@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.local
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+.DS_Store
+*.log
+
+# external 디렉토리는 git submodule로 관리 (이 .gitignore에선 추적 안 함)
+# 추후 git submodule add 하면 .gitmodules가 생기고 추적됨.
+external/

@@ -1,0 +1,53 @@
+services:
+  kis-mcp:
+    # 한국투자증권 공식 Kis Trading MCP를 로컬 빌드 (fastmcp 호환 패치 포함).
+    # external/open-trading-api는 git submodule (또는 로컬 심볼릭 링크).
+    build:
+      context: .
+      dockerfile: infra/kis-mcp.Dockerfile
+    image: kis-trade-mcp:local
+    container_name: kis-mcp
+    restart: unless-stopped
+    environment:
+      ENV: live  # .env.live 로드 → MCP_TYPE=sse, port 3000, path /sse
+      # 실전 키 (실전 거래 시 필요)
+      KIS_APP_KEY: ${KIS_APP_KEY:-}
+      KIS_APP_SECRET: ${KIS_APP_SECRET:-}
+      KIS_ACCT_STOCK: ${KIS_ACCT_STOCK:-}
+      KIS_ACCT_FUTURE: ${KIS_ACCT_FUTURE:-}
+      # 모의(데모) 키
+      KIS_PAPER_APP_KEY: ${KIS_PAPER_APP_KEY:-}
+      KIS_PAPER_APP_SECRET: ${KIS_PAPER_APP_SECRET:-}
+      KIS_PAPER_STOCK: ${KIS_PAPER_STOCK:-}
+      KIS_PAPER_FUTURE: ${KIS_PAPER_FUTURE:-}
+      # 공통
+      KIS_HTS_ID: ${KIS_HTS_ID:-}
+      KIS_PROD_TYPE: ${KIS_PROD_TYPE:-01}
+    ports:
+      # 디버그용. 외부 노출이 싫으면 이 줄 제거하고 internal-only 통신만.
+      - "127.0.0.1:3000:3000"
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telegram-trading-bot
+    restart: unless-stopped
+    depends_on:
+      - kis-mcp
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      ALLOWED_CHAT_IDS: ${ALLOWED_CHAT_IDS}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5}
+      KIS_MCP_URL: http://kis-mcp:3000/sse
+      MODE: ${MODE:-paper}
+      MAX_TRADE_KRW: ${MAX_TRADE_KRW:-1000000}
+      MAX_OPEN_POSITIONS: ${MAX_OPEN_POSITIONS:-5}
+      COOLDOWN_SEC: ${COOLDOWN_SEC:-300}
+      DAILY_LOSS_KRW: ${DAILY_LOSS_KRW:-300000}
+      INTENT_TTL_MIN: ${INTENT_TTL_MIN:-5}
+      DATABASE_FILE: /app/data/tt.db
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ./data:/app/data

@@ -1,0 +1,44 @@
+import 'dotenv/config';
+import { z } from 'zod';
+
+const csvIds = z
+  .string()
+  .transform((s) => s.split(',').map((x) => x.trim()).filter(Boolean).map(Number))
+  .pipe(z.array(z.number().int().positive()).min(1));
+
+const Env = z.object({
+  TELEGRAM_BOT_TOKEN: z.string().min(10),
+  ALLOWED_CHAT_IDS: csvIds,
+
+  ANTHROPIC_API_KEY: z.string().min(10),
+  ANTHROPIC_MODEL: z.string().default('claude-haiku-4-5'),
+
+  KIS_MCP_URL: z.string().url(),
+
+  // 모의(paper)/실전(real). KIS Trading MCP의 env_dv 파라미터로 전달됨.
+  MODE: z.enum(['paper', 'real']).default('paper'),
+
+  MAX_TRADE_KRW: z.coerce.number().int().positive().default(1_000_000),
+  MAX_OPEN_POSITIONS: z.coerce.number().int().positive().default(5),
+  COOLDOWN_SEC: z.coerce.number().int().nonnegative().default(300),
+  DAILY_LOSS_KRW: z.coerce.number().int().nonnegative().default(300_000),
+  INTENT_TTL_MIN: z.coerce.number().int().positive().default(5),
+
+  DATABASE_FILE: z.string().default('./data/tt.db'),
+  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+});
+
+export type AppConfig = z.infer<typeof Env>;
+
+let cached: AppConfig | null = null;
+
+export function getConfig(): AppConfig {
+  if (cached) return cached;
+  const parsed = Env.safeParse(process.env);
+  if (!parsed.success) {
+    console.error('Invalid environment:', parsed.error.flatten().fieldErrors);
+    process.exit(1);
+  }
+  cached = parsed.data;
+  return cached;
+}
