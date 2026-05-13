@@ -39,7 +39,7 @@ TP 74,130원 (+5%) / SL 68,482원 (-3%).
 - Docker, Docker Compose
 - Telegram Bot Token ([@BotFather](https://t.me/BotFather)에서 발급)
 - 본인 Telegram chat_id ([@userinfobot](https://t.me/userinfobot)으로 확인)
-- Anthropic API Key
+- Google Gemini API Key (https://aistudio.google.com/apikey)
 - KIS Open API 발급된 App Key / Secret / 계좌번호 ([한국투자증권 개발자센터](https://apiportal.koreainvestment.com/))
 
 > 실전 거래 전 반드시 **모의투자(paper)** 환경에서 검증할 것.
@@ -76,7 +76,7 @@ nano .env   # 값 채우기 (아래 항목 참고)
 ```ini
 TELEGRAM_BOT_TOKEN=123456:abc...
 ALLOWED_CHAT_IDS=12345678                # 본인 chat_id (콤마 구분 다중 가능)
-ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=AIza...
 
 KIS_MCP_URL=http://kis-mcp:3000/sse      # docker-compose 안에서는 그대로
 KIS_APP_KEY=...

@@ -81,7 +81,7 @@ export function registerHandlers(bot: Bot) {
     await ctx.reply(
       `📊 상태\n` +
         `• 모드: ${cfg.MODE} (env_dv=${cfg.MODE === 'paper' ? 'demo' : 'real'})\n` +
-        `• 모델: ${cfg.ANTHROPIC_MODEL}\n` +
+        `• 모델: ${cfg.GEMINI_MODEL}\n` +
         `• MCP 도구: ${tools.length}개 (${tools.map((t) => t.name).join(', ')})\n` +
         `• 포지션: open=${open}, pending=${pending}, closing=${closing}\n` +
         `• 한도: 거래 ${cfg.MAX_TRADE_KRW.toLocaleString()}원 / 보유 ${cfg.MAX_OPEN_POSITIONS}종목 / 일손실 ${cfg.DAILY_LOSS_KRW.toLocaleString()}원`,

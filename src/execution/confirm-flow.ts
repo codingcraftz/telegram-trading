@@ -1,6 +1,6 @@
 import { getConfig } from '../config.js';
 import { logTrade, insertPendingIntent, type OrderSpec } from '../db/repo.js';
-import { runAgent, type ProposalArgs } from '../llm/claude.js';
+import { runAgent, type ProposalArgs } from '../llm/gemini.js';
 import { checkSpec } from '../guardrails/policy.js';
 
 export type FlowResult =
