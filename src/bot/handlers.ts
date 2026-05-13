@@ -11,6 +11,7 @@ import { processUserMessage } from '../execution/confirm-flow.js';
 import { placeBuyOrder, pollFill } from '../execution/order.js';
 import { closePosition } from '../execution/close.js';
 import { getBalance, type Market } from '../mcp/kis.js';
+import { getAllTools } from '../mcp/client.js';
 
 function whitelistMiddleware() {
   const allowed = new Set(getConfig().ALLOWED_CHAT_IDS);
@@ -35,6 +36,7 @@ const HELP = `🤖 KIS 자연어 매매 봇
 
 명령어:
   /help - 이 도움말
+  /status - 봇 상태 (모드/MCP/포지션 수)
   /balance [krx|nasdaq|...] - 국내(기본) 또는 해외 잔고
   /positions - 보유 포지션
   /confirm <id> - 제안된 주문 실행
@@ -67,6 +69,23 @@ export function registerHandlers(bot: Bot) {
 
   bot.command('help', async (ctx) => {
     await ctx.reply(HELP);
+  });
+
+  bot.command('status', async (ctx) => {
+    const cfg = getConfig();
+    const tools = getAllTools();
+    const list = listChatPositions(ctx.chat!.id);
+    const open = list.filter((p) => p.state === 'open').length;
+    const pending = list.filter((p) => p.state === 'pending').length;
+    const closing = list.filter((p) => p.state === 'closing').length;
+    await ctx.reply(
+      `📊 상태\n` +
+        `• 모드: ${cfg.MODE} (env_dv=${cfg.MODE === 'paper' ? 'demo' : 'real'})\n` +
+        `• 모델: ${cfg.ANTHROPIC_MODEL}\n` +
+        `• MCP 도구: ${tools.length}개 (${tools.map((t) => t.name).join(', ')})\n` +
+        `• 포지션: open=${open}, pending=${pending}, closing=${closing}\n` +
+        `• 한도: 거래 ${cfg.MAX_TRADE_KRW.toLocaleString()}원 / 보유 ${cfg.MAX_OPEN_POSITIONS}종목 / 일손실 ${cfg.DAILY_LOSS_KRW.toLocaleString()}원`,
+    );
   });
 
   bot.command('balance', async (ctx) => {
