@@ -41,14 +41,15 @@ function makeDefaults(toolName: string, apiType: string): Defaults {
       case 'inquire_balance':
         return {
           env_dv: dv,
-          afhr_flpr_yn: 'N',
-          inqr_dvsn: '02',
+          afhr_flpr_yn: 'N',       // 시간외 단일가 여부
+          ofl_yn: '',              // 오프라인 여부 (KIS 필수 — 누락 시 INPUT_FIELD_NAME 에러)
+          inqr_dvsn: '02',         // 02 = 종목별
           unpr_dvsn: '01',
           fund_sttl_icld_yn: 'N',
           fncg_amt_auto_rdpt_yn: 'N',
           prcs_dvsn: '00',
-          FK100: '',
-          NK100: '',
+          ctx_area_fk100: '',      // 페이지네이션 (KIS 정식 이름)
+          ctx_area_nk100: '',
           tr_cont: '',
         };
 
