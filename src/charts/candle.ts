@@ -53,14 +53,28 @@ export function buildCandleSvg(args: CandleChartArgs): string {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="${COLOR_BG}"/><text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="${COLOR_TEXT}" font-size="20" font-family="sans-serif">데이터 없음</text></svg>`;
   }
 
-  const highs = candles.map((c) => c.high);
-  const lows = candles.map((c) => c.low);
-  const minP = Math.min(...lows);
-  const maxP = Math.max(...highs);
+  // 0/NaN/음수 가격 row는 noise — 통계에서 제외하되 캔들은 그대로 그림 (사용자가 봉 누락 인지)
+  const validLows = candles.map((c) => c.low).filter((v) => Number.isFinite(v) && v > 0);
+  const validHighs = candles.map((c) => c.high).filter((v) => Number.isFinite(v) && v > 0);
+  const minP = validLows.length > 0 ? Math.min(...validLows) : 0;
+  const maxP = validHighs.length > 0 ? Math.max(...validHighs) : 1;
   const range = maxP - minP;
   const pad = range > 0 ? range * 0.05 : Math.max(1, maxP * 0.001);
-  const yMin = minP - pad;
-  const yMax = maxP + pad;
+
+  // y축을 "nice numbers"로 정렬 — 사람이 읽기 좋은 라운드 숫자.
+  // 예: 70512~73188 → 70000/70500/71000/.../73500/74000 (step=500)
+  const niceStep = (rough: number): number => {
+    if (rough <= 0) return 1;
+    const exp = Math.floor(Math.log10(rough));
+    const f = rough / Math.pow(10, exp);
+    // 1, 2, 5, 10 시리즈에 align
+    const nice = f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10;
+    return nice * Math.pow(10, exp);
+  };
+  const targetTicks = 6;
+  const step = niceStep((range + pad * 2) / targetTicks);
+  const yMin = Math.floor((minP - pad) / step) * step;
+  const yMax = Math.ceil((maxP + pad) / step) * step;
   const ySpan = yMax - yMin || 1;
 
   const xStep = plotW / candles.length;
@@ -70,17 +84,15 @@ export function buildCandleSvg(args: CandleChartArgs): string {
     padT + ((yMax - price) / ySpan) * plotH;
   const xToPx = (i: number): number => padL + xStep * (i + 0.5);
 
-  // 가격 그리드 (5칸)
+  // 가격 그리드 — step 단위로 라운드 라벨 (yMin~yMax 안에서)
   const gridLines: string[] = [];
-  for (let i = 0; i <= 5; i++) {
-    const t = i / 5;
-    const price = yMax - t * ySpan;
-    const y = padT + t * plotH;
+  for (let p = yMin; p <= yMax + 1e-6; p += step) {
+    const y = yToPx(p);
     gridLines.push(
       `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${padL + plotW}" y2="${y.toFixed(1)}" stroke="${COLOR_GRID}" stroke-width="1" />`,
     );
     gridLines.push(
-      `<text x="${padL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="11" font-family="sans-serif" fill="${COLOR_AXIS}">${Math.round(price).toLocaleString()}</text>`,
+      `<text x="${padL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="11" font-family="sans-serif" fill="${COLOR_AXIS}">${Math.round(p).toLocaleString()}</text>`,
     );
   }
 
@@ -118,6 +130,19 @@ export function buildCandleSvg(args: CandleChartArgs): string {
     );
   }
 
+  // 마지막 봉 종가 기준선 (사용자가 현재가 위치 즉시 인지)
+  const lastClose = candles[candles.length - 1]?.close;
+  let lastLine = '';
+  if (Number.isFinite(lastClose) && lastClose! > 0 && lastClose! >= yMin && lastClose! <= yMax) {
+    const ly = yToPx(lastClose!);
+    const isUp = (candles[candles.length - 1]!.close ?? 0) >= (candles[candles.length - 1]!.open ?? 0);
+    const lineColor = isUp ? COLOR_UP : COLOR_DOWN;
+    lastLine =
+      `<line x1="${padL}" y1="${ly.toFixed(1)}" x2="${padL + plotW}" y2="${ly.toFixed(1)}" stroke="${lineColor}" stroke-width="1" stroke-dasharray="4 3" opacity="0.6" />` +
+      `<rect x="${padL + plotW + 1}" y="${(ly - 9).toFixed(1)}" width="${padR - 2}" height="18" fill="${lineColor}" />` +
+      `<text x="${padL + plotW + padR / 2}" y="${(ly + 4).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="600" font-family="sans-serif" fill="#fff">${Math.round(lastClose!).toLocaleString()}</text>`;
+  }
+
   // 외곽 박스
   const frame = `<rect x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="none" stroke="${COLOR_AXIS}" stroke-width="1" />`;
 
@@ -133,6 +158,7 @@ export function buildCandleSvg(args: CandleChartArgs): string {
   ${gridLines.join('\n  ')}
   ${frame}
   ${bodies.join('\n  ')}
+  ${lastLine}
   ${xLabels.join('\n  ')}
 </svg>`;
 }

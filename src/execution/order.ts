@@ -4,6 +4,7 @@ import {
   markPositionFailed,
   markPositionOpen,
   newId,
+  setPositionTpSl,
   type OrderSpec,
 } from '../db/repo.js';
 import { notify } from '../notify/telegram.js';
@@ -118,6 +119,9 @@ export async function pollFill(args: {
   market: Market;
   orderId: string;
   expectedQty: number;
+  // 시장가 체결가 기준 TP/SL 자동 계산 (전략없이 즉시매수 흐름에서 사용)
+  tpPct?: number | null;
+  slPct?: number | null;
   intervalMs?: number;
   timeoutMs?: number;
 }): Promise<{ filled: number; avgPrice: number | null }> {
@@ -148,7 +152,16 @@ export async function pollFill(args: {
       kind: 'filled',
       payload: { filled, avg },
     });
-    await notify(args.chatId, `✅ 체결: ${avg.toLocaleString()}원 × ${filled}주`);
+    // 시장가 체결가 기준 TP/SL 자동 설정 — 모니터(30초 폴링)가 트리거함
+    if (args.tpPct || args.slPct) {
+      const tpPrice = args.tpPct ? Math.round(avg * (1 + args.tpPct / 100)) : null;
+      const slPrice = args.slPct ? Math.round(avg * (1 - args.slPct / 100)) : null;
+      setPositionTpSl(args.positionId, tpPrice, slPrice);
+    }
+    const parts: string[] = [`✅ 체결: ${avg.toLocaleString()}원 × ${filled}주`];
+    if (args.tpPct) parts.push(`🎯 TP +${args.tpPct}% (${Math.round(avg * (1 + args.tpPct / 100)).toLocaleString()}원)`);
+    if (args.slPct) parts.push(`🛑 SL -${args.slPct}% (${Math.round(avg * (1 - args.slPct / 100)).toLocaleString()}원)`);
+    await notify(args.chatId, parts.join('\n'));
   } else if (filled === 0) {
     markPositionFailed(args.positionId);
     logTrade({

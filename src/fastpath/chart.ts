@@ -88,24 +88,24 @@ export async function handleChart(intent: ChartIntent): Promise<ChartResult | st
   try {
     switch (intent.interval) {
       case '1m':
-        candles = await fetchNaverMinuteBars(sym.code, 1, 120);
+        candles = await fetchNaverMinuteBars(sym.code, 1, 180);
         break;
       case '5m':
-        candles = await fetchNaverMinuteBars(sym.code, 5, 120);
+        candles = await fetchNaverMinuteBars(sym.code, 5, 180);
         break;
       case '15m':
-        candles = await fetchNaverMinuteBars(sym.code, 15, 120);
+        candles = await fetchNaverMinuteBars(sym.code, 15, 180);
         break;
       case '1h':
-        candles = await fetchNaverMinuteBars(sym.code, 60, 120);
+        candles = await fetchNaverMinuteBars(sym.code, 60, 180);
         break;
       case '4h': {
-        const hourly = await fetchNaverMinuteBars(sym.code, 60, 480); // 4시간봉 120개 ≈ 480 1시간봉
+        const hourly = await fetchNaverMinuteBars(sym.code, 60, 720); // 4시간봉 180개 ≈ 720 1시간봉
         candles = aggregateHourlyTo4h(hourly);
         break;
       }
       case '1d':
-        candles = await fetchNaverDaily(sym.code, 120);
+        candles = await fetchNaverDaily(sym.code, 200);
         break;
     }
   } catch (err) {
@@ -114,8 +114,8 @@ export async function handleChart(intent: ChartIntent): Promise<ChartResult | st
 
   if (candles.length === 0) return `❌ ${sym.name} ${intent.interval} 데이터 없음.`;
 
-  // 가독성: 너무 많으면 최근 120봉으로 자름
-  const MAX_BARS = 120;
+  // 가독성: 너무 많으면 최근 200봉으로 자름 (이전 120 → 200, 사용자 요청)
+  const MAX_BARS = 200;
   if (candles.length > MAX_BARS) candles = candles.slice(-MAX_BARS);
 
   const last = candles[candles.length - 1]!;

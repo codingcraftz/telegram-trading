@@ -39,6 +39,10 @@ import {
   buildBuyAmountMenu,
   buildBuyConfirmAndRegister,
   buildBuyDirectInputPrompt,
+  buildBuyNowConfirmAndRegister,
+  buildBuyNowQtyMenu,
+  buildBuyNowSlMenu,
+  buildBuyNowTpMenu,
   buildBuySearchPrompt,
   buildBuySearchResults,
   buildBuyStrategyMenu,
@@ -50,6 +54,11 @@ import {
   parseBuyAmount,
   type BuyAmountSpec,
 } from '../fastpath/trade.js';
+
+// handlers.ts 안 인라인 헬퍼 — TP/SL 라벨
+function pctOrOffLabel(v: string, prefix: '+' | '-'): string {
+  return v === 'off' ? '없음' : `${prefix}${v}%`;
+}
 import { getChatMeta } from './state.js';
 import {
   applyFieldChange,
@@ -241,6 +250,8 @@ export function registerHandlers(bot: Bot) {
           market: spec.market as Market,
           orderId,
           expectedQty: spec.quantity,
+          tpPct: spec.tp_pct ?? null,
+          slPct: spec.sl_pct ?? null,
         }).catch((err) => console.error('[pollFill] failed', err));
         return `📨 매수 주문 접수 (#${orderId})\n포지션 ${positionId} · 체결 확인 중…`;
       } catch (err) {
@@ -634,9 +645,9 @@ export function registerHandlers(bot: Bot) {
     }
   });
 
-  // 매수 전략 선택 → 금액 메뉴
-  bot.callbackQuery(/^tr:bstr:(\d{6}):(mo)$/, async (ctx) => {
-    const m = ctx.callbackQuery.data!.match(/^tr:bstr:(\d{6}):(mo)$/);
+  // 매수 전략 선택 → mo는 금액 메뉴 / now는 TP 메뉴
+  bot.callbackQuery(/^tr:bstr:(\d{6}):(mo|now)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^tr:bstr:(\d{6}):(mo|now)$/);
     if (!m) {
       await ctx.answerCallbackQuery();
       return;
@@ -645,12 +656,105 @@ export function registerHandlers(bot: Bot) {
     await ctx.answerCallbackQuery();
     const sym = await resolveSymbol(code!);
     const name = sym?.name ?? code!;
-    const menu = buildBuyAmountMenu(code!, name, strategy!);
+    const menu =
+      strategy === 'now'
+        ? buildBuyNowTpMenu(code!, name)
+        : buildBuyAmountMenu(code!, name, strategy!);
     try {
       await ctx.editMessageText(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
     } catch {
       await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
     }
+  });
+
+  // 즉시매수 — TP 선택 → SL 메뉴
+  bot.callbackQuery(/^tr:bnow:tp:(\d{6}):(\d+|off)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^tr:bnow:tp:(\d{6}):(\d+|off)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const [, code, tp] = m;
+    await ctx.answerCallbackQuery();
+    const sym = await resolveSymbol(code!);
+    const menu = buildBuyNowSlMenu(code!, sym?.name ?? code!, tp!);
+    try {
+      await ctx.editMessageText(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  // 즉시매수 — SL 선택 → 수량 메뉴
+  bot.callbackQuery(/^tr:bnow:sl:(\d{6}):(\d+|off):(\d+|off)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^tr:bnow:sl:(\d{6}):(\d+|off):(\d+|off)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const [, code, tp, sl] = m;
+    await ctx.answerCallbackQuery();
+    const sym = await resolveSymbol(code!);
+    const menu = buildBuyNowQtyMenu(code!, sym?.name ?? code!, tp!, sl!);
+    try {
+      await ctx.editMessageText(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  // 즉시매수 — 수량 % 선택 → 확정 화면
+  bot.callbackQuery(/^tr:bnow:qty:(\d{6}):(\d+|off):(\d+|off):p(\d+)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^tr:bnow:qty:(\d{6}):(\d+|off):(\d+|off):p(\d+)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const [, code, tp, sl, pctStr] = m;
+    await ctx.answerCallbackQuery('등록 중…');
+    const r = await buildBuyNowConfirmAndRegister({
+      chatId: ctx.chat!.id,
+      code: code!,
+      tp: tp!,
+      sl: sl!,
+      amount: { mode: 'percent', value: Number(pctStr) },
+    });
+    if ('error' in r) {
+      await ctx.reply(`❌ ${r.error}`);
+      return;
+    }
+    const kb = new InlineKeyboard()
+      .text('✅ 매수 발주', `confirm:${r.intentId}`)
+      .text('❌ 취소', `cancel:${r.intentId}`);
+    try {
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+    } catch {}
+    await ctx.reply(r.text, { reply_markup: kb, parse_mode: 'HTML' });
+  });
+
+  // 즉시매수 — 수량 직접 입력 모드 진입
+  bot.callbackQuery(/^tr:bnow:qty:(\d{6}):(\d+|off):(\d+|off):input$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^tr:bnow:qty:(\d{6}):(\d+|off):(\d+|off):input$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const [, code, tp, sl] = m;
+    await ctx.answerCallbackQuery();
+    setChatMode(ctx.chat!.id, 'awaiting_trade_buy_now_amount', {
+      buyCode: code!,
+      buyNowTp: tp!,
+      buyNowSl: sl!,
+    });
+    await ctx.reply(
+      `✏️ <b>즉시매수 — 수량/금액 직접 입력</b>\n` +
+        `TP ${pctOrOffLabel(tp!, '+')} · SL ${pctOrOffLabel(sl!, '-')}\n` +
+        '예: <code>10주</code> · <code>150만원</code> · <code>1500000원</code> · <code>20%</code>',
+      {
+        parse_mode: 'HTML',
+        reply_markup: new InlineKeyboard().text('⬅️ 뒤로', `tr:bnow:sl:${code}:${tp}:${sl}`),
+      },
+    );
   });
 
   // 매수 금액 (% 비율) 선택 → 예약 등록
@@ -962,9 +1066,12 @@ export function registerHandlers(bot: Bot) {
       const candidates = searchSymbolCandidates(text, 10);
       if (candidates.length === 0) {
         await ctx.reply(
-          `❓ "${text}" 검색 결과 없음.\n다른 키워드로 시도하거나 6자리 코드를 입력해 보세요.`,
+          `❓ "${text}" 검색 결과 없음.\n오타가 아닌지 확인하거나 6자리 종목코드(예: <code>005930</code>)를 입력해 보세요.`,
           {
-            reply_markup: new InlineKeyboard().text('⬅️ 뒤로', 'chartmenu:back'),
+            parse_mode: 'HTML',
+            reply_markup: new InlineKeyboard()
+              .text('🔍 다시 입력', 'chartmenu:search')
+              .text('⬅️ 뒤로', 'chartmenu:back'),
           },
         );
       } else {
@@ -978,8 +1085,13 @@ export function registerHandlers(bot: Bot) {
       const candidates = searchSymbolCandidates(text, 10);
       if (candidates.length === 0) {
         await ctx.reply(
-          `❓ "${text}" 검색 결과 없음.\n다른 키워드로 시도해 보세요.`,
-          { reply_markup: new InlineKeyboard().text('⬅️ 뒤로', 'tr:buy') },
+          `❓ "${text}" 검색 결과 없음.\n오타가 아닌지 확인하거나 6자리 종목코드(예: <code>005930</code>)를 입력해 보세요.`,
+          {
+            parse_mode: 'HTML',
+            reply_markup: new InlineKeyboard()
+              .text('🔍 다시 입력', 'tr:bsearch')
+              .text('⬅️ 뒤로', 'tr:buy'),
+          },
         );
       } else {
         const r = buildBuySearchResults(text, candidates);
@@ -1010,6 +1122,34 @@ export function registerHandlers(bot: Bot) {
         const kb = new InlineKeyboard()
           .text('✅ 확정', `confirm:${r.reservationId}`)
           .text('❌ 취소', `cancel:${r.reservationId}`);
+        await ctx.reply(r.text, { reply_markup: kb, parse_mode: 'HTML' });
+      }
+      return;
+    }
+    if (mode === 'awaiting_trade_buy_now_amount' && !text.startsWith('/')) {
+      const meta = getChatMeta(chatId);
+      clearChatMode(chatId);
+      const code = meta?.buyCode;
+      const tp = meta?.buyNowTp ?? 'off';
+      const sl = meta?.buyNowSl ?? 'off';
+      if (!code) {
+        await ctx.reply('❌ 즉시매수 컨텍스트 분실 — [💼 거래] 다시 시작해주세요.');
+        return;
+      }
+      const amount = parseBuyAmount(text);
+      if (!amount) {
+        await ctx.reply(
+          `❌ 형식을 못 알아들었습니다: "${text}"\n예: 10주 · 150만원 · 1500000원 · 20%`,
+        );
+        return;
+      }
+      const r = await buildBuyNowConfirmAndRegister({ chatId, code, tp, sl, amount });
+      if ('error' in r) {
+        await ctx.reply(`❌ ${r.error}`);
+      } else {
+        const kb = new InlineKeyboard()
+          .text('✅ 매수 발주', `confirm:${r.intentId}`)
+          .text('❌ 취소', `cancel:${r.intentId}`);
         await ctx.reply(r.text, { reply_markup: kb, parse_mode: 'HTML' });
       }
       return;

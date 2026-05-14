@@ -10,10 +10,12 @@ import {
   DEFAULT_GAP_GUARD_PCT,
   getMarketOpenSettings,
   insertMarketOpenReservation,
+  insertPendingIntent,
   listWatchlist,
+  type OrderSpec,
 } from '../db/repo.js';
 import { callKisApi, placeOrder } from '../mcp/kis.js';
-import { firstOutput, fmtTtl, num, outputList, parseMcpResult } from './extract.js';
+import { firstOutput, fmtTtl, num, outputDict, outputList, parseMcpResult } from './extract.js';
 import { resolveSymbol, type ResolvedSymbol } from './symbol.js';
 import { formatKst, getMarketSession, nextMarketOpen, sessionLabel } from '../scheduler/calendar.js';
 import type { OrderType } from '../mcp/kis.js';
@@ -84,15 +86,17 @@ export function buildBuyStrategyMenu(
   name: string,
 ): { text: string; kb: InlineKeyboard } {
   const kb = new InlineKeyboard()
-    .text('⏰ 시가매매', `tr:bstr:${code}:mo`)
+    .text('⚡ 전략없이 즉시매수', `tr:bstr:${code}:now`)
+    .row()
+    .text('⏰ 시가매매 (다음 영업일)', `tr:bstr:${code}:mo`)
     .row()
     .text('⬅️ 뒤로', 'tr:buy');
   return {
     text:
       `📈 <b>매수: ${name}</b> (${code})\n` +
       '<b>전략 선택</b>\n' +
-      '⏰ 시가매매 — 다음 영업일 9:00:05 시장가 매수\n' +
-      '(추후 다른 전략 추가 예정)',
+      '⚡ 전략없이 즉시매수 — 현재 세션에 맞게 즉시 발주 (TP/SL 옵션)\n' +
+      '⏰ 시가매매 — 다음 영업일 9:00:05 시장가 매수',
     kb,
   };
 }
@@ -229,6 +233,193 @@ export async function buildBuyConfirmAndRegister(args: {
   ].filter(Boolean);
 
   return { text: lines.join('\n'), reservationId };
+}
+
+// ============================================================
+// 전략없이 즉시매수 흐름 — TP/SL 옵션 + 즉시 발주
+// ============================================================
+//
+// 단계: 종목 → 전략(now) → TP → SL → 수량 → 확정(pendingIntent) → 발주
+//
+// 콜백 인코딩:
+//   tr:bnow:tp:<code>:<tp>          (tp ∈ {3,5,10,off})
+//   tr:bnow:sl:<code>:<tp>:<sl>     (sl ∈ {2,3,5,off})
+//   tr:bnow:qty:<code>:<tp>:<sl>:p<pct>   (pct ∈ {10,20,30,50,100})
+//   tr:bnow:qty:<code>:<tp>:<sl>:input    (직접 입력 모드 진입)
+
+const TP_OPTIONS = [3, 5, 10] as const;
+const SL_OPTIONS = [2, 3, 5] as const;
+
+function pctOrOffLabel(v: string, prefix: '+' | '-'): string {
+  return v === 'off' ? '없음' : `${prefix}${v}%`;
+}
+
+export function buildBuyNowTpMenu(
+  code: string,
+  name: string,
+): { text: string; kb: InlineKeyboard } {
+  const kb = new InlineKeyboard();
+  for (const tp of TP_OPTIONS) {
+    kb.text(`+${tp}%`, `tr:bnow:tp:${code}:${tp}`);
+  }
+  kb.row().text('🚫 TP 없음', `tr:bnow:tp:${code}:off`);
+  kb.row().text('⬅️ 뒤로', `tr:bs:${code}`);
+  return {
+    text:
+      `⚡ <b>즉시매수: ${name}</b> (${code})\n` +
+      '\n<b>1/3 단계 — TP (익절) 설정</b>\n' +
+      '체결가 기준 +% 도달 시 자동 청산.\n' +
+      'TP 없음을 선택하면 자동 익절 안 함.',
+    kb,
+  };
+}
+
+export function buildBuyNowSlMenu(
+  code: string,
+  name: string,
+  tp: string,
+): { text: string; kb: InlineKeyboard } {
+  const kb = new InlineKeyboard();
+  for (const sl of SL_OPTIONS) {
+    kb.text(`-${sl}%`, `tr:bnow:sl:${code}:${tp}:${sl}`);
+  }
+  kb.row().text('🚫 SL 없음', `tr:bnow:sl:${code}:${tp}:off`);
+  kb.row().text('⬅️ 뒤로', `tr:bstr:${code}:now`);
+  return {
+    text:
+      `⚡ <b>즉시매수: ${name}</b> (${code})\n` +
+      `TP: <b>${pctOrOffLabel(tp, '+')}</b>\n` +
+      '\n<b>2/3 단계 — SL (손절) 설정</b>\n' +
+      '체결가 기준 -% 도달 시 자동 청산.\n' +
+      'SL 없음을 선택하면 자동 손절 안 함.',
+    kb,
+  };
+}
+
+export function buildBuyNowQtyMenu(
+  code: string,
+  name: string,
+  tp: string,
+  sl: string,
+): { text: string; kb: InlineKeyboard } {
+  const kb = new InlineKeyboard();
+  AMOUNT_PERCENTS.forEach((p, i) => {
+    const label = p === 100 ? 'MAX' : `${p}%`;
+    kb.text(label, `tr:bnow:qty:${code}:${tp}:${sl}:p${p}`);
+    if (i === 2) kb.row();
+  });
+  kb.row().text('✏️ 직접 입력', `tr:bnow:qty:${code}:${tp}:${sl}:input`);
+  kb.row().text('⬅️ 뒤로', `tr:bnow:tp:${code}:${tp}`); // TP는 그대로 유지하고 SL만 다시 고르려면 한 단계 위
+  return {
+    text:
+      `⚡ <b>즉시매수: ${name}</b> (${code})\n` +
+      `TP: <b>${pctOrOffLabel(tp, '+')}</b>  ·  SL: <b>${pctOrOffLabel(sl, '-')}</b>\n` +
+      '\n<b>3/3 단계 — 수량 / 금액</b>\n' +
+      '예수금 대비 비율 또는 [✏️ 직접 입력]으로 주식수/금액 지정.',
+    kb,
+  };
+}
+
+// 즉시매수 확정 메시지 생성 + pendingIntent 등록 (이후 confirm 콜백에서 발주)
+export async function buildBuyNowConfirmAndRegister(args: {
+  chatId: number;
+  code: string;
+  tp: string; // 'off' or '3' '5' '10'
+  sl: string;
+  amount: BuyAmountSpec;
+}): Promise<{ text: string; intentId: string } | { error: string }> {
+  const cfg = getConfig();
+  const sym = await resolveSymbol(args.code);
+  if (!sym) return { error: `종목 정보 없음 (${args.code})` };
+
+  // 현재가 + 매수가능금액
+  let curPrice = 0;
+  let cash = 0;
+  try {
+    const pRes = await callKisApi('domestic_stock', 'inquire_price', {
+      fid_cond_mrkt_div_code: 'J',
+      fid_input_iscd: args.code,
+    });
+    const pParsed = parseMcpResult(pRes);
+    if (pParsed.success) curPrice = num(firstOutput(pParsed)?.stck_prpr) ?? 0;
+  } catch {}
+  if (curPrice <= 0) return { error: '현재가 조회 실패' };
+
+  try {
+    const balRes = await callKisApi('domestic_stock', 'inquire_balance', {});
+    const balParsed = parseMcpResult(balRes);
+    if (balParsed.success) {
+      const summary = outputDict(balParsed, 'output2');
+      cash = num(summary?.dnca_tot_amt) ?? 0;
+    }
+  } catch {}
+
+  // 수량 계산
+  let qty = 0;
+  if (args.amount.mode === 'shares') {
+    qty = Math.floor(args.amount.value);
+  } else if (args.amount.mode === 'amount') {
+    qty = Math.floor(args.amount.value / curPrice);
+  } else {
+    if (cash <= 0) return { error: '예수금 조회 실패 — 비율 계산 불가' };
+    const budget = (cash * args.amount.value) / 100;
+    qty = Math.floor(budget / curPrice);
+  }
+  if (qty <= 0) return { error: `매수 수량 0주 (현재가 ${curPrice.toLocaleString()}원)` };
+
+  const tpPct = args.tp === 'off' ? null : Number(args.tp);
+  const slPct = args.sl === 'off' ? null : Number(args.sl);
+
+  // 세션 분기 — 즉시매수이므로 closed/holiday면 거부, 시간외면 ord_dvsn 자동 매핑
+  const session = getMarketSession();
+  const sLabel = sessionLabel(session);
+  if (session === 'closed' || session === 'holiday') {
+    return {
+      error:
+        '🔴 장 외/휴장 시간 — 즉시매수 불가. 다음 영업일 시가매매로 예약하거나 정규장 시간에 시도해 주세요.',
+    };
+  }
+  let orderType: OrderType = 'market';
+  let price: number | undefined;
+  if (session === 'pre_extended') orderType = 'pre_extended';
+  else if (session === 'post_extended') orderType = 'post_extended';
+  else if (session === 'after_single') {
+    orderType = 'after_single';
+    price = curPrice;
+  }
+
+  const spec: OrderSpec = {
+    action: 'buy',
+    market: 'KRX',
+    symbol_code: sym.code,
+    symbol_name: sym.name,
+    order_type: orderType,
+    price,
+    quantity: qty,
+    tp_pct: tpPct,
+    sl_pct: slPct,
+  };
+
+  const intentId = insertPendingIntent({
+    chatId: args.chatId,
+    llmProposal: '',
+    orderSpec: spec,
+    ttlMin: cfg.INTENT_TTL_MIN,
+  });
+
+  const ttl = fmtTtl(Date.now() + cfg.INTENT_TTL_MIN * 60 * 1000);
+  const lines = [
+    `⚡ <b>즉시매수 확인</b>  ${sLabel.icon} ${sLabel.label}`,
+    `종목: <b>${sym.name}</b> (${sym.code})`,
+    `현재가: ${curPrice.toLocaleString()}원`,
+    `수량: ${qty}주 (≈${(curPrice * qty).toLocaleString()}원)`,
+    `TP: ${tpPct === null ? '없음' : `+${tpPct}%`}  ·  SL: ${slPct === null ? '없음' : `-${slPct}%`}`,
+    '',
+    `⌛ 확정 만료: ${ttl}`,
+    `<code>/확정 ${intentId}</code>  또는  <code>/취소 ${intentId}</code>`,
+  ];
+
+  return { text: lines.join('\n'), intentId };
 }
 
 // 매수 직접 입력 파서 — 10주 / 150만원 / 1500000원 / 20%

@@ -8,12 +8,15 @@ export type ChatMode =
   | 'awaiting_chart_symbol'
   | 'awaiting_trade_buy_search'
   | 'awaiting_trade_buy_amount'
+  | 'awaiting_trade_buy_now_amount'
   | 'awaiting_trade_sell_qty';
 
 // 거래 흐름에서 다음 메시지가 필요한 경우 추가 컨텍스트.
 export type ChatMeta = {
   buyCode?: string; // 매수 금액 직접 입력 시 종목 코드
   buyStrategy?: string;
+  buyNowTp?: string; // 즉시매수 TP ('off' or '3'/'5'/'10')
+  buyNowSl?: string;
   sellCode?: string; // 매도 수량 직접 입력 시 종목 코드
 };
 

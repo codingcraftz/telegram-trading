@@ -59,11 +59,15 @@ export async function handleWatchlistAdd(
   }
 
   if (candidates.length === 0) {
+    const kb = new InlineKeyboard()
+      .text('🔍 다시 입력', 'wlmenu:add')
+      .text('⬅️ 뒤로', 'wlmenu:back');
     return {
-      kind: 'text',
+      kind: 'choices',
       text:
         `❓ "${q}" 검색 결과 없음.\n` +
-        '다른 키워드로 시도하거나 6자리 코드를 입력해 보세요.',
+        '오타가 아닌지 확인하거나 6자리 종목코드(예: <code>005930</code>)를 입력해 보세요.',
+      kb,
     };
   }
   const kb = new InlineKeyboard();
