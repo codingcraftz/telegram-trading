@@ -38,7 +38,7 @@ jobs:
             type=raw,value=latest
             type=sha,prefix=sha-,format=short
 
-      - name: Build and push
+      - name: Build and push (bot)
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -47,5 +47,31 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=bot
+          cache-to: type=gha,mode=max,scope=bot
+
+      # KIS MCP — 빌드 시간 줄이려고 미리 GHCR에 push.
+      # 사용자 서버는 pull만 → 빌드 시간 0.
+      - name: Checkout open-trading-api (kis-mcp 빌드 컨텍스트)
+        run: |
+          git clone --depth 1 https://github.com/koreainvestment/open-trading-api external/open-trading-api
+
+      - name: Extract kis-mcp metadata
+        id: meta_mcp
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-kis-mcp
+          tags: |
+            type=raw,value=latest
+
+      - name: Build and push (kis-mcp)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./infra/kis-mcp.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta_mcp.outputs.tags }}
+          labels: ${{ steps.meta_mcp.outputs.labels }}
+          cache-from: type=gha,scope=kis-mcp
+          cache-to: type=gha,mode=max,scope=kis-mcp

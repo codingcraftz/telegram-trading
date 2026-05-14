@@ -1,11 +1,8 @@
 // 종목명/별칭 → 종목코드 해석.
 // 1) data/krx-stocks.json (KOSPI/KOSDAQ 전체 3,500여 종) — 부팅 시 1회 로드
 // 2) 자주 쓰는 alias 테이블 (별칭/단축어)
-// 3) 못 찾으면 MCP find_stock_code 호출
 
 import { existsSync, readFileSync } from 'node:fs';
-import { callTool } from '../mcp/client.js';
-import { parseMcpResult } from './extract.js';
 
 // KRX 마스터 로드 (3,500여 종). 없으면 빈 배열로 동작 (alias만 사용).
 type KrxStock = { code: string; name: string; market: 'KOSPI' | 'KOSDAQ' };
@@ -182,27 +179,5 @@ export async function resolveSymbol(input: string): Promise<ResolvedSymbol | nul
   const exactInMaster = _master.find((s) => norm(s.name) === key);
   if (exactInMaster) return { code: exactInMaster.code, name: exactInMaster.name };
 
-  // MCP find_stock_code 폴백
-  try {
-    const res = await callTool('domestic_stock', {
-      api_type: 'find_stock_code',
-      params: { stock_name: trimmed },
-    });
-    const parsed = parseMcpResult(res);
-    const d = parsed.raw as Record<string, unknown> | null;
-    if (!d) return null;
-    const code =
-      (d.code as string | undefined) ??
-      (d.symbol_code as string | undefined) ??
-      ((d.result as Record<string, unknown> | undefined)?.code as string | undefined);
-    const name =
-      (d.name as string | undefined) ??
-      (d.stock_name as string | undefined) ??
-      ((d.result as Record<string, unknown> | undefined)?.name as string | undefined) ??
-      trimmed;
-    if (code && /^\d{6}$/.test(code)) {
-      return { code, name };
-    }
-  } catch {}
   return null;
 }

@@ -18,9 +18,7 @@ const Env = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(10),
   ALLOWED_CHAT_IDS: csvIds,
 
-  KIS_MCP_URL: z.string().url(),
-
-  // 모의(paper)/실전(real). KIS Trading MCP의 env_dv 파라미터로 전달됨.
+  // 모의(paper)/실전(real). KIS REST 호출 시 env_dv로 사용.
   MODE: z.enum(['paper', 'real']).default('paper'),
 
   // 모두 0이면 해당 가드 비활성.

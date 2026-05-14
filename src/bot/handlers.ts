@@ -17,7 +17,7 @@ import { placeBuyOrder, pollFill } from '../execution/order.js';
 import { closePosition } from '../execution/close.js';
 import { placeOrder, type Market } from '../mcp/kis.js';
 import { getBalance } from '../mcp/kis.js';
-import { getAllTools } from '../mcp/client.js';
+// KIS는 REST 직접 호출 (MCP 제거됨)
 import { tryFastPath } from '../fastpath/index.js';
 import { handleBalance } from '../fastpath/balance.js';
 import {
@@ -158,7 +158,6 @@ export function registerHandlers(bot: Bot) {
 
   bot.command('status', async (ctx) => {
     const cfg = getConfig();
-    const tools = getAllTools();
     const list = listChatPositions(ctx.chat!.id);
     const open = list.filter((p) => p.state === 'open').length;
     const pending = list.filter((p) => p.state === 'pending').length;
@@ -167,7 +166,7 @@ export function registerHandlers(bot: Bot) {
     await ctx.reply(
       `📊 상태\n` +
         `• 모드: <b>${mode === 'paper' ? '모의투자(paper)' : '실전(real)'}</b> (env_dv=${mode === 'paper' ? 'demo' : 'real'})\n` +
-        `• MCP 도구: ${tools.length}개 (${tools.map((t) => t.name).join(', ')})\n` +
+        `• KIS API: REST 직접 호출\n` +
         `• 포지션: open=${open}, pending=${pending}, closing=${closing}\n` +
         `• 한도: 거래 ${cfg.MAX_TRADE_KRW.toLocaleString()}원\n` +
         `\n전환: /모의투자  /라이브계좌`,
@@ -1090,7 +1089,6 @@ export function registerHandlers(bot: Bot) {
     }
     if ((arg = tryPrefix('/상태')) !== null) {
       const cfg = getConfig();
-      const tools = getAllTools();
       const list = listChatPositions(chatId);
       const open = list.filter((p) => p.state === 'open').length;
       const pending = list.filter((p) => p.state === 'pending').length;
@@ -1099,7 +1097,7 @@ export function registerHandlers(bot: Bot) {
       await ctx.reply(
         `📊 상태\n` +
           `• 모드: <b>${mode === 'paper' ? '모의투자(paper)' : '실전(real)'}</b>\n` +
-          `• MCP 도구: ${tools.length}개\n` +
+          `• KIS API: REST 직접 호출\n` +
           `• 포지션: open=${open}, pending=${pending}, closing=${closing}\n` +
           `• 한도: 거래 ${cfg.MAX_TRADE_KRW.toLocaleString()}원\n\n` +
           `전환: /모의투자  /실전`,

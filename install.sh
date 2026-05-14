@@ -26,6 +26,7 @@ error() { echo -e "${RED}✗${NC} $*" >&2; }
 
 INSTALL_DIR=/opt/telegram-trading
 RAW_BASE=https://raw.githubusercontent.com/codingcraftz/telegram-trading/main
+TOTAL_STEPS=5
 
 # ---------- callback 헬퍼 ----------
 report() {
@@ -52,9 +53,6 @@ collect_diagnostics() {
     echo ""
     echo "=== caddy logs (30줄) ==="
     docker compose -f "$INSTALL_DIR/docker-compose.yml" logs --tail 30 caddy 2>&1
-    echo ""
-    echo "=== kis-mcp logs (30줄) ==="
-    docker compose -f "$INSTALL_DIR/docker-compose.yml" logs --tail 30 kis-mcp 2>&1
     echo ""
     echo "=== install log (마지막 80줄) ==="
     tail -80 /var/log/owlim-install.log 2>/dev/null
@@ -102,14 +100,7 @@ mkdir -p $INSTALL_DIR/infra $INSTALL_DIR/data
 cd $INSTALL_DIR
 curl -fsSL $RAW_BASE/docker-compose.yml -o docker-compose.yml
 curl -fsSL $RAW_BASE/infra/Caddyfile -o infra/Caddyfile
-curl -fsSL $RAW_BASE/infra/kis-mcp.Dockerfile -o infra/kis-mcp.Dockerfile
-
-# external 서브모듈 (KIS MCP 빌드용)
-if [ ! -d "external/open-trading-api" ]; then
-  mkdir -p external
-  git clone --depth 1 https://github.com/koreainvestment/open-trading-api external/open-trading-api 2>/dev/null || \
-    warn "open-trading-api clone 실패 (kis-mcp 빌드 시 재시도)"
-fi
+# kis-mcp 컨테이너 제거됨 — 봇이 KIS REST 직접 호출
 
 # ---------- 4) IP + sslip.io 도메인 ----------
 report 4 "도메인/HTTPS 설정 중"
@@ -160,9 +151,9 @@ LOG_LEVEL=info
 EOF
 
 # ---------- 7) docker compose up ----------
-report 5 "이미지 다운로드 + 컨테이너 시작 (3~5분, 첫 빌드)"
-docker compose pull bot watchtower caddy 2>/dev/null || true
-docker compose up -d --build 2>&1 | tail -50 || warn "docker compose up 일부 실패 — 봇/Caddy 상태 확인 필요"
+report 5 "이미지 다운로드 + 컨테이너 시작 (1~2분)"
+docker compose pull 2>&1 | tail -20 || warn "pull 일부 실패"
+docker compose up -d 2>&1 | tail -20 || warn "compose up 일부 실패"
 
 # Caddy가 Let's Encrypt 인증서 받을 시간 (HTTP-01 challenge) — 80포트 도달 필요
 sleep 15

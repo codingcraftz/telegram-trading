@@ -1,43 +1,20 @@
 services:
-  kis-mcp:
-    # 한국투자증권 공식 Kis Trading MCP를 로컬 빌드 (fastmcp 호환 패치 포함).
-    # external/open-trading-api는 git submodule (또는 로컬 심볼릭 링크).
-    build:
-      context: .
-      dockerfile: infra/kis-mcp.Dockerfile
-    image: kis-trade-mcp:local
-    container_name: kis-mcp
-    restart: unless-stopped
-    environment:
-      ENV: live  # .env.live 로드 → MCP_TYPE=sse, port 3000, path /sse
-      # 실전 키 (실전 거래 시 필요)
-      KIS_APP_KEY: ${KIS_APP_KEY:-}
-      KIS_APP_SECRET: ${KIS_APP_SECRET:-}
-      KIS_ACCT_STOCK: ${KIS_ACCT_STOCK:-}
-      KIS_ACCT_FUTURE: ${KIS_ACCT_FUTURE:-}
-      # 모의(데모) 키
-      KIS_PAPER_APP_KEY: ${KIS_PAPER_APP_KEY:-}
-      KIS_PAPER_APP_SECRET: ${KIS_PAPER_APP_SECRET:-}
-      KIS_PAPER_STOCK: ${KIS_PAPER_STOCK:-}
-      KIS_PAPER_FUTURE: ${KIS_PAPER_FUTURE:-}
-      # 공통
-      KIS_HTS_ID: ${KIS_HTS_ID:-}
-      KIS_PROD_TYPE: ${KIS_PROD_TYPE:-01}
-    ports:
-      # 디버그용. 외부 노출이 싫으면 이 줄 제거하고 internal-only 통신만.
-      - "127.0.0.1:3000:3000"
-
   bot:
-    # GHCR pre-built 이미지 사용. push할 일 없으면 build로 변경 가능 (개발용).
+    # GHCR pre-built 이미지. KIS REST를 직접 호출 (별도 MCP 컨테이너 없음).
     image: ghcr.io/codingcraftz/telegram-trading:latest
     container_name: telegram-trading-bot
     restart: unless-stopped
-    depends_on:
-      - kis-mcp
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       ALLOWED_CHAT_IDS: ${ALLOWED_CHAT_IDS}
-      KIS_MCP_URL: http://kis-mcp:3000/sse
+      # KIS keys — 봇이 직접 KIS REST 호출. 모드(MODE)에 따라 paper/real 자동 선택.
+      KIS_APP_KEY: ${KIS_APP_KEY:-}
+      KIS_APP_SECRET: ${KIS_APP_SECRET:-}
+      KIS_ACCT_STOCK: ${KIS_ACCT_STOCK:-}
+      KIS_PAPER_APP_KEY: ${KIS_PAPER_APP_KEY:-}
+      KIS_PAPER_APP_SECRET: ${KIS_PAPER_APP_SECRET:-}
+      KIS_PAPER_STOCK: ${KIS_PAPER_STOCK:-}
+      KIS_PROD_TYPE: ${KIS_PROD_TYPE:-01}
       MODE: ${MODE:-paper}
       MAX_TRADE_KRW: ${MAX_TRADE_KRW:-1000000}
       MAX_OPEN_POSITIONS: ${MAX_OPEN_POSITIONS:-5}
@@ -52,7 +29,6 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
 
   # 자동 업데이트 — 5분마다 GHCR 새 이미지 체크 → 발견 시 pull + bot 재시작.
-  # 라벨 enable=true 컨테이너만 감시 (kis-mcp는 제외).
   watchtower:
     image: containrrr/watchtower:latest
     container_name: telegram-trading-watchtower
@@ -62,7 +38,7 @@ services:
     command:
       - --label-enable
       - --interval
-      - "300"  # 5분
+      - "300"
       - --cleanup
       - --include-restarting
 

@@ -1,11 +1,9 @@
-// KIS Trading MCP의 카테고리 도구를 우리 코드가 쓰기 쉽도록 감싸는 wrapper.
-// MCP는 카테고리별로 1개 도구를 등록하고, api_type+params로 실제 API를 식별함.
-//   예: domestic_stock(api_type="order_cash", params={...})
-//      overseas_stock(api_type="order",      params={...})
+// 이전엔 KIS Trading MCP (Python)을 통해 호출.
+// 이제 src/kis/client.ts가 KIS REST를 직접 호출. 호출 측 시그니처 그대로 유지.
 //
-// cano (계좌번호), acnt_prdt_cd, my_htsid 는 MCP가 자동 주입하므로 우리는 안 넣음.
+// cano/acnt_prdt_cd는 src/kis/client.ts가 자동 주입.
 
-import { callTool } from './client.js';
+import { callKisApi as kisCallKisApi } from '../kis/client.js';
 import { applyDefaults } from './defaults.js';
 import { envDv as runtimeEnvDv } from '../runtime.js';
 
@@ -45,10 +43,7 @@ export async function callKisApi(
   apiType: string,
   params: Record<string, unknown>,
 ): Promise<unknown> {
-  return callTool(category, {
-    api_type: apiType,
-    params: applyDefaults(category, apiType, params),
-  });
+  return kisCallKisApi(category, apiType, applyDefaults(category, apiType, params));
 }
 
 // ============================================================

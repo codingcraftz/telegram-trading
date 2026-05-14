@@ -1,6 +1,5 @@
 import { getConfig } from './config.js';
 import { ensureSchema } from './db/migrate.js';
-import { connectMcp, closeMcp } from './mcp/client.js';
 import { createBot } from './bot/index.js';
 import { reconcileOnBoot } from './monitor/recovery.js';
 import { startMonitor, stopMonitor } from './monitor/worker.js';
@@ -34,9 +33,7 @@ async function main() {
   await ensureKrxSymbols();
   reloadKrxMaster();
 
-  console.log('[boot] connecting MCP at', cfg.KIS_MCP_URL);
-  await connectMcp();
-  console.log('[boot] MCP connected');
+  console.log('[boot] KIS REST 직접 호출 모드');
 
   console.log('[boot] reconciling positions');
   await reconcileOnBoot();
@@ -57,7 +54,6 @@ async function main() {
     try {
       await bot.stop();
     } catch {}
-    await closeMcp();
     process.exit(0);
   };
   process.once('SIGINT', () => shutdown('SIGINT'));
