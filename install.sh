@@ -113,8 +113,12 @@ DASHBOARD_DOMAIN="${PUBLIC_IP//./-}.sslip.io"
 
 # ---------- 5) 대시보드 비밀번호 + bcrypt hash ----------
 DASHBOARD_PASSWORD=$(openssl rand -base64 18 | tr -d '=+/' | cut -c1-20)
-# Caddy 이미지로 bcrypt hash 생성
-DASHBOARD_PASSWORD_HASH=$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "$DASHBOARD_PASSWORD" 2>/dev/null)
+# Caddy 이미지로 bcrypt hash 생성 — 1분 timeout (caddy 이미지 pull 포함)
+say "caddy 이미지로 bcrypt hash 생성 중"
+DASHBOARD_PASSWORD_HASH=$(timeout 120 docker run --rm caddy:2-alpine caddy hash-password --plaintext "$DASHBOARD_PASSWORD" 2>/dev/null) || {
+  warn "caddy hash-password 실패 — 평문 fallback"
+  DASHBOARD_PASSWORD_HASH=""
+}
 
 # ---------- 6) .env (봇 키는 비워두고 대시보드에서 입력) ----------
 cat > $INSTALL_DIR/.env <<EOF
@@ -150,10 +154,12 @@ INTENT_TTL_MIN=5
 LOG_LEVEL=info
 EOF
 
-# ---------- 7) docker compose up ----------
-report 5 "이미지 다운로드 + 컨테이너 시작 (1~2분)"
-docker compose pull 2>&1 | tail -20 || warn "pull 일부 실패"
-docker compose up -d 2>&1 | tail -20 || warn "compose up 일부 실패"
+# ---------- 7) docker compose up (timeout 적용) ----------
+report 5 "이미지 다운로드 (bot, caddy, watchtower)"
+timeout 300 docker compose pull 2>&1 | tail -20 || warn "pull 일부 실패 또는 timeout (5분)"
+
+report 5 "컨테이너 시작"
+timeout 120 docker compose up -d 2>&1 | tail -20 || warn "compose up 일부 실패 또는 timeout (2분)"
 
 # Caddy가 Let's Encrypt 인증서 받을 시간 (HTTP-01 challenge) — 80포트 도달 필요
 sleep 15
