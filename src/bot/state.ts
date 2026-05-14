@@ -9,6 +9,8 @@ export type ChatMode =
   | 'awaiting_trade_buy_search'
   | 'awaiting_trade_buy_amount'
   | 'awaiting_trade_buy_now_amount'
+  | 'awaiting_trade_buy_now_tp'
+  | 'awaiting_trade_buy_now_sl'
   | 'awaiting_trade_sell_qty';
 
 // 거래 흐름에서 다음 메시지가 필요한 경우 추가 컨텍스트.

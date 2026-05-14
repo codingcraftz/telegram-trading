@@ -254,6 +254,38 @@ function pctOrOffLabel(v: string, prefix: '+' | '-'): string {
   return v === 'off' ? '없음' : `${prefix}${v}%`;
 }
 
+// 매수가능금액 (psbl_order의 ord_psbl_cash). worker.ts의 fetchOrderableCash와 동일 패턴.
+async function fetchOrderableCash(code: string, refPrice: number): Promise<number | null> {
+  try {
+    const r = await callKisApi('domestic_stock', 'inquire_psbl_order', {
+      pdno: code,
+      ord_unpr: String(Math.round(refPrice)),
+      ord_dvsn: '00',
+    });
+    const parsed = parseMcpResult(r);
+    if (!parsed.success) return null;
+    const o = firstOutput(parsed);
+    const cash = num(o?.ord_psbl_cash);
+    return cash && cash > 0 ? cash : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchCurrentPrice(code: string): Promise<number | null> {
+  try {
+    const r = await callKisApi('domestic_stock', 'inquire_price', {
+      fid_cond_mrkt_div_code: 'J',
+      fid_input_iscd: code,
+    });
+    const parsed = parseMcpResult(r);
+    if (!parsed.success) return null;
+    return num(firstOutput(parsed)?.stck_prpr);
+  } catch {
+    return null;
+  }
+}
+
 export function buildBuyNowTpMenu(
   code: string,
   name: string,
@@ -263,13 +295,14 @@ export function buildBuyNowTpMenu(
     kb.text(`+${tp}%`, `tr:bnow:tp:${code}:${tp}`);
   }
   kb.row().text('🚫 TP 없음', `tr:bnow:tp:${code}:off`);
+  kb.text('✏️ 직접 입력', `tr:bnow:tp:${code}:input`);
   kb.row().text('⬅️ 뒤로', `tr:bs:${code}`);
   return {
     text:
       `⚡ <b>즉시매수: ${name}</b> (${code})\n` +
       '\n<b>1/3 단계 — TP (익절) 설정</b>\n' +
       '체결가 기준 +% 도달 시 자동 청산.\n' +
-      'TP 없음을 선택하면 자동 익절 안 함.',
+      '[✏️ 직접 입력]은 채팅으로 % 입력 (예: <code>7.5</code>).',
     kb,
   };
 }
@@ -284,6 +317,7 @@ export function buildBuyNowSlMenu(
     kb.text(`-${sl}%`, `tr:bnow:sl:${code}:${tp}:${sl}`);
   }
   kb.row().text('🚫 SL 없음', `tr:bnow:sl:${code}:${tp}:off`);
+  kb.text('✏️ 직접 입력', `tr:bnow:sl:${code}:${tp}:input`);
   kb.row().text('⬅️ 뒤로', `tr:bstr:${code}:now`);
   return {
     text:
@@ -291,17 +325,23 @@ export function buildBuyNowSlMenu(
       `TP: <b>${pctOrOffLabel(tp, '+')}</b>\n` +
       '\n<b>2/3 단계 — SL (손절) 설정</b>\n' +
       '체결가 기준 -% 도달 시 자동 청산.\n' +
-      'SL 없음을 선택하면 자동 손절 안 함.',
+      '[✏️ 직접 입력]은 채팅으로 % 입력 (예: <code>2.5</code>).',
     kb,
   };
 }
 
-export function buildBuyNowQtyMenu(
+// 수량 메뉴 — 매수가능금액 + 비율별 예상 금액 미리 표시 (사용자 요청).
+export async function buildBuyNowQtyMenu(
   code: string,
   name: string,
   tp: string,
   sl: string,
-): { text: string; kb: InlineKeyboard } {
+): Promise<{ text: string; kb: InlineKeyboard }> {
+  const [cash, curPrice] = await Promise.all([
+    fetchCurrentPrice(code).then((p) => p ?? 0).then((p) => fetchOrderableCash(code, p || 1)),
+    fetchCurrentPrice(code),
+  ]);
+
   const kb = new InlineKeyboard();
   AMOUNT_PERCENTS.forEach((p, i) => {
     const label = p === 100 ? 'MAX' : `${p}%`;
@@ -309,15 +349,30 @@ export function buildBuyNowQtyMenu(
     if (i === 2) kb.row();
   });
   kb.row().text('✏️ 직접 입력', `tr:bnow:qty:${code}:${tp}:${sl}:input`);
-  kb.row().text('⬅️ 뒤로', `tr:bnow:tp:${code}:${tp}`); // TP는 그대로 유지하고 SL만 다시 고르려면 한 단계 위
-  return {
-    text:
-      `⚡ <b>즉시매수: ${name}</b> (${code})\n` +
-      `TP: <b>${pctOrOffLabel(tp, '+')}</b>  ·  SL: <b>${pctOrOffLabel(sl, '-')}</b>\n` +
-      '\n<b>3/3 단계 — 수량 / 금액</b>\n' +
-      '예수금 대비 비율 또는 [✏️ 직접 입력]으로 주식수/금액 지정.',
-    kb,
-  };
+  kb.row().text('⬅️ 뒤로', `tr:bnow:tp:${code}:${tp}`);
+
+  const lines = [
+    `⚡ <b>즉시매수: ${name}</b> (${code})`,
+    `TP: <b>${pctOrOffLabel(tp, '+')}</b>  ·  SL: <b>${pctOrOffLabel(sl, '-')}</b>`,
+    '',
+    `<b>3/3 단계 — 수량 / 금액</b>`,
+  ];
+  if (cash && cash > 0) {
+    lines.push(`💵 매수가능금액: <b>${cash.toLocaleString()}원</b>`);
+    if (curPrice && curPrice > 0) {
+      lines.push(`📊 현재가: ${curPrice.toLocaleString()}원`);
+      const preview = AMOUNT_PERCENTS.map((p) => {
+        const budget = (cash * p) / 100;
+        const qty = Math.floor(budget / curPrice);
+        const label = p === 100 ? 'MAX' : `${p}%`;
+        return `  ${label}: ${budget.toLocaleString()}원 (≈${qty}주)`;
+      });
+      lines.push('', '비율 누르면 예상:', ...preview);
+    }
+  } else {
+    lines.push(`⚠️ 매수가능금액 조회 실패 — 비율 선택은 가능하지만 [직접 입력] 권장`);
+  }
+  return { text: lines.join('\n'), kb };
 }
 
 // 즉시매수 확정 메시지 생성 + pendingIntent 등록 (이후 confirm 콜백에서 발주)
@@ -332,27 +387,10 @@ export async function buildBuyNowConfirmAndRegister(args: {
   const sym = await resolveSymbol(args.code);
   if (!sym) return { error: `종목 정보 없음 (${args.code})` };
 
-  // 현재가 + 매수가능금액
-  let curPrice = 0;
-  let cash = 0;
-  try {
-    const pRes = await callKisApi('domestic_stock', 'inquire_price', {
-      fid_cond_mrkt_div_code: 'J',
-      fid_input_iscd: args.code,
-    });
-    const pParsed = parseMcpResult(pRes);
-    if (pParsed.success) curPrice = num(firstOutput(pParsed)?.stck_prpr) ?? 0;
-  } catch {}
+  // 현재가 + 매수가능금액 (inquire_psbl_order — 시가매매 워커와 동일 방식)
+  const curPrice = (await fetchCurrentPrice(args.code)) ?? 0;
   if (curPrice <= 0) return { error: '현재가 조회 실패' };
-
-  try {
-    const balRes = await callKisApi('domestic_stock', 'inquire_balance', {});
-    const balParsed = parseMcpResult(balRes);
-    if (balParsed.success) {
-      const summary = outputDict(balParsed, 'output2');
-      cash = num(summary?.dnca_tot_amt) ?? 0;
-    }
-  } catch {}
+  const cash = (await fetchOrderableCash(args.code, curPrice)) ?? 0;
 
   // 수량 계산
   let qty = 0;

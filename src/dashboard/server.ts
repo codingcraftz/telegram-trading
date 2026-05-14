@@ -9,6 +9,10 @@ import { dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
 const ENV_PATH = process.env.ENV_PATH ?? '/app/data/runtime.env';
+const UPDATE_SENTINEL = '/app/data/.update-now';
+const GIT_SHA = process.env.GIT_SHA ?? 'dev';
+const BUILD_DATE = process.env.BUILD_DATE ?? '';
+const REPO_API = 'https://api.github.com/repos/codingcraftz/telegram-trading/commits/main';
 
 type Settings = {
   TELEGRAM_BOT_TOKEN?: string;
@@ -41,10 +45,8 @@ function writeSettings(s: Settings): void {
   writeFileSync(ENV_PATH, lines.join('\n') + '\n', 'utf-8');
 }
 
-function mask(v: string | undefined): string {
-  if (!v) return '';
-  if (v.length <= 8) return '••••';
-  return v.slice(0, 4) + '••••' + v.slice(-4);
+function shortSha(s: string): string {
+  return s.length >= 7 ? s.slice(0, 7) : s;
 }
 
 const HTML = (s: Settings) => `<!DOCTYPE html>
@@ -64,18 +66,21 @@ const HTML = (s: Settings) => `<!DOCTYPE html>
   input[type="text"], input[type="password"] { width:100%; box-sizing:border-box; padding:10px 12px; background:#0f172a; border:1px solid #334155; border-radius:6px; color:#e2e8f0; font-size:14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   input:focus { outline:none; border-color:#3b82f6; }
   .grid { display:grid; gap:14px; }
-  .row { display:flex; gap:8px; align-items:end; }
-  .row > label { flex:1; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
   button { background:#3b82f6; color:white; border:0; padding:10px 18px; border-radius:6px; font-size:14px; cursor:pointer; font-weight:600; }
   button:hover { background:#2563eb; }
+  button:disabled { background:#475569; cursor:not-allowed; opacity:0.6; }
   button.secondary { background:#475569; }
   button.danger { background:#dc2626; }
-  .toast { position:fixed; bottom:20px; right:20px; padding:12px 16px; border-radius:8px; background:#16a34a; color:white; opacity:0; transition: opacity .3s; }
+  button.success { background:#16a34a; }
+  .toast { position:fixed; bottom:20px; right:20px; padding:12px 16px; border-radius:8px; background:#16a34a; color:white; opacity:0; transition: opacity .3s; max-width: 80%; }
   .toast.show { opacity:1; }
   .pill { display:inline-block; font-size:11px; padding:2px 8px; border-radius:9999px; }
   .pill.on { background:#16a34a; color:white; }
   .pill.off { background:#475569; color:white; }
+  .pill.update { background:#f59e0b; color:white; }
   .hint { font-size:12px; color:#94a3b8; margin-top:4px; }
+  .version { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; color:#94a3b8; }
   a { color:#60a5fa; }
 </style>
 </head>
@@ -83,6 +88,19 @@ const HTML = (s: Settings) => `<!DOCTYPE html>
 <div class="wrap">
   <h1>📈 KIS 텔레그램 봇 대시보드</h1>
   <p class="sub">키와 셋팅을 입력해 봇을 활성화합니다. 변경 후 [저장 + 봇 재시작]을 누르세요.</p>
+
+  <div class="card">
+    <h2>🔧 버전 / 업데이트</h2>
+    <div class="row" style="gap:12px; margin-bottom:8px;">
+      <span class="version">현재 버전: <b id="curVersion">${shortSha(GIT_SHA)}</b>${BUILD_DATE ? ` <span style="color:#64748b">(${BUILD_DATE.slice(0, 10)})</span>` : ''}</span>
+      <span id="updateBadge"></span>
+    </div>
+    <div class="row" style="gap:8px;">
+      <button id="checkUpdateBtn" class="secondary" type="button">🔍 업데이트 확인</button>
+      <button id="doUpdateBtn" type="button" disabled>⬇️ 지금 업데이트</button>
+    </div>
+    <div class="hint" id="updateHint">업데이트는 백그라운드에서 진행되며 1~2분 안에 봇이 재시작됩니다.</div>
+  </div>
 
   <form id="f">
     <div class="card">
@@ -155,8 +173,9 @@ function showToast(msg, ok = true) {
   toast.textContent = msg;
   toast.style.background = ok ? '#16a34a' : '#dc2626';
   toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), 3500);
+  setTimeout(() => toast.classList.remove('show'), 5000);
 }
+
 f.addEventListener('submit', async (e) => {
   e.preventDefault();
   const data = Object.fromEntries(new FormData(f));
@@ -171,6 +190,51 @@ f.addEventListener('submit', async (e) => {
     showToast('❌ ' + t.slice(0, 100), false);
   }
 });
+
+const checkBtn = document.getElementById('checkUpdateBtn');
+const doBtn = document.getElementById('doUpdateBtn');
+const badge = document.getElementById('updateBadge');
+const hint = document.getElementById('updateHint');
+
+checkBtn.addEventListener('click', async () => {
+  checkBtn.disabled = true;
+  badge.innerHTML = '⏳ 확인 중...';
+  try {
+    const res = await fetch('/api/check-update');
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (data.updateAvailable) {
+      badge.innerHTML = '<span class="pill update">🔔 업데이트 가능: ' + data.latest + '</span>';
+      hint.innerHTML = '<b>최신 변경:</b> ' + (data.latestMessage || '(메시지 없음)') + '<br><b>[⬇️ 지금 업데이트]</b>를 누르면 1~2분 안에 적용됩니다.';
+      doBtn.disabled = false;
+    } else {
+      badge.innerHTML = '<span class="pill on">✅ 최신 버전</span>';
+      hint.textContent = '업데이트할 내용이 없습니다.';
+    }
+  } catch (e) {
+    badge.innerHTML = '<span class="pill off">❌ 확인 실패</span>';
+    hint.textContent = '⚠️ ' + (e.message || '확인 실패');
+  } finally {
+    checkBtn.disabled = false;
+  }
+});
+
+doBtn.addEventListener('click', async () => {
+  if (!confirm('지금 봇을 업데이트하시겠어요? 1~2분 동안 봇이 재시작됩니다.')) return;
+  doBtn.disabled = true;
+  hint.textContent = '⏳ 업데이트 요청 중...';
+  try {
+    const res = await fetch('/api/update', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'failed');
+    showToast('✅ ' + (data.message || '업데이트 요청됨'));
+    hint.innerHTML = '✅ <b>요청 완료.</b> cron이 1분 안에 감지해 docker pull + 재시작. 1~2분 후 새로고침하면 새 버전이 표시됩니다.';
+  } catch (e) {
+    showToast('❌ ' + e.message, false);
+    hint.textContent = '❌ ' + e.message;
+    doBtn.disabled = false;
+  }
+});
 </script>
 </body>
 </html>`;
@@ -183,17 +247,55 @@ export function startDashboard(port = 8080): void {
 
   app.post('/api/settings', async (c) => {
     const body = (await c.req.json()) as Settings;
-    // 단순 검증
     if (body.MODE && body.MODE !== 'paper' && body.MODE !== 'real') {
       return c.text('mode must be paper or real', 400);
     }
     const cur = readSettings();
     writeSettings({ ...cur, ...body });
-    // 봇 재시작 신호 — Docker가 다음 헬스체크 실패 시 자동 재시작 (또는 부모 프로세스가 SIGTERM 보냄)
     setTimeout(() => process.exit(0), 1000);
     return c.json({ ok: true });
   });
 
+  // GitHub API로 latest main commit 확인 → 현재 GIT_SHA와 비교
+  app.get('/api/check-update', async (c) => {
+    try {
+      const res = await fetch(REPO_API, {
+        headers: { 'User-Agent': 'owlim-bot-dashboard' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) {
+        return c.json({ error: `GitHub API ${res.status}` }, 502);
+      }
+      const data = (await res.json()) as { sha?: string; commit?: { message?: string } };
+      const latest = data.sha ?? '';
+      const latestMessage = (data.commit?.message ?? '').split('\n')[0]?.slice(0, 200) ?? '';
+      const current = GIT_SHA === 'dev' ? '' : GIT_SHA;
+      const updateAvailable = !!current && !!latest && shortSha(latest) !== shortSha(current);
+      return c.json({
+        current: shortSha(current || 'dev'),
+        latest: shortSha(latest),
+        latestMessage,
+        updateAvailable,
+      });
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 500);
+    }
+  });
+
+  // 업데이트 trigger — sentinel 파일 touch. 호스트의 cron(매분)이 감지 후 docker compose pull + up.
+  app.post('/api/update', async (c) => {
+    try {
+      mkdirSync(dirname(UPDATE_SENTINEL), { recursive: true });
+      writeFileSync(UPDATE_SENTINEL, new Date().toISOString(), 'utf-8');
+      return c.json({
+        ok: true,
+        message: '업데이트 요청됨. 1분 안에 docker pull + 재시작 시작 (총 1~2분 소요).',
+      });
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 500);
+    }
+  });
+
   serve({ fetch: app.fetch, port });
-  console.log(`[dashboard] listening on :${port}`);
+  console.log(`[dashboard] listening on :${port}  ·  version=${shortSha(GIT_SHA)}`);
 }

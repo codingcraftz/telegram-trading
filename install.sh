@@ -151,14 +151,17 @@ INTENT_TTL_MIN=5
 LOG_LEVEL=info
 EOF
 
-# self-update (cron) 설치 — 인프라 파일(docker-compose.yml / Caddyfile) 자동 갱신
+# self-update (cron) 설치 — 인프라 자동 갱신 + 대시보드 "지금 업데이트" 버튼 트리거
 mkdir -p $INSTALL_DIR/scripts
 curl -fsSL $RAW_BASE/scripts/self-update.sh -o $INSTALL_DIR/scripts/self-update.sh
 chmod +x $INSTALL_DIR/scripts/self-update.sh
 cat > /etc/cron.d/owlim-self-update <<CRONEOF
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# 매시간 :05 정기 sync
 5 * * * * root $INSTALL_DIR/scripts/self-update.sh >> /var/log/owlim-self-update.log 2>&1
+# 매분 sentinel 체크 (대시보드 업데이트 버튼)
+* * * * * root $INSTALL_DIR/scripts/self-update.sh --check-sentinel >> /var/log/owlim-self-update.log 2>&1
 CRONEOF
 chmod 0644 /etc/cron.d/owlim-self-update
 systemctl reload cron 2>/dev/null || systemctl restart cron 2>/dev/null || true
