@@ -254,8 +254,13 @@ function pctOrOffLabel(v: string, prefix: '+' | '-'): string {
   return v === 'off' ? '없음' : `${prefix}${v}%`;
 }
 
-// 매수가능금액 (psbl_order의 ord_psbl_cash). worker.ts의 fetchOrderableCash와 동일 패턴.
+// 매수가능금액 — 3단계 fallback:
+//   1) inquire_psbl_order의 ord_psbl_cash (가장 정확, 미수 없는 현금 한도)
+//   2) inquire_psbl_order의 nrcvb_buy_amt (미수없는매수금액)
+//   3) inquire_balance의 dnca_tot_amt (예수금 총액)
+// 실패해도 console.warn으로 로그만 남기고 null 반환 — 직접 입력 모드로 우회.
 async function fetchOrderableCash(code: string, refPrice: number): Promise<number | null> {
+  // 1) inquire_psbl_order — 가장 정확한 한도
   try {
     const r = await callKisApi('domestic_stock', 'inquire_psbl_order', {
       pdno: code,
@@ -263,13 +268,45 @@ async function fetchOrderableCash(code: string, refPrice: number): Promise<numbe
       ord_dvsn: '00',
     });
     const parsed = parseMcpResult(r);
-    if (!parsed.success) return null;
-    const o = firstOutput(parsed);
-    const cash = num(o?.ord_psbl_cash);
-    return cash && cash > 0 ? cash : null;
-  } catch {
-    return null;
+    if (parsed.success) {
+      const o = firstOutput(parsed);
+      if (o) {
+        for (const key of ['ord_psbl_cash', 'nrcvb_buy_amt', 'max_buy_amt']) {
+          const v = num(o[key]);
+          if (v && v > 0) {
+            console.log('[psbl] cash from', key, '=', v);
+            return v;
+          }
+        }
+        console.warn('[psbl] inquire_psbl_order: no positive cash field. keys:', Object.keys(o).join(','));
+      } else {
+        console.warn('[psbl] inquire_psbl_order: no output');
+      }
+    } else {
+      console.warn('[psbl] inquire_psbl_order parse failed:', parsed.error);
+    }
+  } catch (err) {
+    console.warn('[psbl] inquire_psbl_order error:', (err as Error).message);
   }
+
+  // 2) fallback — inquire_balance.output2.dnca_tot_amt (예수금 총액)
+  try {
+    const r = await callKisApi('domestic_stock', 'inquire_balance', {});
+    const parsed = parseMcpResult(r);
+    if (parsed.success) {
+      const summary = outputDict(parsed, 'output2');
+      const v = num(summary?.dnca_tot_amt);
+      if (v && v > 0) {
+        console.log('[psbl] cash fallback from dnca_tot_amt =', v);
+        return v;
+      }
+      console.warn('[psbl] inquire_balance: dnca_tot_amt 없음/0. output2 keys:', summary ? Object.keys(summary).join(',') : '(no output2)');
+    }
+  } catch (err) {
+    console.warn('[psbl] inquire_balance error:', (err as Error).message);
+  }
+
+  return null;
 }
 
 async function fetchCurrentPrice(code: string): Promise<number | null> {
@@ -337,10 +374,9 @@ export async function buildBuyNowQtyMenu(
   tp: string,
   sl: string,
 ): Promise<{ text: string; kb: InlineKeyboard }> {
-  const [cash, curPrice] = await Promise.all([
-    fetchCurrentPrice(code).then((p) => p ?? 0).then((p) => fetchOrderableCash(code, p || 1)),
-    fetchCurrentPrice(code),
-  ]);
+  const curPrice = await fetchCurrentPrice(code);
+  const cash =
+    curPrice && curPrice > 0 ? await fetchOrderableCash(code, curPrice) : null;
 
   const kb = new InlineKeyboard();
   AMOUNT_PERCENTS.forEach((p, i) => {
@@ -399,7 +435,14 @@ export async function buildBuyNowConfirmAndRegister(args: {
   } else if (args.amount.mode === 'amount') {
     qty = Math.floor(args.amount.value / curPrice);
   } else {
-    if (cash <= 0) return { error: '예수금 조회 실패 — 비율 계산 불가' };
+    if (cash <= 0) {
+      return {
+        error:
+          '💵 매수가능금액 조회 실패 (KIS 응답에 ord_psbl_cash / nrcvb_buy_amt / dnca_tot_amt 모두 없음).\n' +
+          '👉 [✏️ 직접 입력]으로 주식수 또는 금액을 직접 지정해서 진행해보세요.\n' +
+          '   예: <code>10주</code> · <code>50만원</code> · <code>500000원</code>',
+      };
+    }
     const budget = (cash * args.amount.value) / 100;
     qty = Math.floor(budget / curPrice);
   }
