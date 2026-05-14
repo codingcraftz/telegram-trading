@@ -29,6 +29,11 @@ function loadMaster(): void {
 }
 loadMaster();
 
+// 마스터 파일 갱신 후 메모리 재로드 (boot 단계에서 호출)
+export function reloadKrxMaster(): void {
+  loadMaster();
+}
+
 const ALIASES: Record<string, { code: string; name: string }> = {
   // 시총 상위 + 자주 거래
   삼성전자: { code: '005930', name: '삼성전자' },

@@ -5,6 +5,8 @@ import { createBot } from './bot/index.js';
 import { reconcileOnBoot } from './monitor/recovery.js';
 import { startMonitor, stopMonitor } from './monitor/worker.js';
 import { startScheduler, stopScheduler } from './scheduler/worker.js';
+import { ensureKrxSymbols } from './fastpath/symbols-fetcher.js';
+import { reloadKrxMaster } from './fastpath/symbol.js';
 
 async function main() {
   const cfg = getConfig();
@@ -12,6 +14,10 @@ async function main() {
 
   console.log('[boot] db init');
   ensureSchema();
+
+  console.log('[boot] KRX 종목 마스터 확인');
+  await ensureKrxSymbols();
+  reloadKrxMaster();
 
   console.log('[boot] connecting MCP at', cfg.KIS_MCP_URL);
   await connectMcp();

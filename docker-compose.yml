@@ -28,9 +28,8 @@ services:
       - "127.0.0.1:3000:3000"
 
   bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # GHCR pre-built 이미지 사용. push할 일 없으면 build로 변경 가능 (개발용).
+    image: ghcr.io/codingcraftz/telegram-trading:latest
     container_name: telegram-trading-bot
     restart: unless-stopped
     depends_on:
@@ -49,3 +48,20 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - ./data:/app/data
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  # 자동 업데이트 — 5분마다 GHCR 새 이미지 체크 → 발견 시 pull + bot 재시작.
+  # 라벨 enable=true 컨테이너만 감시 (kis-mcp는 제외).
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: telegram-trading-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - --label-enable
+      - --interval
+      - "300"  # 5분
+      - --cleanup
+      - --include-restarting
