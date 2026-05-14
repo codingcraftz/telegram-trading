@@ -67,26 +67,33 @@ else
   echo -e "${GREEN}═══════════════════════════════════════${NC}"
   echo ""
 
-  echo "1. 텔레그램 봇 토큰 (BotFather에서 받은 거)"
-  read -rp "   > " TG_TOKEN
-
-  echo ""
-  echo "2. 허용할 텔레그램 chat_id (콤마 구분)"
-  echo "   본인 chat_id 확인: 텔레그램에서 @userinfobot → /start"
-  read -rp "   > " CHAT_IDS
-
-  echo ""
-  echo "3. KIS 모의투자 APP_KEY"
-  echo "   한국투자증권 개발자센터 → 모의투자 신청 → 키 발급"
-  read -rp "   > " KIS_PAPER_KEY
-
-  echo ""
-  echo "4. KIS 모의투자 APP_SECRET"
-  read -rp "   > " KIS_PAPER_SECRET
-
-  echo ""
-  echo "5. 모의투자 종합계좌 앞 8자리 (예: 50012345-01 → 50012345)"
-  read -rp "   > " KIS_PAPER_STOCK
+  # 환경변수 우선, 없으면 대화형 입력 (자동화 가능)
+  if [ -z "${TG_TOKEN:-}" ]; then
+    echo "1. 텔레그램 봇 토큰 (BotFather에서 받은 거)"
+    read -rp "   > " TG_TOKEN
+  fi
+  if [ -z "${CHAT_IDS:-}" ]; then
+    echo ""
+    echo "2. 허용할 텔레그램 chat_id (콤마 구분)"
+    echo "   본인 chat_id 확인: 텔레그램에서 @userinfobot → /start"
+    read -rp "   > " CHAT_IDS
+  fi
+  if [ -z "${KIS_PAPER_KEY:-}" ]; then
+    echo ""
+    echo "3. KIS 모의투자 APP_KEY"
+    echo "   한국투자증권 개발자센터 → 모의투자 신청 → 키 발급"
+    read -rp "   > " KIS_PAPER_KEY
+  fi
+  if [ -z "${KIS_PAPER_SECRET:-}" ]; then
+    echo ""
+    echo "4. KIS 모의투자 APP_SECRET"
+    read -rp "   > " KIS_PAPER_SECRET
+  fi
+  if [ -z "${KIS_PAPER_STOCK:-}" ]; then
+    echo ""
+    echo "5. 모의투자 종합계좌 앞 8자리 (예: 50012345-01 → 50012345)"
+    read -rp "   > " KIS_PAPER_STOCK
+  fi
 
   cat > "$ENV_FILE" <<EOF
 TELEGRAM_BOT_TOKEN=$TG_TOKEN
