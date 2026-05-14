@@ -41,13 +41,36 @@ report() {
   say "[$step/6] $message"
 }
 
+# 진단 정보 — JSON-safe 인코딩
+collect_diagnostics() {
+  {
+    echo "=== docker compose ps ==="
+    docker compose -f "$INSTALL_DIR/docker-compose.yml" ps 2>&1 | head -30
+    echo ""
+    echo "=== bot logs (50줄) ==="
+    docker compose -f "$INSTALL_DIR/docker-compose.yml" logs --tail 50 bot 2>&1
+    echo ""
+    echo "=== caddy logs (30줄) ==="
+    docker compose -f "$INSTALL_DIR/docker-compose.yml" logs --tail 30 caddy 2>&1
+    echo ""
+    echo "=== kis-mcp logs (30줄) ==="
+    docker compose -f "$INSTALL_DIR/docker-compose.yml" logs --tail 30 kis-mcp 2>&1
+    echo ""
+    echo "=== install log (마지막 80줄) ==="
+    tail -80 /var/log/owlim-install.log 2>/dev/null
+  } 2>&1 | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || \
+   echo '"diagnostics encoding failed"'
+}
+
 # 어떤 단계에서 실패해도 마지막 callback (failed) 보내기
 report_failure() {
   local exit_code=$?
   if [ "$exit_code" -ne 0 ] && [ -n "${SETUP_CALLBACK_URL:-}" ] && [ -n "${SETUP_TOKEN:-}" ]; then
+    local diag
+    diag=$(collect_diagnostics)
     curl -fsS -X POST "$SETUP_CALLBACK_URL" \
       -H "content-type: application/json" \
-      -d "{\"setup_token\":\"$SETUP_TOKEN\",\"step\":6,\"message\":\"설치 중 오류 (exit=$exit_code) — /var/log/owlim-install.log 확인\"}" \
+      -d "{\"setup_token\":\"$SETUP_TOKEN\",\"step\":6,\"message\":\"설치 중 오류 (exit=$exit_code)\",\"diagnostics\":$diag}" \
       >/dev/null 2>&1 || true
   fi
 }
@@ -146,7 +169,8 @@ sleep 15
 
 # ---------- 8) 완료 callback (어떤 일이 있어도 보냄) ----------
 DASHBOARD_URL="https://$DASHBOARD_DOMAIN"
-report 6 "준비 완료" ",\"ip\":\"$PUBLIC_IP\",\"dashboard_url\":\"$DASHBOARD_URL\",\"password\":\"$DASHBOARD_PASSWORD\""
+DIAG=$(collect_diagnostics)
+report 6 "준비 완료" ",\"ip\":\"$PUBLIC_IP\",\"dashboard_url\":\"$DASHBOARD_URL\",\"password\":\"$DASHBOARD_PASSWORD\",\"diagnostics\":$DIAG"
 
 # 정상 종료 — trap이 종료 시 false alarm 안 보내도록
 trap - ERR EXIT
