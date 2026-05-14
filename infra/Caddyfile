@@ -1,0 +1,16 @@
+# Caddy 설정 — sslip.io 도메인으로 자동 HTTPS (Let's Encrypt).
+# DASHBOARD_DOMAIN 환경변수 = "1-2-3-4.sslip.io" 형태 (install.sh가 IP로 채움).
+# DASHBOARD_PASSWORD_HASH = bcrypt 해시 (install.sh가 생성).
+
+{
+  # 운영자 이메일 (Let's Encrypt 알림용, 빈 값이면 이메일 없이 ZeroSSL fallback)
+  email {$CADDY_EMAIL}
+}
+
+{$DASHBOARD_DOMAIN} {
+  # 비밀번호로 보호 (Caddy basic_auth)
+  basic_auth /* {
+    admin {$DASHBOARD_PASSWORD_HASH}
+  }
+  reverse_proxy bot:8080
+}

@@ -65,3 +65,26 @@ services:
       - "300"  # 5분
       - --cleanup
       - --include-restarting
+
+  # Caddy — sslip.io 도메인으로 자동 HTTPS, 봇 대시보드 reverse-proxy.
+  caddy:
+    image: caddy:2-alpine
+    container_name: telegram-trading-caddy
+    restart: unless-stopped
+    depends_on:
+      - bot
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN}
+      DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH}
+      CADDY_EMAIL: ${CADDY_EMAIL:-}
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

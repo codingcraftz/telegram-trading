@@ -1,109 +1,110 @@
 #!/usr/bin/env bash
-# 텔레그램 매매 봇 자동 설치 스크립트.
-# Vultr/AWS/일반 Ubuntu 서버에서 한 줄 실행:
-#   curl -fsSL https://raw.githubusercontent.com/codingcraftz/telegram-trading/main/install.sh | sudo bash
+# 텔레그램 매매 봇 자동 설치 — owlim register 페이지에서 실행됨.
 #
-# Docker 이미지는 GHCR(GitHub Container Registry)에서 pre-built 받음.
-# Watchtower가 5분마다 새 이미지 자동 감지 + 봇 재시작.
-# → 개발자 push만 하면 모든 사용자 서버에 5분 이내 자동 반영.
+# 환경변수 (cloud-init이 미리 export):
+#   SETUP_CALLBACK_URL  — owlim에서 진행 상황 받을 endpoint
+#   SETUP_TOKEN         — owlim에서 발급한 인증 토큰
+#
+# 단계:
+#   1. 시스템 패키지
+#   2. Docker
+#   3. docker-compose.yml + Caddyfile 다운로드
+#   4. IP 확인 → sslip.io 도메인 생성
+#   5. random 대시보드 비밀번호 생성 + bcrypt hash
+#   6. .env 작성 (봇 키들은 빈값, 사용자가 대시보드에서 입력)
+#   7. docker compose up
+#   8. owlim에 callback (URL + 비밀번호)
 
 set -euo pipefail
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
-
 say()   { echo -e "${GREEN}▶${NC} $*"; }
 warn()  { echo -e "${YELLOW}⚠${NC} $*"; }
 error() { echo -e "${RED}✗${NC} $*" >&2; }
 
-# ---------- 1) 루트 권한 + OS 체크 ----------
-if [[ $EUID -ne 0 ]]; then
-  error "root 권한이 필요합니다. 다음과 같이 실행:"
-  echo "  curl -fsSL https://raw.githubusercontent.com/codingcraftz/telegram-trading/main/install.sh | sudo bash"
-  exit 1
-fi
-
-if ! command -v apt-get &>/dev/null; then
-  error "Ubuntu/Debian 전용입니다."
-  exit 1
-fi
-
 INSTALL_DIR=/opt/telegram-trading
-COMPOSE_URL=https://raw.githubusercontent.com/codingcraftz/telegram-trading/main/docker-compose.yml
-MCP_DOCKERFILE_URL=https://raw.githubusercontent.com/codingcraftz/telegram-trading/main/infra/kis-mcp.Dockerfile
+RAW_BASE=https://raw.githubusercontent.com/codingcraftz/telegram-trading/main
 
-# ---------- 2) 시스템 패키지 ----------
-say "시스템 패키지 업데이트 (1~2분)"
+# ---------- callback 헬퍼 ----------
+report() {
+  local step="$1"; local message="$2"; shift 2
+  if [ -n "${SETUP_CALLBACK_URL:-}" ] && [ -n "${SETUP_TOKEN:-}" ]; then
+    local extra=""
+    if [ "$#" -gt 0 ]; then extra="$1"; fi
+    curl -fsS -X POST "$SETUP_CALLBACK_URL" \
+      -H "content-type: application/json" \
+      -d "{\"setup_token\":\"$SETUP_TOKEN\",\"step\":$step,\"message\":\"$message\"$extra}" \
+      >/dev/null 2>&1 || warn "callback 실패 (계속 진행)"
+  fi
+  say "[$step/6] $message"
+}
+
+# ---------- 0) 환경 ----------
+if [[ $EUID -ne 0 ]]; then
+  error "root 권한 필요"
+  exit 1
+fi
 export DEBIAN_FRONTEND=noninteractive
+
+# ---------- 1) 시스템 패키지 ----------
+report 1 "시스템 패키지 설치 중"
 apt-get update -qq
 apt-get install -y -qq curl ca-certificates
 
-# ---------- 3) Docker ----------
+# ---------- 2) Docker ----------
+report 2 "Docker 설치 중"
 if ! command -v docker &>/dev/null; then
-  say "Docker 설치 중"
-  curl -fsSL https://get.docker.com | sh >/dev/null
+  curl -fsSL https://get.docker.com | sh >/dev/null 2>&1
 fi
 if ! docker compose version &>/dev/null; then
-  say "Docker Compose plugin 설치"
   apt-get install -y -qq docker-compose-plugin
 fi
 
-# ---------- 4) 작업 디렉토리 + compose 파일 ----------
+# ---------- 3) compose 파일 다운로드 ----------
+report 3 "봇 구성 파일 다운로드"
 mkdir -p $INSTALL_DIR/infra $INSTALL_DIR/data
 cd $INSTALL_DIR
+curl -fsSL $RAW_BASE/docker-compose.yml -o docker-compose.yml
+curl -fsSL $RAW_BASE/infra/Caddyfile -o infra/Caddyfile
+curl -fsSL $RAW_BASE/infra/kis-mcp.Dockerfile -o infra/kis-mcp.Dockerfile
 
-say "docker-compose.yml 다운로드"
-curl -fsSL $COMPOSE_URL -o docker-compose.yml
-mkdir -p infra
-curl -fsSL $MCP_DOCKERFILE_URL -o infra/kis-mcp.Dockerfile
+# external 서브모듈 (KIS MCP 빌드용)
+if [ ! -d "external/open-trading-api" ]; then
+  mkdir -p external
+  git clone --depth 1 https://github.com/koreainvestment/open-trading-api external/open-trading-api 2>/dev/null || \
+    warn "open-trading-api clone 실패 (kis-mcp 빌드 시 재시도)"
+fi
 
-# ---------- 5) .env 입력 ----------
-ENV_FILE=$INSTALL_DIR/.env
-if [ -f "$ENV_FILE" ]; then
-  warn ".env 이미 있음 — 그대로 사용 (재입력 필요하면 rm $ENV_FILE)"
-else
-  echo ""
-  echo -e "${GREEN}═══════════════════════════════════════${NC}"
-  echo -e "${GREEN}    환경 변수 입력${NC}"
-  echo -e "${GREEN}═══════════════════════════════════════${NC}"
-  echo ""
+# ---------- 4) IP + sslip.io 도메인 ----------
+report 4 "도메인/HTTPS 설정 중"
+PUBLIC_IP=$(curl -fsS https://api.ipify.org 2>/dev/null || curl -fsS https://ifconfig.me 2>/dev/null || echo "")
+if [ -z "$PUBLIC_IP" ]; then
+  error "공인 IP 확인 실패"
+  exit 1
+fi
+DASHBOARD_DOMAIN="${PUBLIC_IP//./-}.sslip.io"
 
-  # 환경변수 우선, 없으면 대화형 입력 (자동화 가능)
-  if [ -z "${TG_TOKEN:-}" ]; then
-    echo "1. 텔레그램 봇 토큰 (BotFather에서 받은 거)"
-    read -rp "   > " TG_TOKEN
-  fi
-  if [ -z "${CHAT_IDS:-}" ]; then
-    echo ""
-    echo "2. 허용할 텔레그램 chat_id (콤마 구분)"
-    echo "   본인 chat_id 확인: 텔레그램에서 @userinfobot → /start"
-    read -rp "   > " CHAT_IDS
-  fi
-  if [ -z "${KIS_PAPER_KEY:-}" ]; then
-    echo ""
-    echo "3. KIS 모의투자 APP_KEY"
-    echo "   한국투자증권 개발자센터 → 모의투자 신청 → 키 발급"
-    read -rp "   > " KIS_PAPER_KEY
-  fi
-  if [ -z "${KIS_PAPER_SECRET:-}" ]; then
-    echo ""
-    echo "4. KIS 모의투자 APP_SECRET"
-    read -rp "   > " KIS_PAPER_SECRET
-  fi
-  if [ -z "${KIS_PAPER_STOCK:-}" ]; then
-    echo ""
-    echo "5. 모의투자 종합계좌 앞 8자리 (예: 50012345-01 → 50012345)"
-    read -rp "   > " KIS_PAPER_STOCK
-  fi
+# ---------- 5) 대시보드 비밀번호 + bcrypt hash ----------
+DASHBOARD_PASSWORD=$(openssl rand -base64 18 | tr -d '=+/' | cut -c1-20)
+# Caddy 이미지로 bcrypt hash 생성
+DASHBOARD_PASSWORD_HASH=$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "$DASHBOARD_PASSWORD" 2>/dev/null)
 
-  cat > "$ENV_FILE" <<EOF
-TELEGRAM_BOT_TOKEN=$TG_TOKEN
-ALLOWED_CHAT_IDS=$CHAT_IDS
+# ---------- 6) .env (봇 키는 비워두고 대시보드에서 입력) ----------
+cat > $INSTALL_DIR/.env <<EOF
+# 대시보드 (Caddy)
+DASHBOARD_DOMAIN=$DASHBOARD_DOMAIN
+DASHBOARD_PASSWORD_HASH=$DASHBOARD_PASSWORD_HASH
+CADDY_EMAIL=
 
-KIS_PAPER_APP_KEY=$KIS_PAPER_KEY
-KIS_PAPER_APP_SECRET=$KIS_PAPER_SECRET
-KIS_PAPER_STOCK=$KIS_PAPER_STOCK
+# 봇 (대시보드에서 입력 — runtime.env에 저장됨)
+TELEGRAM_BOT_TOKEN=initial-empty-will-be-overridden-by-dashboard
+ALLOWED_CHAT_IDS=0
+KIS_MCP_URL=http://kis-mcp:3000/sse
 
-# 실전은 나중에
+# KIS — 처음엔 비어있음, 대시보드에서 입력
+KIS_PAPER_APP_KEY=
+KIS_PAPER_APP_SECRET=
+KIS_PAPER_STOCK=
 KIS_APP_KEY=
 KIS_APP_SECRET=
 KIS_ACCT_STOCK=
@@ -112,6 +113,7 @@ KIS_PAPER_FUTURE=
 KIS_HTS_ID=
 KIS_PROD_TYPE=01
 
+# 운영
 MODE=paper
 MAX_TRADE_KRW=1000000
 MAX_OPEN_POSITIONS=5
@@ -120,38 +122,22 @@ DAILY_LOSS_KRW=300000
 INTENT_TTL_MIN=5
 LOG_LEVEL=info
 EOF
-  say ".env 저장"
-fi
 
-# ---------- 6) external 서브모듈 (KIS MCP 빌드용) ----------
-# kis-mcp.Dockerfile은 external/open-trading-api 클론을 시도. 사전 다운로드.
-if [ ! -d "external/open-trading-api" ]; then
-  say "KIS Open Trading API 다운로드 (kis-mcp 이미지용)"
-  mkdir -p external
-  git clone --depth 1 https://github.com/koreainvestment/open-trading-api external/open-trading-api 2>/dev/null || \
-    warn "open-trading-api clone 실패 — kis-mcp 빌드 시 다시 시도됨"
-fi
-
-# ---------- 7) 봇 시작 ----------
-say "이미지 pull + 봇 시작 (3~5분, kis-mcp 첫 빌드)"
-docker compose pull bot watchtower 2>/dev/null || true
+# ---------- 7) docker compose up ----------
+report 5 "이미지 다운로드 + 컨테이너 시작"
+docker compose pull bot watchtower caddy 2>/dev/null || true
 docker compose up -d --build
 
-# ---------- 완료 ----------
+# Caddy가 Let's Encrypt 인증서 받을 시간 (HTTP-01 challenge)
+sleep 10
+
+# ---------- 8) 완료 callback ----------
+DASHBOARD_URL="https://$DASHBOARD_DOMAIN"
+report 6 "준비 완료" ",\"ip\":\"$PUBLIC_IP\",\"dashboard_url\":\"$DASHBOARD_URL\",\"password\":\"$DASHBOARD_PASSWORD\""
+
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════${NC}"
-echo -e "${GREEN}    설치 완료!${NC}"
+echo "  📋 설치 완료"
+echo "  대시보드: $DASHBOARD_URL"
+echo "  비밀번호: $DASHBOARD_PASSWORD"
 echo -e "${GREEN}═══════════════════════════════════════${NC}"
-echo ""
-echo "텔레그램에서 본인 봇 검색 → /시작"
-echo ""
-echo "📋 자주 쓰는 명령:"
-echo "  로그:     cd $INSTALL_DIR && docker compose logs -f bot"
-echo "  재시작:    cd $INSTALL_DIR && docker compose restart bot"
-echo "  종료:     cd $INSTALL_DIR && docker compose down"
-echo "  강제 갱신:  cd $INSTALL_DIR && docker compose pull bot && docker compose up -d bot"
-echo ""
-echo "✨ 자동 업데이트:"
-echo "   Watchtower가 5분마다 GHCR 새 이미지 체크 → 발견 시 자동 반영"
-echo "   (개발자가 push하면 5~10분 안에 봇 자동 업데이트)"
-echo ""

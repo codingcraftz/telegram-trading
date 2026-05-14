@@ -1,5 +1,13 @@
-import 'dotenv/config';
+import { config as dotenvConfig } from 'dotenv';
+import { existsSync } from 'node:fs';
 import { z } from 'zod';
+
+// 1) .env (개발용) → 2) /app/data/runtime.env (대시보드가 쓴 키, 우선)
+dotenvConfig();
+const RUNTIME_ENV = process.env.RUNTIME_ENV ?? '/app/data/runtime.env';
+if (existsSync(RUNTIME_ENV)) {
+  dotenvConfig({ path: RUNTIME_ENV, override: true });
+}
 
 const csvIds = z
   .string()
@@ -34,8 +42,8 @@ export function getConfig(): AppConfig {
   if (cached) return cached;
   const parsed = Env.safeParse(process.env);
   if (!parsed.success) {
-    console.error('Invalid environment:', parsed.error.flatten().fieldErrors);
-    process.exit(1);
+    const errors = JSON.stringify(parsed.error.flatten().fieldErrors);
+    throw new Error(`Invalid environment: ${errors}`);
   }
   cached = parsed.data;
   return cached;
