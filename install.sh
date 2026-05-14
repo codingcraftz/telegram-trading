@@ -15,7 +15,9 @@
 #   7. docker compose up
 #   8. owlim에 callback (URL + 비밀번호)
 
-set -euo pipefail
+# set -e 제외 — 일부 단계 실패해도 6번 callback은 무조건 보내기 위함
+set -uo pipefail
+trap 'report_failure $?' ERR EXIT
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 say()   { echo -e "${GREEN}▶${NC} $*"; }
@@ -37,6 +39,17 @@ report() {
       >/dev/null 2>&1 || warn "callback 실패 (계속 진행)"
   fi
   say "[$step/6] $message"
+}
+
+# 어떤 단계에서 실패해도 마지막 callback (failed) 보내기
+report_failure() {
+  local exit_code=$?
+  if [ "$exit_code" -ne 0 ] && [ -n "${SETUP_CALLBACK_URL:-}" ] && [ -n "${SETUP_TOKEN:-}" ]; then
+    curl -fsS -X POST "$SETUP_CALLBACK_URL" \
+      -H "content-type: application/json" \
+      -d "{\"setup_token\":\"$SETUP_TOKEN\",\"step\":6,\"message\":\"설치 중 오류 (exit=$exit_code) — /var/log/owlim-install.log 확인\"}" \
+      >/dev/null 2>&1 || true
+  fi
 }
 
 # ---------- 0) 환경 ----------
@@ -124,16 +137,20 @@ LOG_LEVEL=info
 EOF
 
 # ---------- 7) docker compose up ----------
-report 5 "이미지 다운로드 + 컨테이너 시작"
+report 5 "이미지 다운로드 + 컨테이너 시작 (3~5분, 첫 빌드)"
 docker compose pull bot watchtower caddy 2>/dev/null || true
-docker compose up -d --build
+docker compose up -d --build 2>&1 | tail -50 || warn "docker compose up 일부 실패 — 봇/Caddy 상태 확인 필요"
 
-# Caddy가 Let's Encrypt 인증서 받을 시간 (HTTP-01 challenge)
-sleep 10
+# Caddy가 Let's Encrypt 인증서 받을 시간 (HTTP-01 challenge) — 80포트 도달 필요
+sleep 15
 
-# ---------- 8) 완료 callback ----------
+# ---------- 8) 완료 callback (어떤 일이 있어도 보냄) ----------
 DASHBOARD_URL="https://$DASHBOARD_DOMAIN"
 report 6 "준비 완료" ",\"ip\":\"$PUBLIC_IP\",\"dashboard_url\":\"$DASHBOARD_URL\",\"password\":\"$DASHBOARD_PASSWORD\""
+
+# 정상 종료 — trap이 종료 시 false alarm 안 보내도록
+trap - ERR EXIT
+exit 0
 
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════${NC}"
