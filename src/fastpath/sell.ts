@@ -14,6 +14,7 @@ import { getConfig } from '../config.js';
 import { callKisApi } from '../mcp/kis.js';
 import { num, outputList, parseMcpResult } from './extract.js';
 import { resolveSymbol } from './symbol.js';
+import { getMarketSession, sessionLabel } from '../scheduler/calendar.js';
 
 type SellIntent = { sym: string; all: boolean; qtyShares?: number };
 
@@ -76,12 +77,44 @@ export async function handleSell(
       text: `❌ 매도 가능 수량 부족 (가능 ${ordPsbl}주, 요청 ${targetQty}주)`,
     };
 
+  // 세션별 ord_dvsn 결정
+  const session = getMarketSession();
+  const sLabel = sessionLabel(session);
+
+  // 매도는 시가매매 예약 미지원 (현재 buy-only) → closed/holiday면 거부
+  if (session === 'closed' || session === 'holiday') {
+    return {
+      kind: 'reply',
+      text:
+        `🔴 ${sLabel.label} — 매도 불가\n` +
+        `${sym.name} ${targetQty}주 매도는 정규장/시간외 거래 시간에 다시 시도해 주세요.\n` +
+        `(시가매매 매도 예약은 v2 예정)`,
+    };
+  }
+
+  let orderType: OrderSpec['order_type'] = 'market';
+  let price: number | undefined = undefined;
+  let typeLabel = '시장가';
+  if (session === 'pre_extended') {
+    orderType = 'pre_extended';
+    typeLabel = '장전 시간외 종가';
+  } else if (session === 'post_extended') {
+    orderType = 'post_extended';
+    typeLabel = '장후 시간외 종가';
+  } else if (session === 'after_single') {
+    // 시간외 단일가 매도 — ord_dvsn=07 + 단가 필요 (현재가로 지정).
+    orderType = 'after_single';
+    price = curPrice;
+    typeLabel = '시간외 단일가 (현재가)';
+  }
+
   const spec: OrderSpec = {
     action: 'sell',
     market: 'KRX',
     symbol_code: sym.code,
     symbol_name: sym.name,
-    order_type: 'market',
+    order_type: orderType,
+    price,
     quantity: targetQty,
     tp_pct: null,
     sl_pct: null,
@@ -91,10 +124,11 @@ export async function handleSell(
     curPrice > 0 && avgBuy > 0 ? (curPrice - avgBuy) * targetQty : 0;
   const pnlSign = expectedPnl >= 0 ? '+' : '';
   const summary =
-    `🔻 ${sym.name} (KRX/${sym.code}) ${targetQty}주 시장가 매도\n` +
+    `📤 <b>매도 제안</b> ${sLabel.icon} ${sLabel.label}\n` +
+    `${sym.name} (KRX/${sym.code}) ${targetQty}주 ${typeLabel}\n` +
     `매입평균 ${avgBuy.toLocaleString()}원 → 현재가 ${curPrice.toLocaleString()}원\n` +
     `예상손익 ${pnlSign}${Math.round(expectedPnl).toLocaleString()}원\n` +
-    `/confirm <id>  또는  /cancel <id>`;
+    `\n<code>/확정 <id></code>  또는  <code>/취소 <id></code>`;
 
   const intentId = insertPendingIntent({
     chatId,

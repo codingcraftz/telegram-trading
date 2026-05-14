@@ -1,7 +1,7 @@
-// 미체결 주문 조회 fast-path.
+// 미체결 주문 조회 fast-path + 데이터-only 헬퍼 (orders.ts에서 재사용).
 
 import { callKisApi } from '../mcp/kis.js';
-import { findOutput, fmtKrw, num, parseMcpResult } from './extract.js';
+import { checkKisOk, findOutput, fmtKrw, num, parseMcpResult } from './extract.js';
 
 function normalize(s: string): string {
   return s.toLowerCase().replace(/\s+/g, '');
@@ -25,7 +25,22 @@ function todayKst(): string {
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
-export async function handlePending(): Promise<string> {
+export type PendingOrder = {
+  time: string;        // HH:MM:SS
+  code: string;        // pdno
+  name: string;        // prdt_name
+  side: string;        // 매수/매도 한글 라벨 또는 코드
+  qty: number;         // ord_qty
+  price: number;       // ord_unpr
+  filled: number;      // tot_ccld_qty
+  remaining: number;   // qty - filled
+  orgno: string;       // ord_gno_brno (취소용)
+  odno: string;        // odno (취소용)
+  ordDvsn: string;     // ord_dvsn (취소용)
+};
+
+// 데이터-only — orders.ts 통합 뷰가 재사용.
+export async function fetchPendingOrders(): Promise<{ ok: boolean; error?: string; items: PendingOrder[] }> {
   const today = todayKst();
   const res = await callKisApi('domestic_stock', 'inquire_daily_ccld', {
     pd_dv: 'inner',
@@ -37,24 +52,40 @@ export async function handlePending(): Promise<string> {
     inqr_dvsn_3: '00',
   });
   const parsed = parseMcpResult(res);
-  if (!parsed.success) return `❌ 미체결 조회 실패: ${parsed.error ?? '알 수 없는 오류'}`;
+  if (!parsed.success) return { ok: false, error: parsed.error ?? '알 수 없는 오류', items: [] };
+  const kisOk = checkKisOk(parsed);
+  if (!kisOk.ok) return { ok: false, error: kisOk.message ?? 'KIS 오류', items: [] };
 
   const list = findOutput(parsed, 'output1');
-  const items = Array.isArray(list) ? (list as Record<string, unknown>[]) : [];
-  if (items.length === 0) return '대기 중인 미체결 주문 없음';
-
-  const lines = [`📋 <b>미체결 주문 ${items.length}개</b>`];
-  for (const it of items) {
-    const time = String(it.ord_tmd ?? '');
-    const code = String(it.pdno ?? '');
-    const name = String(it.prdt_name ?? code);
-    const side = String(it.sll_buy_dvsn_cd_name ?? it.sll_buy_dvsn_cd ?? '');
+  const raw = Array.isArray(list) ? (list as Record<string, unknown>[]) : [];
+  const items: PendingOrder[] = raw.map((it) => {
     const qty = num(it.ord_qty) ?? 0;
-    const price = num(it.ord_unpr) ?? 0;
     const filled = num(it.tot_ccld_qty) ?? 0;
-    const rem = qty - filled;
+    return {
+      time: String(it.ord_tmd ?? ''),
+      code: String(it.pdno ?? ''),
+      name: String(it.prdt_name ?? it.pdno ?? ''),
+      side: String(it.sll_buy_dvsn_cd_name ?? it.sll_buy_dvsn_cd ?? ''),
+      qty,
+      price: num(it.ord_unpr) ?? 0,
+      filled,
+      remaining: qty - filled,
+      orgno: String(it.ord_gno_brno ?? ''),
+      odno: String(it.odno ?? ''),
+      ordDvsn: String(it.ord_dvsn ?? '00'),
+    };
+  });
+  return { ok: true, items };
+}
+
+export async function handlePending(): Promise<string> {
+  const r = await fetchPendingOrders();
+  if (!r.ok) return `❌ 미체결 조회 실패: ${r.error}`;
+  if (r.items.length === 0) return '대기 중인 미체결 주문 없음';
+  const lines = [`📋 <b>미체결 주문 ${r.items.length}개</b>`];
+  for (const it of r.items) {
     lines.push(
-      `• ${time} ${name} (${code}) ${side} ${fmtKrw(price)} × ${qty}주 (잔여 ${rem})`,
+      `• ${it.time} ${it.name} (${it.code}) ${it.side} ${fmtKrw(it.price)} × ${it.qty}주 (잔여 ${it.remaining})`,
     );
   }
   return lines.join('\n');

@@ -69,6 +69,21 @@ const API: Record<string, ApiMeta> = {
       demo: { buy: 'VTTC0802U', sell: 'VTTC0801U' },
     },
   },
+  // 미체결 정정/취소
+  order_rvsecncl: {
+    path: '/uapi/domestic-stock/v1/trading/order-rvsecncl',
+    method: 'POST',
+    trId: { real: 'TTTC0803U', demo: 'VTTC0803U' },
+    needsAccount: true,
+  },
+  // 영업일/휴장일 조회 (KRX). 실전·모의 tr_id 동일.
+  // 응답 output: { bass_dt, wday_dvsn_cd, bzdy_yn, tr_day_yn, opnd_yn, sttl_day_yn }
+  //   opnd_yn = 'Y' 면 개장 (정상 거래일)
+  chk_holiday: {
+    path: '/uapi/domestic-stock/v1/quotations/chk-holiday',
+    method: 'GET',
+    trId: { real: 'CTCA0903R', demo: 'CTCA0903R' },
+  },
   // 랭킹
   volume_rank: {
     path: '/uapi/domestic-stock/v1/quotations/volume-rank',

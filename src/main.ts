@@ -7,6 +7,7 @@ import { startScheduler, stopScheduler } from './scheduler/worker.js';
 import { ensureKrxSymbols } from './fastpath/symbols-fetcher.js';
 import { reloadKrxMaster } from './fastpath/symbol.js';
 import { startDashboard } from './dashboard/server.js';
+import { prefetchHolidays } from './scheduler/holidays.js';
 
 async function main() {
   // 1) 대시보드는 항상 시작 (키가 없어도 사용자가 키 입력할 수 있게)
@@ -37,6 +38,12 @@ async function main() {
 
   console.log('[boot] reconciling positions');
   await reconcileOnBoot();
+
+  // 휴장일 prefetch (실패해도 정적 fallback으로 동작)
+  console.log('[boot] prefetching holidays');
+  await prefetchHolidays(60).catch((err) =>
+    console.warn('[boot] holiday prefetch error:', (err as Error).message),
+  );
 
   console.log('[boot] starting monitor');
   startMonitor();

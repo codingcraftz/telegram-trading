@@ -14,6 +14,7 @@ import {
   listDueReservations,
   logTrade,
   rejectReservation,
+  rescheduleReservation,
   setPositionTpSl,
   tryClaimReservation,
   type OrderSpec,
@@ -24,6 +25,8 @@ import { fetchNaverDaily, fetchNaverMinuteBars } from '../charts/naver.js';
 import { evaluateGap } from './gap-guard.js';
 import { placeBuyOrder, pollFill } from '../execution/order.js';
 import { notify } from '../notify/telegram.js';
+import { nextMarketOpen } from './calendar.js';
+import { isHoliday, prefetchHolidays } from './holidays.js';
 
 // 5초 폴링 — 9:00:05 정각 발주 보장 (최악 5초 지연).
 // 부담은 거의 없음 (DB 쿼리 1건 + 메모리 비교).
@@ -212,6 +215,19 @@ async function fireReservation(rId: string): Promise<void> {
     orderId = out.orderId;
   } catch (err) {
     const msg = (err as Error).message;
+    // KIS가 "휴장" / "거래정지" / "장 종료" 등으로 거부한 경우 자동으로 다음 영업일로 연기
+    if (/휴장|거래정지|거래 정지|장.*종료|장.*마감/.test(msg)) {
+      const next = nextMarketOpen(new Date());
+      const ok = rescheduleReservation(r.id, next.getTime());
+      logTrade({ chatId: r.chatId, kind: 'mo_rescheduled', payload: { id: r.id, reason: 'kis_reject_holiday', error: msg, newScheduledFor: next.getTime() } });
+      if (ok > 0) {
+        await notify(
+          r.chatId,
+          `📅 ${r.symbolName} — KIS가 휴장/거래정지로 거부. 다음 영업일로 자동 연기.`,
+        );
+        return;
+      }
+    }
     rejectReservation(r.id, `order_failed:${msg}`);
     logTrade({ chatId: r.chatId, kind: 'mo_order_error', payload: { id: r.id, error: msg } });
     await notify(r.chatId, `❌ 시가매매 발주 실패 — ${r.symbolName}: ${msg}`);
@@ -251,12 +267,54 @@ async function fireReservation(rId: string): Promise<void> {
     .catch((err) => console.error('[scheduler] pollFill failed', err));
 }
 
+// 매일 KST 03:00 휴장일 재 prefetch — 마지막 실행이 24h 이상 전이고 현재 KST 03:00~03:05이면 트리거
+let _lastHolidayPrefetch = Date.now();
+async function maybePrefetchHolidays() {
+  const now = Date.now();
+  if (now - _lastHolidayPrefetch < 23 * 3600 * 1000) return;
+  const KST = new Date(now + 9 * 3600 * 1000);
+  const h = KST.getUTCHours();
+  const m = KST.getUTCMinutes();
+  if (h === 3 && m < 5) {
+    _lastHolidayPrefetch = now;
+    console.log('[scheduler] daily holiday prefetch');
+    await prefetchHolidays(60).catch((err) =>
+      console.warn('[scheduler] holiday prefetch failed:', (err as Error).message),
+    );
+  }
+}
+
 async function tick() {
+  // 매일 03:00 KST 휴장일 재 prefetch
+  await maybePrefetchHolidays();
+
   // awaiting_confirm TTL 만료 처리
   expireOldAwaitingReservations();
 
   const due = listDueReservations(Date.now());
   if (due.length === 0) return;
+
+  // 오늘이 휴장일이면 due 예약을 일괄로 다음 영업일로 재예약 (발사 없음)
+  const now = new Date();
+  if (isHoliday(now)) {
+    const nextOpen = nextMarketOpen(now);
+    for (const r of due) {
+      const ok = rescheduleReservation(r.id, nextOpen.getTime());
+      if (ok > 0) {
+        await notify(
+          r.chatId,
+          `📅 휴장일 — ${r.symbolName} 예약을 다음 영업일로 자동 연기했습니다 (${nextOpen.toISOString()}).`,
+        );
+        logTrade({
+          chatId: r.chatId,
+          kind: 'mo_rescheduled',
+          payload: { id: r.id, reason: 'holiday', newScheduledFor: nextOpen.getTime() },
+        });
+      }
+    }
+    return;
+  }
+
   console.log('[scheduler] due reservations:', due.length);
   for (const r of due) {
     try {

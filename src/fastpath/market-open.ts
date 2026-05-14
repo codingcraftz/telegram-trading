@@ -16,7 +16,7 @@ import {
   insertMarketOpenReservation,
   upsertMarketOpenSettings,
 } from '../db/repo.js';
-import { firstOutput, num, parseMcpResult } from './extract.js';
+import { firstOutput, fmtTtl, num, parseMcpResult } from './extract.js';
 import { resolveSymbol } from './symbol.js';
 import { formatKst, nextMarketOpen } from '../scheduler/calendar.js';
 
@@ -190,16 +190,19 @@ export async function handleMarketOpenReserve(
     ttlMin: cfg.INTENT_TTL_MIN,
   });
 
+  const ttl = fmtTtl(Date.now() + cfg.INTENT_TTL_MIN * 60 * 1000);
   const lines = [
     '📝 <b>시가매매 예약 확인</b>',
     `종목: ${sym.name} (KRX/${sym.code})`,
     curPrice && curPrice > 0 ? `현재가: ${curPrice.toLocaleString()}원 (참고)` : '',
     `수량: ${estQtyText}`,
     `발주: ${formatKst(fireAt)} 시장가`,
-    `갭가드: ${gapGuardPct === null ? '끄기' : `±${gapGuardPct}%`}`,
-    `TP: ${tpPct === null ? '끄기' : `+${tpPct}%`}  SL: ${slPct === null ? '끄기' : `-${slPct}%`}`,
+    `갭가드: ${gapGuardPct === null ? '끄기' : `±${gapGuardPct}%`}` +
+      ` · TP: ${tpPct === null ? '끄기' : `+${tpPct}%`}` +
+      ` · SL: ${slPct === null ? '끄기' : `-${slPct}%`}`,
     '',
-    `<code>/confirm ${reservationId}</code>  또는  <code>/cancel ${reservationId}</code>`,
+    `⌛ 확정 만료: ${ttl}`,
+    `<code>/확정 ${reservationId}</code>  또는  <code>/취소 ${reservationId}</code>`,
   ].filter(Boolean);
 
   return { kind: 'proposal', summary: lines.join('\n'), intentId: reservationId };

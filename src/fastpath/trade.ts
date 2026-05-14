@@ -13,9 +13,10 @@ import {
   listWatchlist,
 } from '../db/repo.js';
 import { callKisApi, placeOrder } from '../mcp/kis.js';
-import { firstOutput, num, outputDict, outputList, parseMcpResult } from './extract.js';
+import { firstOutput, fmtTtl, num, outputList, parseMcpResult } from './extract.js';
 import { resolveSymbol, type ResolvedSymbol } from './symbol.js';
-import { formatKst, nextMarketOpen } from '../scheduler/calendar.js';
+import { formatKst, getMarketSession, nextMarketOpen, sessionLabel } from '../scheduler/calendar.js';
+import type { OrderType } from '../mcp/kis.js';
 import { getConfig } from '../config.js';
 
 // ============================================================
@@ -212,15 +213,18 @@ export async function buildBuyConfirmAndRegister(args: {
     ttlMin: cfg.INTENT_TTL_MIN,
   });
 
+  const ttl = fmtTtl(Date.now() + cfg.INTENT_TTL_MIN * 60 * 1000);
   const lines = [
     '📝 <b>매수 예약 확인</b>',
     `종목: ${sym.name} (${sym.code})`,
     curPrice && curPrice > 0 ? `현재가: ${curPrice.toLocaleString()}원 (참고)` : '',
     estimateLine,
     `전략: 시가매매 — ${formatKst(fireAt)} 시장가`,
-    `갭가드: ${gapGuardPct === null ? '끄기' : `±${gapGuardPct}%`}`,
-    `TP: ${tpPct === null ? '끄기' : `+${tpPct}%`}  SL: ${slPct === null ? '끄기' : `-${slPct}%`}`,
+    `갭가드: ${gapGuardPct === null ? '끄기' : `±${gapGuardPct}%`}` +
+      ` · TP: ${tpPct === null ? '끄기' : `+${tpPct}%`}` +
+      ` · SL: ${slPct === null ? '끄기' : `-${slPct}%`}`,
     '',
+    `⌛ 확정 만료: ${ttl}`,
     `<code>/확정 ${reservationId}</code>  또는  <code>/취소 ${reservationId}</code>`,
   ].filter(Boolean);
 
@@ -346,13 +350,40 @@ export async function executeSell(args: {
     return { ok: false, text: `❌ 잘못된 수량: ${qty}주 (보유 ${h.qty}주)` };
   }
 
+  // 세션별 ord_dvsn 결정 — 정규장 외엔 시간외 단가 매핑
+  const session = getMarketSession();
+  const sLabel = sessionLabel(session);
+  if (session === 'closed' || session === 'holiday') {
+    return {
+      ok: false,
+      text:
+        `🔴 ${sLabel.label} — 매도 불가\n` +
+        `${h.name} ${qty}주 매도는 정규장/시간외 거래 시간에 다시 시도해 주세요.`,
+    };
+  }
+  let orderType: OrderType = 'market';
+  let price: number | undefined;
+  let typeLabel = '시장가';
+  if (session === 'pre_extended') {
+    orderType = 'pre_extended';
+    typeLabel = '장전 시간외 종가';
+  } else if (session === 'post_extended') {
+    orderType = 'post_extended';
+    typeLabel = '장후 시간외 종가';
+  } else if (session === 'after_single') {
+    orderType = 'after_single';
+    price = h.curPrice;
+    typeLabel = '시간외 단일가 (현재가)';
+  }
+
   try {
     const result = await placeOrder({
       market: 'KRX',
       side: 'sell',
       code: args.code,
       quantity: qty,
-      orderType: 'market',
+      orderType,
+      price,
     });
     const ext = (obj: unknown, ...keys: string[]): string | undefined => {
       if (!obj || typeof obj !== 'object') return undefined;
@@ -374,8 +405,8 @@ export async function executeSell(args: {
     return {
       ok: true,
       text:
-        `📤 <b>매도 주문 접수</b>\n` +
-        `${h.name} (${h.code}) ${qty}주 시장가\n` +
+        `📤 <b>매도 주문 접수</b> ${sLabel.icon} ${sLabel.label}\n` +
+        `${h.name} (${h.code}) ${qty}주 ${typeLabel}\n` +
         `주문번호: ${orderId}`,
     };
   } catch (err) {

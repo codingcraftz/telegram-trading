@@ -1,7 +1,9 @@
-// 잔고/보유 종목 fast-path. LLM 호출 없이 MCP만으로 응답.
+// 잔고/보유 종목 fast-path. KIS inquire_balance 한 번 호출로 요약 + 보유 종목 + 인라인 액션을 제공.
 
+import { InlineKeyboard } from 'grammy';
 import { callKisApi } from '../mcp/kis.js';
-import { fmtKrw, fmtNum, num, outputDict, outputList, parseMcpResult } from './extract.js';
+import { getMarketSession, sessionLabel } from '../scheduler/calendar.js';
+import { checkKisOk, fmtKrw, fmtNum, num, outputDict, outputList, parseMcpResult } from './extract.js';
 
 // STT 공백 변형 대응을 위해 normalize 후 키워드 매칭
 function normalize(s: string): string {
@@ -28,17 +30,40 @@ export function tryMatchBalance(text: string): boolean {
   );
 }
 
-export async function handleBalance(): Promise<string> {
+function nowKstShort(): string {
+  const kst = new Date(Date.now() + 9 * 3600 * 1000);
+  const yyyy = kst.getUTCFullYear();
+  const mm = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(kst.getUTCDate()).padStart(2, '0');
+  const HH = String(kst.getUTCHours()).padStart(2, '0');
+  const MI = String(kst.getUTCMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${HH}:${MI} KST`;
+}
+
+export async function buildBalanceView(): Promise<{ text: string; kb: InlineKeyboard }> {
   const res = await callKisApi('domestic_stock', 'inquire_balance', {});
   const parsed = parseMcpResult(res);
   if (!parsed.success) {
-    return `❌ 잔고 조회 실패: ${parsed.error ?? '알 수 없는 오류'}`;
+    return {
+      text: `❌ 잔고 조회 실패: ${parsed.error ?? '알 수 없는 오류'}`,
+      kb: new InlineKeyboard(),
+    };
+  }
+  const kisOk = checkKisOk(parsed);
+  if (!kisOk.ok) {
+    return {
+      text: `❌ 잔고 조회 실패 (KIS)\n${kisOk.message ?? '알 수 없는 오류'}`,
+      kb: new InlineKeyboard().text('📊 포지션', 'nav:positions').text('📋 대기', 'nav:orders'),
+    };
   }
 
   const holdings = outputList(parsed, 'output1');
   const summary = outputDict(parsed, 'output2');
+  const session = getMarketSession();
+  const sLabel = sessionLabel(session);
 
   const lines: string[] = [];
+  lines.push(`💰 <b>계좌 요약</b> · ${nowKstShort()} · ${sLabel.icon} ${sLabel.label}`);
 
   if (summary) {
     const totEvlu = num(summary.tot_evlu_amt); // 총평가
@@ -49,7 +74,6 @@ export async function handleBalance(): Promise<string> {
     const pflsRt = num(summary.asst_icdc_erng_rt); // 자산증감수익률
     const d2 = num(summary.nxdy_excc_amt); // 익일정산금액
 
-    lines.push(`💰 <b>계좌 요약</b>`);
     if (dnca !== null) lines.push(`예수금: ${fmtKrw(dnca)}`);
     if (totEvlu !== null) lines.push(`총 평가: ${fmtKrw(totEvlu)}`);
     if (evluSmt !== null && pchsSmt !== null) {
@@ -61,12 +85,15 @@ export async function handleBalance(): Promise<string> {
       lines.push(`평가손익: <b>${sign}${Math.round(pflsSmt).toLocaleString()}원</b>${rtTxt}`);
     }
     if (d2 !== null) lines.push(`익일정산: ${fmtKrw(d2)}`);
-    lines.push('');
   }
 
+  const kb = new InlineKeyboard();
+
   if (holdings.length === 0) {
+    lines.push('');
     lines.push('보유 종목 없음');
   } else {
+    lines.push('');
     lines.push(`📈 <b>보유 종목 ${holdings.length}개</b>`);
     for (const h of holdings) {
       const code = String(h.pdno ?? '');
@@ -82,8 +109,17 @@ export async function handleBalance(): Promise<string> {
           `   매입 ${fmtKrw(avg)} → 현재 ${fmtKrw(cur)}\n` +
           `   손익 ${sign}${Math.round(pfls).toLocaleString()}원 (${sign}${pflsRt.toFixed(2)}%)`,
       );
+      kb.text(`📤 ${name}`, `bal:sell:${code}`).text('📈 차트', `bal:chart:${code}`).row();
     }
   }
 
-  return lines.join('\n');
+  kb.text('📊 포지션', 'nav:positions').text('📋 대기', 'nav:orders');
+
+  return { text: lines.join('\n'), kb };
+}
+
+// 하위 호환 — 텍스트만 필요한 곳용
+export async function handleBalance(): Promise<string> {
+  const v = await buildBalanceView();
+  return v.text;
 }

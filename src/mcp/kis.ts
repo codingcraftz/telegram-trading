@@ -102,22 +102,47 @@ export async function getBalance(market: Market): Promise<unknown> {
 // ============================================================
 // 주문
 // ============================================================
+// orderType → KIS ord_dvsn 매핑
+//   limit         → 00 (지정가)
+//   market        → 01 (시장가)
+//   pre_extended  → 05 (장전 시간외 종가, 08:30~08:40)
+//   post_extended → 06 (장후 시간외 종가, 15:40~16:00)
+//   after_single  → 07 (시간외 단일가, 16:00~18:00)
+export type OrderType = 'limit' | 'market' | 'pre_extended' | 'post_extended' | 'after_single';
+
+const ORDER_TYPE_TO_DVSN: Record<OrderType, string> = {
+  limit: '00',
+  market: '01',
+  pre_extended: '05',
+  post_extended: '06',
+  after_single: '07',
+};
+
 export async function placeOrder(args: {
   market: Market;
   side: 'buy' | 'sell';
   code: string;
   quantity: number;
-  orderType: 'limit' | 'market';
+  orderType: OrderType;
   price?: number;
 }): Promise<unknown> {
   if (isDomestic(args.market)) {
+    const ordDvsn = ORDER_TYPE_TO_DVSN[args.orderType];
+    // ord_unpr 전송 규칙:
+    //   market(01)        → 0
+    //   limit(00)         → price
+    //   pre_extended(05)  → 0 (전일 종가 자동)
+    //   post_extended(06) → 0 (당일 종가 자동)
+    //   after_single(07)  → price 필수 (10분 단위 단일가)
+    const ordUnpr =
+      args.orderType === 'limit' || args.orderType === 'after_single' ? args.price ?? 0 : 0;
     return callKisApi('domestic_stock', 'order_cash', {
-      ord_dv: args.side, // 'buy' | 'sell'
+      ord_dv: args.side,
       pdno: args.code,
       ord_qty: String(args.quantity),
-      ord_unpr: String(args.orderType === 'limit' ? args.price ?? 0 : 0),
-      ord_dvsn: args.orderType === 'limit' ? '00' : '01', // 00=지정가, 01=시장가
-      excg_id_dvsn_cd: 'KRX', // 필수: KRX | NXT | SOR
+      ord_unpr: String(ordUnpr),
+      ord_dvsn: ordDvsn,
+      excg_id_dvsn_cd: 'KRX',
     });
   }
   // 해외: 시장가는 거래소·상품별로 다름. v1은 지정가 위주.
@@ -128,6 +153,28 @@ export async function placeOrder(args: {
     ord_dv: args.side,
     ord_qty: String(args.quantity),
     ord_unpr: String(args.price ?? 0),
+  });
+}
+
+// ============================================================
+// 미체결 취소 (국내만). inquire_daily_ccld의 row에서 ord_gno_brno/odno/ord_qty/ord_dvsn 그대로 사용.
+// rvse_cncl_dvsn_cd: '01'=정정, '02'=취소. qty_all_ord_yn='Y'면 잔량 전부 취소.
+// ============================================================
+export async function cancelKrxOrder(args: {
+  orgno: string;
+  odno: string;
+  qty?: number;
+  ordDvsn?: string;
+}): Promise<unknown> {
+  return callKisApi('domestic_stock', 'order_rvsecncl', {
+    krx_fwdg_ord_orgno: args.orgno,
+    orgn_odno: args.odno,
+    ord_dvsn: args.ordDvsn ?? '00',
+    rvse_cncl_dvsn_cd: '02',
+    ord_qty: String(args.qty ?? 0),
+    ord_unpr: '0',
+    qty_all_ord_yn: 'Y',
+    excg_id_dvsn_cd: 'KRX',
   });
 }
 

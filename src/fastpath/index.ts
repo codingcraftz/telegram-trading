@@ -12,9 +12,11 @@ import { handlePsbl, tryMatchPsbl } from './psbl.js';
 import { handleRanking, tryMatchRanking } from './ranking.js';
 import { handleSell, tryMatchSell } from './sell.js';
 
+import type { InlineKeyboard } from 'grammy';
+
 export type FastResult =
   | { kind: 'text'; text: string }
-  | { kind: 'proposal'; summary: string; intentId: string }
+  | { kind: 'proposal'; summary: string; intentId: string; kb?: InlineKeyboard }
   | null;
 
 export async function tryFastPath(chatId: number, text: string): Promise<FastResult> {
@@ -25,7 +27,8 @@ export async function tryFastPath(chatId: number, text: string): Promise<FastRes
   if (buyM) {
     try {
       const r = await handleBuy(chatId, buyM);
-      return r.kind === 'reply' ? { kind: 'text', text: r.text } : r;
+      if (r.kind === 'reply') return { kind: 'text', text: r.text };
+      return { kind: 'proposal', summary: r.summary, intentId: r.intentId, kb: r.kb };
     } catch (err) {
       return { kind: 'text', text: `❌ 매수 처리 오류: ${(err as Error).message}` };
     }

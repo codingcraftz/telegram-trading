@@ -22,7 +22,11 @@ export type OrderSpec = {
   market: string; // 'KRX' | 'NASDAQ' | ...
   symbol_code: string;
   symbol_name: string;
-  order_type: 'limit' | 'market';
+  // limit/market = 정규장 기본
+  // pre_extended (08:30~08:40 전일 종가, ord_dvsn=05)
+  // post_extended (15:40~16:00 당일 종가, ord_dvsn=06)
+  // after_single (16:00~18:00 시간외 단일가, ord_dvsn=07)
+  order_type: 'limit' | 'market' | 'pre_extended' | 'post_extended' | 'after_single';
   price?: number;
   quantity: number;
   tp_pct?: number | null;
@@ -69,6 +73,22 @@ export function markIntentConsumed(id: string) {
     .set({ consumedAt: Date.now() })
     .where(eq(pendingIntents.id, id))
     .run();
+}
+
+// 현재 확정/취소 대기 중(미소비 + 미만료)인 즉시 주문 제안 — /대기 통합 뷰용.
+export function listChatPendingIntents(chatId: number) {
+  const now = Date.now();
+  return getDb()
+    .select()
+    .from(pendingIntents)
+    .where(
+      and(
+        eq(pendingIntents.chatId, chatId),
+        isNull(pendingIntents.consumedAt),
+        sql`${pendingIntents.expiresAt} > ${now}`,
+      ),
+    )
+    .all();
 }
 
 // ---------- positions ----------
@@ -396,6 +416,20 @@ export function attachPositionToReservation(id: string, positionId: string) {
   getRawSqlite()
     .prepare(`UPDATE market_open_reservations SET position_id = ? WHERE id = ?`)
     .run(positionId, id);
+}
+
+// 휴장일/임시휴장 등으로 발사 거부됐을 때 다음 영업일로 재예약.
+// state는 'pending' 그대로, scheduled_for만 갱신.
+// 일단 fired 클레임이 됐다면 state='fired' → 'pending'으로 되돌림 + scheduled_for 갱신.
+export function rescheduleReservation(id: string, newScheduledFor: number): number {
+  const r = getRawSqlite()
+    .prepare(
+      `UPDATE market_open_reservations
+       SET state = 'pending', scheduled_for = ?, fired_at = NULL, reject_reason = NULL
+       WHERE id = ? AND state IN ('pending','fired','rejected')`,
+    )
+    .run(newScheduledFor, id);
+  return r.changes;
 }
 
 export function expireOldAwaitingReservations() {

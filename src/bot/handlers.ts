@@ -3,7 +3,6 @@ import { InlineKeyboard, Keyboard } from 'grammy';
 import { getConfig } from '../config.js';
 import {
   listChatPositions,
-  listChatReservations,
   loadPendingIntent,
   markIntentConsumed,
   logTrade,
@@ -16,10 +15,13 @@ import { formatKst } from '../scheduler/calendar.js';
 import { placeBuyOrder, pollFill } from '../execution/order.js';
 import { closePosition } from '../execution/close.js';
 import { placeOrder, type Market } from '../mcp/kis.js';
-import { getBalance } from '../mcp/kis.js';
 // KIS는 REST 직접 호출 (MCP 제거됨)
 import { tryFastPath } from '../fastpath/index.js';
-import { handleBalance } from '../fastpath/balance.js';
+import { buildBalanceView } from '../fastpath/balance.js';
+import { buildPositionsView } from '../fastpath/positions.js';
+import { buildOrdersView } from '../fastpath/orders.js';
+import { cancelKrxOrder } from '../mcp/kis.js';
+import { parseMcpResult } from '../fastpath/extract.js';
 import {
   handleMarketOpenCommand,
   handleMarketOpenReserve,
@@ -87,63 +89,43 @@ function whitelistMiddleware() {
 const MAIN_KEYBOARD = new Keyboard()
   .text('⭐ 관심종목').text('💵 잔고').row()
   .text('🧩 전략').text('💼 거래').row()
-  .text('📊 포지션').text('📈 차트').row()
-  .text('📖 도움말')
+  .text('📊 포지션').text('📋 대기').row()
+  .text('📈 차트').text('📖 도움말')
   .resized()
   .persistent();
 
 const HELP = `🤖 KIS 한글 매매 봇
 
-⚡ 즉시 주문:
+⚡ 즉시 주문 (정규장):
   "삼성전자 5주 매수" / "삼성전자 10만원어치 매수"
   "삼성전자 전량 매도"
+  ※ 장 외/시간외 시간엔 옵션 메시지로 선택지 제공
 
-💼 거래 (메인 키보드):
-  [💼 거래] → 매수/매도 → 종목 → 전략 → 금액 → 확정
-  매수 전략: 시가매매 (다음 영업일 9:00:05 시장가)
-  매도: 시장가 즉시
-  /시가매매 set gap=5 tp=5 sl=3      - 갭가드/TP/SL 셋팅 갱신
+📅 다음 날 시가매매 예약:
+  "삼성전자 시가매매 10주" · "150만원" · "20%"
+  /시가매매 set gap=5 tp=5 sl=3   - 갭가드/TP/SL 갱신
+
+📊 내 자산 보기:
+  💵 잔고  — 계좌 전체 보유 종목 + 현재가/손익
+  📊 포지션 — 봇이 만든 거래 (TP/SL 추적)
+  📋 대기  — 미체결 + 시가매매 예약 + 즉시주문 대기 통합
+  📈 차트  — PNG (1m/5m/15m/1h/4h/1d)
 
 ⭐ 관심종목:
-  /관심종목                          - 목록 (번호 매김)
-  /관심종목추가 삼성전자             - 추가 (여러 후보면 버튼)
-  /관심종목제거 1, 2                 - 번호로 일괄 제거
-
-📈 차트 (PNG):
-  "삼성전자 5분봉" / "005930 1분봉" / "삼성전자 차트"
-
-📊 조회:
-  "삼성전자 현재가" / "삼성전자 호가" / "내 잔고" / "예수금" / "미체결"
-  "거래량 순위" / "상승률 top" / "시가총액 순위"
+  /관심종목                  - 목록
+  /관심종목추가 삼성전자     - 추가 (여러 후보면 버튼)
+  /관심종목제거 1, 2         - 번호로 일괄 제거
 
 📋 명령:
-  /도움말 - 이 도움말
-  /상태 - 봇 상태
-  /모의투자 - 모의 모드
-  /실전 - 실전 모드
-  /잔고 - 잔고 조회
-  /포지션 - 보유 포지션
-  /예약 - 예약 목록
-  /확정 <id> - 제안 확정
-  /취소 <id> - 제안 취소
-  /청산 <position_id> - 포지션 청산
+  /도움말 /상태 /모의투자 /실전
+  /잔고 /포지션 /대기 /예약
+  /확정 <id>  /취소 <id>  /청산 <position_id>
+
+🔖 아이콘 컨벤션:
+  ✅성공  ❌실패  ⌛만료  ⏳처리중
+  📨접수  📤매도  📥매수  🎯TP  🛑SL  ✋수동  📅예약
 
 ⚠️ 주문은 /확정 받기 전까진 실행되지 않습니다.`;
-
-const MARKET_FROM_INPUT: Record<string, Market> = {
-  krx: 'KRX',
-  국내: 'KRX',
-  nasdaq: 'NASDAQ',
-  나스닥: 'NASDAQ',
-  nyse: 'NYSE',
-  amex: 'AMEX',
-  tse: 'TSE',
-  hkex: 'HKEX',
-  sse: 'SSE',
-  szse: 'SZSE',
-  hnx: 'HNX',
-  hsx: 'HSX',
-};
 
 export function registerHandlers(bot: Bot) {
   bot.use(whitelistMiddleware());
@@ -190,55 +172,30 @@ export function registerHandlers(bot: Bot) {
   });
 
   bot.command('balance', async (ctx) => {
-    const arg = ctx.match?.trim().toLowerCase() ?? '';
-    const market = (MARKET_FROM_INPUT[arg] || 'KRX') as Market;
     try {
-      const res = await getBalance(market);
-      const text = JSON.stringify(res, null, 2).slice(0, 3500);
-      await ctx.reply(`잔고 (${market}):\n<pre>${text}</pre>`, { parse_mode: 'HTML' });
+      const v = await buildBalanceView();
+      await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
     } catch (err) {
       await ctx.reply(`❌ 잔고 조회 실패: ${(err as Error).message}`);
     }
   });
 
-  bot.command('reservations', async (ctx) => {
-    const list = listChatReservations(ctx.chat!.id, ['awaiting_confirm', 'pending']);
-    if (list.length === 0) {
-      await ctx.reply('예약 없음');
-      return;
+  bot.command(['reservations', 'orders', 'pending'], async (ctx) => {
+    try {
+      const v = await buildOrdersView(ctx.chat!.id);
+      await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+    } catch (err) {
+      await ctx.reply(`❌ 대기 조회 실패: ${(err as Error).message}`);
     }
-    const lines = list.map((r) => {
-      const qty =
-        r.qtyMode === 'shares'
-          ? `${r.qtyValue}주`
-          : r.qtyMode === 'amount'
-            ? `${r.qtyValue.toLocaleString()}원`
-            : `${r.qtyValue}%`;
-      const stateLabel = r.state === 'awaiting_confirm' ? '확인대기' : '예약';
-      return (
-        `• [${stateLabel}] ${r.symbolName} (${r.symbolCode}) ${qty}\n` +
-        `  발주: ${formatKst(new Date(r.scheduledFor))}\n` +
-        `  id: ${r.id}`
-      );
-    });
-    await ctx.reply(lines.join('\n\n'));
   });
 
   bot.command('positions', async (ctx) => {
-    const list = listChatPositions(ctx.chat!.id);
-    if (list.length === 0) {
-      await ctx.reply('보유/대기 포지션 없음');
-      return;
+    try {
+      const v = await buildPositionsView(ctx.chat!.id);
+      await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+    } catch (err) {
+      await ctx.reply(`❌ 포지션 조회 실패: ${(err as Error).message}`);
     }
-    const lines = list.map(
-      (p) =>
-        `• [${p.state}] ${p.symbolName} (${p.market}/${p.symbolCode}) ${p.quantity}주` +
-        (p.avgPrice ? ` @ ${p.avgPrice.toLocaleString()}` : '') +
-        ` (id: ${p.id})` +
-        (p.tpPrice ? `\n   TP ${p.tpPrice.toLocaleString()}` : '') +
-        (p.slPrice ? ` / SL ${p.slPrice.toLocaleString()}` : ''),
-    );
-    await ctx.reply(lines.join('\n'));
   });
 
   // 텍스트 응답으로 confirm/cancel 처리 (callback과 공통)
@@ -843,6 +800,147 @@ export function registerHandlers(bot: Bot) {
     } catch {}
   });
 
+  // ===== 잔고/포지션 화면 인라인 액션 =====
+
+  // 잔고 화면 → [📊 포지션] / [📋 대기] 단축
+  bot.callbackQuery('nav:balance', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const v = await buildBalanceView();
+      try {
+        await ctx.editMessageText(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+      } catch {
+        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+      }
+    } catch (err) {
+      await ctx.reply(`❌ 잔고 조회 실패: ${(err as Error).message}`);
+    }
+  });
+
+  bot.callbackQuery('nav:positions', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    try {
+      const v = await buildPositionsView(ctx.chat!.id);
+      try {
+        await ctx.editMessageText(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+      } catch {
+        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+      }
+    } catch (err) {
+      await ctx.reply(`❌ 포지션 조회 실패: ${(err as Error).message}`);
+    }
+  });
+
+  // nav:orders / od:refresh — 통합 대기 뷰
+  async function renderOrdersView(ctx: Context) {
+    try {
+      const v = await buildOrdersView(ctx.chat!.id);
+      try {
+        await ctx.editMessageText(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+      } catch {
+        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+      }
+    } catch (err) {
+      await ctx.reply(`❌ 대기 조회 실패: ${(err as Error).message}`);
+    }
+  }
+  bot.callbackQuery('nav:orders', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await renderOrdersView(ctx);
+  });
+  bot.callbackQuery('od:refresh', async (ctx) => {
+    await ctx.answerCallbackQuery('새로고침');
+    await renderOrdersView(ctx);
+  });
+
+  // KIS 미체결 취소
+  bot.callbackQuery(/^kis:cx:(\w+):(\w+):(\w+)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^kis:cx:(\w+):(\w+):(\w+)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const [, orgno, odno, ordDvsn] = m;
+    await ctx.answerCallbackQuery('취소 요청 중…');
+    try {
+      const res = await cancelKrxOrder({ orgno: orgno!, odno: odno!, ordDvsn });
+      const parsed = parseMcpResult(res);
+      const raw = parsed.raw ?? {};
+      const rtCd = (raw as Record<string, unknown>).rt_cd;
+      const msg = String((raw as Record<string, unknown>).msg1 ?? '');
+      if (rtCd === '0' || rtCd === undefined) {
+        await ctx.reply(`✅ 주문취소 요청 성공 (#${odno})${msg ? `\n${msg}` : ''}`);
+      } else {
+        await ctx.reply(`❌ 주문취소 실패 (#${odno}): ${msg || 'rt_cd=' + rtCd}`);
+      }
+      await renderOrdersView(ctx);
+    } catch (err) {
+      await ctx.reply(`❌ 주문취소 실패: ${(err as Error).message}`);
+    }
+  });
+
+  // 포지션/잔고 종목별 매도 — 매도 수량 메뉴로 진입 (tr:ss 로직 재사용)
+  bot.callbackQuery(/^(pos|bal):sell:(\d{6})$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^(pos|bal):sell:(\d{6})$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const code = m[2]!;
+    await ctx.answerCallbackQuery();
+    try {
+      const r = await buildSellQtyMenu(code);
+      if ('error' in r) {
+        await ctx.reply(`❌ ${r.error}`);
+        return;
+      }
+      await ctx.reply(r.text, { reply_markup: r.kb, parse_mode: 'HTML' });
+    } catch (err) {
+      await ctx.reply(`❌ 매도 수량 메뉴 실패: ${(err as Error).message}`);
+    }
+  });
+
+  // 포지션/잔고 종목별 차트 — 1d 디폴트
+  bot.callbackQuery(/^(pos|bal):chart:(\d{6})$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^(pos|bal):chart:(\d{6})$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const code = m[2]!;
+    await ctx.answerCallbackQuery('차트 생성 중…');
+    try {
+      const r = await handleChart({ sym: code, interval: '1d' });
+      if (typeof r === 'string') {
+        await ctx.reply(r);
+      } else {
+        await ctx.replyWithPhoto(new InputFile(r.png, 'chart.png'), { caption: r.caption });
+      }
+    } catch (err) {
+      await ctx.reply(`❌ 차트 생성 실패: ${(err as Error).message}`);
+    }
+  });
+
+  // 포지션 청산
+  bot.callbackQuery(/^pos:close:([\w-]+)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^pos:close:([\w-]+)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const positionId = m[1]!;
+    await ctx.answerCallbackQuery('청산 중…');
+    try {
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+    } catch {}
+    await ctx.reply('⏳ 청산 중…');
+    try {
+      await closePosition({ positionId, reason: 'manual' });
+    } catch (err) {
+      await ctx.reply(`❌ 청산 실패: ${(err as Error).message}`);
+    }
+  });
+
   async function handleText(ctx: Context, text: string) {
     await ctx.replyWithChatAction('typing');
     const chatId = ctx.chat!.id;
@@ -959,49 +1057,28 @@ export function registerHandlers(bot: Bot) {
       await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
       return;
     }
-    if (cleaned === '예약') {
-      const list = listChatReservations(chatId, ['awaiting_confirm', 'pending']);
-      if (list.length === 0) {
-        await ctx.reply('예약 없음');
-        return;
+    if (cleaned === '예약' || cleaned === '대기') {
+      try {
+        const v = await buildOrdersView(chatId);
+        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+      } catch (err) {
+        await ctx.reply(`❌ 대기 조회 실패: ${(err as Error).message}`);
       }
-      const lines = list.map((r) => {
-        const qty =
-          r.qtyMode === 'shares'
-            ? `${r.qtyValue}주`
-            : r.qtyMode === 'amount'
-              ? `${r.qtyValue.toLocaleString()}원`
-              : `${r.qtyValue}%`;
-        const stateLabel = r.state === 'awaiting_confirm' ? '확인대기' : '예약';
-        return (
-          `• [${stateLabel}] ${r.symbolName} (${r.symbolCode}) ${qty}\n` +
-          `  발주: ${formatKst(new Date(r.scheduledFor))}\n` +
-          `  id: ${r.id}`
-        );
-      });
-      await ctx.reply(lines.join('\n\n'));
       return;
     }
     if (cleaned === '포지션') {
-      const list = listChatPositions(chatId);
-      if (list.length === 0) {
-        await ctx.reply('보유/대기 포지션 없음');
-        return;
+      try {
+        const v = await buildPositionsView(chatId);
+        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+      } catch (err) {
+        await ctx.reply(`❌ 포지션 조회 실패: ${(err as Error).message}`);
       }
-      const lines = list.map(
-        (p) =>
-          `• [${p.state}] ${p.symbolName} (${p.market}/${p.symbolCode}) ${p.quantity}주` +
-          (p.avgPrice ? ` @ ${p.avgPrice.toLocaleString()}` : '') +
-          ` (id: ${p.id})` +
-          (p.tpPrice ? `\n   TP ${p.tpPrice.toLocaleString()}` : '') +
-          (p.slPrice ? ` / SL ${p.slPrice.toLocaleString()}` : ''),
-      );
-      await ctx.reply(lines.join('\n'));
       return;
     }
     if (cleaned === '잔고') {
       try {
-        await ctx.reply(await handleBalance(), { parse_mode: 'HTML' });
+        const v = await buildBalanceView();
+        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
       } catch (err) {
         await ctx.reply(`❌ 잔고 조회 실패: ${(err as Error).message}`);
       }
@@ -1051,10 +1128,12 @@ export function registerHandlers(bot: Bot) {
       if (fast) {
         console.log('[bot] fastpath hit:', fast.kind);
         if (fast.kind === 'proposal') {
-          const kb = new InlineKeyboard()
-            .text('✅ 실행', `confirm:${fast.intentId}`)
-            .text('❌ 취소', `cancel:${fast.intentId}`);
-          await ctx.reply(fast.summary, { reply_markup: kb });
+          const kb =
+            fast.kb ??
+            new InlineKeyboard()
+              .text('✅ 실행', `confirm:${fast.intentId}`)
+              .text('❌ 취소', `cancel:${fast.intentId}`);
+          await ctx.reply(fast.summary, { reply_markup: kb, parse_mode: 'HTML' });
         } else {
           await ctx.reply(fast.text, { parse_mode: 'HTML' });
         }
@@ -1118,54 +1197,34 @@ export function registerHandlers(bot: Bot) {
       return true;
     }
     if ((arg = tryPrefix('/잔고')) !== null) {
-      const market = (MARKET_FROM_INPUT[arg.toLowerCase()] || 'KRX') as Market;
       try {
-        const res = await getBalance(market);
-        const t = JSON.stringify(res, null, 2).slice(0, 3500);
-        await ctx.reply(`잔고 (${market}):\n<pre>${t}</pre>`, { parse_mode: 'HTML' });
+        const v = await buildBalanceView();
+        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
       } catch (err) {
         await ctx.reply(`❌ 잔고 조회 실패: ${(err as Error).message}`);
       }
       return true;
     }
     if ((arg = tryPrefix('/포지션')) !== null || (arg = tryPrefix('/보유')) !== null) {
-      const list = listChatPositions(chatId);
-      if (list.length === 0) {
-        await ctx.reply('보유/대기 포지션 없음');
-        return true;
+      try {
+        const v = await buildPositionsView(chatId);
+        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+      } catch (err) {
+        await ctx.reply(`❌ 포지션 조회 실패: ${(err as Error).message}`);
       }
-      const lines = list.map(
-        (p) =>
-          `• [${p.state}] ${p.symbolName} (${p.market}/${p.symbolCode}) ${p.quantity}주` +
-          (p.avgPrice ? ` @ ${p.avgPrice.toLocaleString()}` : '') +
-          ` (id: ${p.id})` +
-          (p.tpPrice ? `\n   TP ${p.tpPrice.toLocaleString()}` : '') +
-          (p.slPrice ? ` / SL ${p.slPrice.toLocaleString()}` : ''),
-      );
-      await ctx.reply(lines.join('\n'));
       return true;
     }
-    if ((arg = tryPrefix('/예약목록')) !== null || (arg = tryPrefix('/예약')) !== null) {
-      const list = listChatReservations(chatId, ['awaiting_confirm', 'pending']);
-      if (list.length === 0) {
-        await ctx.reply('예약 없음');
-        return true;
+    if (
+      (arg = tryPrefix('/대기')) !== null ||
+      (arg = tryPrefix('/예약목록')) !== null ||
+      (arg = tryPrefix('/예약')) !== null
+    ) {
+      try {
+        const v = await buildOrdersView(chatId);
+        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+      } catch (err) {
+        await ctx.reply(`❌ 대기 조회 실패: ${(err as Error).message}`);
       }
-      const lines = list.map((r) => {
-        const qty =
-          r.qtyMode === 'shares'
-            ? `${r.qtyValue}주`
-            : r.qtyMode === 'amount'
-              ? `${r.qtyValue.toLocaleString()}원`
-              : `${r.qtyValue}%`;
-        const stateLabel = r.state === 'awaiting_confirm' ? '확인대기' : '예약';
-        return (
-          `• [${stateLabel}] ${r.symbolName} (${r.symbolCode}) ${qty}\n` +
-          `  발주: ${formatKst(new Date(r.scheduledFor))}\n` +
-          `  id: ${r.id}`
-        );
-      });
-      await ctx.reply(lines.join('\n\n'));
       return true;
     }
     if ((arg = tryPrefix('/시가매매')) !== null) {

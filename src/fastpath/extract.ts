@@ -169,3 +169,34 @@ export function fmtPct(v: unknown, decimals = 2): string {
   const n = num(v);
   return n === null ? '-' : `${n.toFixed(decimals)}%`;
 }
+
+// KIS 응답이 정상(rt_cd='0')인지 + msg1(에러 메시지) 추출.
+// MCP wrapping은 항상 ok:true로 감싸므로, 실제 KIS 실패는 raw.rt_cd로만 식별됨.
+export function checkKisOk(parsed: ParsedMcp): { ok: boolean; message?: string } {
+  if (!parsed.ok || !parsed.raw) return { ok: false, message: 'MCP 응답 파싱 실패' };
+  const raw = parsed.raw;
+  // raw 자체에 rt_cd가 있는 경우 (대부분)
+  let rtCd: unknown = raw.rt_cd;
+  let msg: unknown = raw.msg1 ?? raw.msg;
+  // data 안에 한 번 더 wrap된 경우
+  if (rtCd === undefined && typeof raw.data === 'object' && raw.data) {
+    const d = raw.data as Record<string, unknown>;
+    rtCd = d.rt_cd;
+    msg = d.msg1 ?? d.msg;
+  }
+  if (rtCd === undefined) return { ok: true }; // rt_cd 자체가 없는 응답 (시세 등) → OK 가정
+  return { ok: String(rtCd) === '0', message: typeof msg === 'string' ? msg : undefined };
+}
+
+// "12분", "45초", "1시간 5분", "만료됨" 같은 잔여시간 표시.
+export function fmtTtl(expiresAt: number, now: number = Date.now()): string {
+  const ms = expiresAt - now;
+  if (ms <= 0) return '만료됨';
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}시간 ${m}분`;
+  if (m > 0) return `${m}분 ${s}초`;
+  return `${s}초`;
+}
