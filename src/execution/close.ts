@@ -10,19 +10,48 @@ import { notify } from '../notify/telegram.js';
 import { getConfig } from '../config.js';
 import { placeOrder, checkFill, type Market } from '../mcp/kis.js';
 
+function maybeParseJson(v: unknown): unknown {
+  if (typeof v !== 'string') return v;
+  const t = v.trim();
+  if (!t.startsWith('{') && !t.startsWith('[')) return v;
+  try {
+    return JSON.parse(t);
+  } catch {
+    return v;
+  }
+}
+
 function extract(obj: unknown, ...candidates: string[]): string | undefined {
-  if (!obj || typeof obj !== 'object') return undefined;
+  if (!obj) return undefined;
+  obj = maybeParseJson(obj);
+  if (typeof obj !== 'object') return undefined;
+  const lc = candidates.map((c) => c.toLowerCase());
+  if (Array.isArray(obj)) {
+    for (const it of obj) {
+      const r = extract(it, ...candidates);
+      if (r) return r;
+    }
+    return undefined;
+  }
   const o = obj as Record<string, unknown>;
-  for (const k of candidates) {
-    const v = o[k];
-    if (typeof v === 'string' && v.trim() !== '') return v;
-    if (typeof v === 'number') return String(v);
+  for (const k of Object.keys(o)) {
+    if (lc.includes(k.toLowerCase())) {
+      const v = o[k];
+      if (typeof v === 'string' && v.trim() !== '') return v;
+      if (typeof v === 'number') return String(v);
+    }
   }
   for (const k of Object.keys(o)) {
     const v = o[k];
     if (v && typeof v === 'object') {
       const r = extract(v, ...candidates);
       if (r) return r;
+    } else if (typeof v === 'string') {
+      const parsed = maybeParseJson(v);
+      if (parsed && typeof parsed === 'object') {
+        const r = extract(parsed, ...candidates);
+        if (r) return r;
+      }
     }
   }
   return undefined;
@@ -56,7 +85,8 @@ export async function closePosition(args: {
       price: pos.avgPrice ?? undefined,
     });
     exitOrderId =
-      extract(res, 'odno', 'ord_no', 'order_id', 'orderId') ?? `exit-${Date.now()}`;
+      extract(res, 'ODNO', 'odno', 'ord_no', 'order_id', 'orderId') ??
+      `exit-${Date.now()}`;
   } catch (err) {
     logTrade({
       chatId: pos.chatId,

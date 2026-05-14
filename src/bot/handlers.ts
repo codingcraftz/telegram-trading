@@ -1,17 +1,75 @@
 import type { Bot, Context } from 'grammy';
+import { InlineKeyboard, Keyboard } from 'grammy';
 import { getConfig } from '../config.js';
 import {
   listChatPositions,
+  listChatReservations,
   loadPendingIntent,
   markIntentConsumed,
   logTrade,
+  cancelReservation,
+  confirmReservation,
+  getReservation,
   type OrderSpec,
 } from '../db/repo.js';
-import { processUserMessage } from '../execution/confirm-flow.js';
+import { formatKst } from '../scheduler/calendar.js';
 import { placeBuyOrder, pollFill } from '../execution/order.js';
 import { closePosition } from '../execution/close.js';
-import { getBalance, type Market } from '../mcp/kis.js';
+import { placeOrder, type Market } from '../mcp/kis.js';
+import { getBalance } from '../mcp/kis.js';
 import { getAllTools } from '../mcp/client.js';
+import { tryFastPath } from '../fastpath/index.js';
+import { handleBalance } from '../fastpath/balance.js';
+import {
+  handleMarketOpenCommand,
+  handleMarketOpenReserve,
+  tryMatchMarketOpen,
+} from '../fastpath/market-open.js';
+import {
+  buildChartIntervalMenu,
+  buildChartMainMenu,
+  buildChartSearchPrompt,
+  buildChartSearchResults,
+  handleChart,
+  tryMatchChart,
+} from '../fastpath/chart.js';
+import {
+  buildBuyAmountMenu,
+  buildBuyConfirmAndRegister,
+  buildBuyDirectInputPrompt,
+  buildBuySearchPrompt,
+  buildBuySearchResults,
+  buildBuyStrategyMenu,
+  buildBuySymbolMenu,
+  buildSellQtyMenu,
+  buildSellSymbolMenu,
+  buildTradeMainMenu,
+  executeSell,
+  parseBuyAmount,
+  type BuyAmountSpec,
+} from '../fastpath/trade.js';
+import { getChatMeta } from './state.js';
+import {
+  applyFieldChange,
+  buildEditField,
+  buildMarketOpenStrategyView,
+  buildStrategyAddPlaceholder,
+  buildStrategyMainMenu,
+} from '../fastpath/strategy.js';
+import { InputFile } from 'grammy';
+import {
+  buildWatchlistAddPrompt,
+  buildWatchlistMenu,
+  buildWatchlistRemoveMenu,
+  handleWatchlistAdd,
+  handleWatchlistAddCallback,
+  handleWatchlistRemove,
+  removeWatchlistOne,
+  renderWatchlist,
+} from '../fastpath/watchlist.js';
+import { resolveSymbol, searchSymbolCandidates } from '../fastpath/symbol.js';
+import { clearChatMode, getChatMode, setChatMode } from './state.js';
+import { getMode, setMode } from '../runtime.js';
 
 function whitelistMiddleware() {
   const allowed = new Set(getConfig().ALLOWED_CHAT_IDS);
@@ -25,25 +83,52 @@ function whitelistMiddleware() {
   };
 }
 
-const HELP = `🤖 KIS 자연어 매매 봇
+// 메인 단축 버튼. /시작, /도움말 호출 시 같이 보냄.
+const MAIN_KEYBOARD = new Keyboard()
+  .text('⭐ 관심종목').text('💵 잔고').row()
+  .text('🧩 전략').text('💼 거래').row()
+  .text('📊 포지션').text('📈 차트').row()
+  .text('📖 도움말')
+  .resized()
+  .persistent();
 
-자연어 매매:
-  "삼성전자 지금호가 3개 아래 매수, TP 5% SL 3%, 시드 10%"
-  "애플 1000달러어치 사줘"
-  "SK하이닉스 10만원어치 사줘"
-  "내 잔고 알려줘"
-  "삼성전자 현재가"
+const HELP = `🤖 KIS 한글 매매 봇
 
-명령어:
-  /help - 이 도움말
-  /status - 봇 상태 (모드/MCP/포지션 수)
-  /balance [krx|nasdaq|...] - 국내(기본) 또는 해외 잔고
-  /positions - 보유 포지션
-  /confirm <id> - 제안된 주문 실행
-  /cancel <id> - 제안된 주문 취소
-  /close <position_id> - 보유 포지션 청산 (국내=시장가, 해외=지정가 진입가)
+⚡ 즉시 주문:
+  "삼성전자 5주 매수" / "삼성전자 10만원어치 매수"
+  "삼성전자 전량 매도"
 
-⚠️ 주문은 /confirm 받기 전까진 실행되지 않습니다.`;
+💼 거래 (메인 키보드):
+  [💼 거래] → 매수/매도 → 종목 → 전략 → 금액 → 확정
+  매수 전략: 시가매매 (다음 영업일 9:00:05 시장가)
+  매도: 시장가 즉시
+  /시가매매 set gap=5 tp=5 sl=3      - 갭가드/TP/SL 셋팅 갱신
+
+⭐ 관심종목:
+  /관심종목                          - 목록 (번호 매김)
+  /관심종목추가 삼성전자             - 추가 (여러 후보면 버튼)
+  /관심종목제거 1, 2                 - 번호로 일괄 제거
+
+📈 차트 (PNG):
+  "삼성전자 5분봉" / "005930 1분봉" / "삼성전자 차트"
+
+📊 조회:
+  "삼성전자 현재가" / "삼성전자 호가" / "내 잔고" / "예수금" / "미체결"
+  "거래량 순위" / "상승률 top" / "시가총액 순위"
+
+📋 명령:
+  /도움말 - 이 도움말
+  /상태 - 봇 상태
+  /모의투자 - 모의 모드
+  /실전 - 실전 모드
+  /잔고 - 잔고 조회
+  /포지션 - 보유 포지션
+  /예약 - 예약 목록
+  /확정 <id> - 제안 확정
+  /취소 <id> - 제안 취소
+  /청산 <position_id> - 포지션 청산
+
+⚠️ 주문은 /확정 받기 전까진 실행되지 않습니다.`;
 
 const MARKET_FROM_INPUT: Record<string, Market> = {
   krx: 'KRX',
@@ -64,11 +149,11 @@ export function registerHandlers(bot: Bot) {
   bot.use(whitelistMiddleware());
 
   bot.command('start', async (ctx) => {
-    await ctx.reply(HELP);
+    await ctx.reply(HELP, { reply_markup: MAIN_KEYBOARD });
   });
 
   bot.command('help', async (ctx) => {
-    await ctx.reply(HELP);
+    await ctx.reply(HELP, { reply_markup: MAIN_KEYBOARD });
   });
 
   bot.command('status', async (ctx) => {
@@ -78,13 +163,30 @@ export function registerHandlers(bot: Bot) {
     const open = list.filter((p) => p.state === 'open').length;
     const pending = list.filter((p) => p.state === 'pending').length;
     const closing = list.filter((p) => p.state === 'closing').length;
+    const mode = getMode();
     await ctx.reply(
       `📊 상태\n` +
-        `• 모드: ${cfg.MODE} (env_dv=${cfg.MODE === 'paper' ? 'demo' : 'real'})\n` +
-        `• 모델: ${cfg.GEMINI_MODEL}\n` +
+        `• 모드: <b>${mode === 'paper' ? '모의투자(paper)' : '실전(real)'}</b> (env_dv=${mode === 'paper' ? 'demo' : 'real'})\n` +
         `• MCP 도구: ${tools.length}개 (${tools.map((t) => t.name).join(', ')})\n` +
         `• 포지션: open=${open}, pending=${pending}, closing=${closing}\n` +
-        `• 한도: 거래 ${cfg.MAX_TRADE_KRW.toLocaleString()}원 / 보유 ${cfg.MAX_OPEN_POSITIONS}종목 / 일손실 ${cfg.DAILY_LOSS_KRW.toLocaleString()}원`,
+        `• 한도: 거래 ${cfg.MAX_TRADE_KRW.toLocaleString()}원\n` +
+        `\n전환: /모의투자  /라이브계좌`,
+      { parse_mode: 'HTML' },
+    );
+  });
+
+  bot.command(['paper', 'demo'], async (ctx) => {
+    setMode('paper');
+    await ctx.reply('🧪 <b>모의투자 모드</b>로 전환됨 (env_dv=demo)', {
+      parse_mode: 'HTML',
+    });
+  });
+
+  bot.command(['real', 'live'], async (ctx) => {
+    setMode('real');
+    await ctx.reply(
+      '⚠️ <b>실전 모드</b>로 전환됨 (env_dv=real)\n실제 자금 거래입니다. 주의하세요.',
+      { parse_mode: 'HTML' },
     );
   });
 
@@ -98,6 +200,29 @@ export function registerHandlers(bot: Bot) {
     } catch (err) {
       await ctx.reply(`❌ 잔고 조회 실패: ${(err as Error).message}`);
     }
+  });
+
+  bot.command('reservations', async (ctx) => {
+    const list = listChatReservations(ctx.chat!.id, ['awaiting_confirm', 'pending']);
+    if (list.length === 0) {
+      await ctx.reply('예약 없음');
+      return;
+    }
+    const lines = list.map((r) => {
+      const qty =
+        r.qtyMode === 'shares'
+          ? `${r.qtyValue}주`
+          : r.qtyMode === 'amount'
+            ? `${r.qtyValue.toLocaleString()}원`
+            : `${r.qtyValue}%`;
+      const stateLabel = r.state === 'awaiting_confirm' ? '확인대기' : '예약';
+      return (
+        `• [${stateLabel}] ${r.symbolName} (${r.symbolCode}) ${qty}\n` +
+        `  발주: ${formatKst(new Date(r.scheduledFor))}\n` +
+        `  id: ${r.id}`
+      );
+    });
+    await ctx.reply(lines.join('\n\n'));
   });
 
   bot.command('positions', async (ctx) => {
@@ -117,62 +242,127 @@ export function registerHandlers(bot: Bot) {
     await ctx.reply(lines.join('\n'));
   });
 
+  // 텍스트 응답으로 confirm/cancel 처리 (callback과 공통)
+  async function runConfirm(chatId: number, id: string): Promise<string> {
+    // 1) 시가매매 예약 우선 (awaiting_confirm 상태인 경우)
+    const reservation = getReservation(id, chatId);
+    if (reservation) {
+      if (reservation.state === 'awaiting_confirm') {
+        if (reservation.expiresAt < Date.now()) {
+          return '⌛ 만료된 예약 제안입니다. 다시 요청해 주세요.';
+        }
+        const ok = confirmReservation(id);
+        if (!ok) return '예약 확정 실패 (이미 처리되었을 수 있음).';
+        return (
+          `📅 시가매매 예약 확정\n` +
+          `${reservation.symbolName} (${reservation.symbolCode}) — ${formatKst(new Date(reservation.scheduledFor))} 발주 예정\n` +
+          `취소: /cancel ${id}`
+        );
+      }
+      return `예약 상태: ${reservation.state} — 추가 처리 불가`;
+    }
+
+    // 2) 즉시 주문 제안 (pendingIntents)
+    const intent = loadPendingIntent(id, chatId);
+    if (!intent) return '해당 제안을 찾을 수 없습니다.';
+    if (intent.consumedAt) return '이미 처리된 제안입니다.';
+    if (intent.expiresAt < Date.now()) return '⌛ 만료된 제안입니다. 다시 요청해 주세요.';
+
+    let spec: OrderSpec;
+    try {
+      spec = JSON.parse(intent.orderSpecJson);
+    } catch {
+      return '제안 데이터 파싱 실패';
+    }
+    markIntentConsumed(id);
+
+    if (spec.action === 'buy') {
+      try {
+        const { positionId, orderId } = await placeBuyOrder({ chatId, spec });
+        pollFill({
+          chatId,
+          positionId,
+          market: spec.market as Market,
+          orderId,
+          expectedQty: spec.quantity,
+        }).catch((err) => console.error('[pollFill] failed', err));
+        return `📨 매수 주문 접수 (#${orderId})\n포지션 ${positionId} · 체결 확인 중…`;
+      } catch (err) {
+        logTrade({ chatId, kind: 'order_error', payload: { error: (err as Error).message } });
+        return `❌ 매수 실패: ${(err as Error).message}`;
+      }
+    }
+
+    // sell
+    try {
+      const result = await placeOrder({
+        market: spec.market as Market,
+        side: 'sell',
+        code: spec.symbol_code,
+        quantity: spec.quantity,
+        orderType: spec.order_type,
+        price: spec.price,
+      });
+      const ext = (obj: unknown, ...keys: string[]): string | undefined => {
+        if (!obj || typeof obj !== 'object') return undefined;
+        const o = obj as Record<string, unknown>;
+        const lc = keys.map((k) => k.toLowerCase());
+        for (const k of Object.keys(o)) {
+          if (lc.includes(k.toLowerCase()) && typeof o[k] === 'string' && (o[k] as string).trim()) {
+            return o[k] as string;
+          }
+        }
+        for (const k of Object.keys(o)) {
+          if (o[k] && typeof o[k] === 'object') {
+            const r = ext(o[k], ...keys);
+            if (r) return r;
+          } else if (typeof o[k] === 'string' && (o[k] as string).startsWith('{')) {
+            try {
+              const r = ext(JSON.parse(o[k] as string), ...keys);
+              if (r) return r;
+            } catch {}
+          }
+        }
+        return undefined;
+      };
+      const orderId = ext(result, 'ODNO', 'odno', 'ord_no') ?? `sell-${Date.now()}`;
+      logTrade({ chatId, kind: 'sell_submitted', payload: { orderId, spec } });
+      return `📤 매도 주문 접수 (#${orderId})\n${spec.symbol_name} ${spec.quantity}주 ${spec.order_type === 'market' ? '시장가' : `${spec.price?.toLocaleString()}원`}`;
+    } catch (err) {
+      logTrade({ chatId, kind: 'order_error', payload: { error: (err as Error).message } });
+      return `❌ 매도 실패: ${(err as Error).message}`;
+    }
+  }
+
+  function runCancel(chatId: number, id: string): string {
+    // 1) 시가매매 예약 우선
+    const reservation = getReservation(id, chatId);
+    if (reservation) {
+      if (
+        reservation.state === 'awaiting_confirm' ||
+        reservation.state === 'pending'
+      ) {
+        const ok = cancelReservation(id);
+        return ok ? '🗑️ 예약 취소됨' : '취소 실패';
+      }
+      return `예약 상태: ${reservation.state} — 추가 처리 불가`;
+    }
+    // 2) 즉시 주문 제안
+    const intent = loadPendingIntent(id, chatId);
+    if (!intent) return '해당 제안을 찾을 수 없습니다.';
+    if (intent.consumedAt) return '이미 처리된 제안입니다.';
+    markIntentConsumed(id);
+    return '🗑️ 제안 취소됨';
+  }
+
   bot.command('confirm', async (ctx) => {
     const id = ctx.match?.trim();
     if (!id) {
       await ctx.reply('사용: /confirm <id>');
       return;
     }
-    const intent = loadPendingIntent(id, ctx.chat!.id);
-    if (!intent) {
-      await ctx.reply('해당 제안을 찾을 수 없습니다.');
-      return;
-    }
-    if (intent.consumedAt) {
-      await ctx.reply('이미 처리된 제안입니다.');
-      return;
-    }
-    if (intent.expiresAt < Date.now()) {
-      await ctx.reply('만료된 제안입니다. 다시 요청해 주세요.');
-      return;
-    }
-    let spec: OrderSpec;
-    try {
-      spec = JSON.parse(intent.orderSpecJson);
-    } catch {
-      await ctx.reply('제안 데이터 파싱 실패');
-      return;
-    }
-
-    if (spec.action !== 'buy') {
-      await ctx.reply('v1은 매수 제안만 /confirm 지원합니다. (매도는 /close 사용)');
-      return;
-    }
-
-    markIntentConsumed(id);
-    await ctx.reply('⏳ 주문 접수 중…');
-
-    try {
-      const { positionId, orderId } = await placeBuyOrder({
-        chatId: ctx.chat!.id,
-        spec,
-      });
-      await ctx.reply(`📨 주문번호 ${orderId} (position: ${positionId})\n체결 폴링 중…`);
-      pollFill({
-        chatId: ctx.chat!.id,
-        positionId,
-        market: spec.market as Market,
-        orderId,
-        expectedQty: spec.quantity,
-      }).catch((err) => console.error('[pollFill] failed', err));
-    } catch (err) {
-      logTrade({
-        chatId: ctx.chat!.id,
-        kind: 'order_error',
-        payload: { error: (err as Error).message },
-      });
-      await ctx.reply(`❌ 주문 실패: ${(err as Error).message}`);
-    }
+    const reply = await runConfirm(ctx.chat!.id, id);
+    await ctx.reply(reply);
   });
 
   bot.command('cancel', async (ctx) => {
@@ -181,17 +371,33 @@ export function registerHandlers(bot: Bot) {
       await ctx.reply('사용: /cancel <id>');
       return;
     }
-    const intent = loadPendingIntent(id, ctx.chat!.id);
-    if (!intent) {
-      await ctx.reply('해당 제안을 찾을 수 없습니다.');
+    await ctx.reply(runCancel(ctx.chat!.id, id));
+  });
+
+  // 인라인 버튼 콜백
+  bot.callbackQuery(/^(confirm|cancel):(.+)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^(confirm|cancel):(.+)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
       return;
     }
-    if (intent.consumedAt) {
-      await ctx.reply('이미 처리된 제안입니다.');
-      return;
-    }
-    markIntentConsumed(id);
-    await ctx.reply('🗑️ 제안 취소됨');
+    const action = m[1] as 'confirm' | 'cancel';
+    const id = m[2]!;
+    const chatId = ctx.chat!.id;
+
+    // 빠른 응답 (인디케이터 해제)
+    await ctx.answerCallbackQuery(action === 'confirm' ? '주문 접수 중…' : '취소 중…');
+
+    const reply =
+      action === 'confirm'
+        ? await runConfirm(chatId, id)
+        : runCancel(chatId, id);
+
+    // 원본 메시지의 버튼 제거 + 결과 표시
+    try {
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+    } catch {}
+    await ctx.reply(reply);
   });
 
   bot.command('close', async (ctx) => {
@@ -208,20 +414,852 @@ export function registerHandlers(bot: Bot) {
     }
   });
 
-  bot.on('message:text', async (ctx) => {
-    const text = ctx.message.text;
-    if (text.startsWith('/')) return;
-    await ctx.replyWithChatAction('typing');
+  // /시가매매 — 셋업 메뉴 / 갱신
+  bot.command(['시가매매', 'marketopen'], async (ctx) => {
+    const reply = await handleMarketOpenCommand(ctx.chat!.id, ctx.match?.trim() ?? '');
+    await ctx.reply(reply, { parse_mode: 'HTML' });
+  });
+
+  // 관심종목
+  bot.command(['관심종목', 'watchlist'], async (ctx) => {
+    await ctx.reply(renderWatchlist(ctx.chat!.id), { parse_mode: 'HTML' });
+  });
+
+  bot.command(['관심종목추가', 'watchlist_add', 'wladd'], async (ctx) => {
+    const r = await handleWatchlistAdd(ctx.chat!.id, ctx.match?.trim() ?? '');
+    if (r.kind === 'choices') {
+      await ctx.reply(r.text, { reply_markup: r.kb, parse_mode: 'HTML' });
+    } else {
+      await ctx.reply(r.text, { parse_mode: 'HTML' });
+    }
+  });
+
+  bot.command(['관심종목제거', 'watchlist_remove', 'wlrm'], async (ctx) => {
+    await ctx.reply(handleWatchlistRemove(ctx.chat!.id, ctx.match?.trim() ?? ''), {
+      parse_mode: 'HTML',
+    });
+  });
+
+  // 관심종목 추가 — 검색 결과 InlineKeyboard 콜백
+  bot.callbackQuery(/^wladd:(\d{6}):(.+)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^wladd:(\d{6}):(.+)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const [, code, name] = m;
+    await ctx.answerCallbackQuery('추가 중…');
+    const text = handleWatchlistAddCallback(ctx.chat!.id, code!, name!);
     try {
-      const out = await processUserMessage({ chatId: ctx.chat!.id, text });
-      if (out.kind === 'reply') {
-        await ctx.reply(out.text);
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+    } catch {}
+    await ctx.reply(text, { parse_mode: 'HTML' });
+  });
+
+  // 관심종목 메뉴 callbacks
+  bot.callbackQuery('wlmenu:add', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    setChatMode(ctx.chat!.id, 'awaiting_watchlist_add');
+    const p = buildWatchlistAddPrompt();
+    try {
+      await ctx.editMessageText(p.text, { reply_markup: p.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(p.text, { reply_markup: p.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  bot.callbackQuery('wlmenu:rm', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const m = buildWatchlistRemoveMenu(ctx.chat!.id);
+    try {
+      await ctx.editMessageText(m.text, { reply_markup: m.kb });
+    } catch {
+      await ctx.reply(m.text, { reply_markup: m.kb });
+    }
+  });
+
+  bot.callbackQuery('wlmenu:back', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    clearChatMode(ctx.chat!.id);
+    const m = buildWatchlistMenu(ctx.chat!.id);
+    try {
+      await ctx.editMessageText(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  // ===== 차트 메뉴 callbacks =====
+
+  bot.callbackQuery('chartmenu:search', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    setChatMode(ctx.chat!.id, 'awaiting_chart_symbol');
+    const p = buildChartSearchPrompt();
+    try {
+      await ctx.editMessageText(p.text, { reply_markup: p.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(p.text, { reply_markup: p.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  bot.callbackQuery('chartmenu:back', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    clearChatMode(ctx.chat!.id);
+    const menu = buildChartMainMenu(ctx.chat!.id);
+    try {
+      await ctx.editMessageText(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  // 종목 선택 → 분봉 선택 화면
+  bot.callbackQuery(/^chartpick:(\d{6})$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^chartpick:(\d{6})$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const code = m[1]!;
+    await ctx.answerCallbackQuery();
+    const sym = await resolveSymbol(code);
+    const name = sym?.name ?? code;
+    const menu = buildChartIntervalMenu(code, name);
+    try {
+      await ctx.editMessageText(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  // 분봉 선택 → 차트 PNG
+  bot.callbackQuery(/^chartint:(\d{6}):(1m|5m|15m|1h|4h|1d)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^chartint:(\d{6}):(1m|5m|15m|1h|4h|1d)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const code = m[1]!;
+    const interval = m[2] as '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
+    await ctx.answerCallbackQuery('차트 생성 중…');
+    try {
+      const r = await handleChart({ sym: code, interval });
+      if (typeof r === 'string') {
+        await ctx.reply(r);
       } else {
-        await ctx.reply(out.summary);
+        await ctx.replyWithPhoto(new InputFile(r.png, 'chart.png'), { caption: r.caption });
       }
     } catch (err) {
-      console.error('[message] error', err);
-      await ctx.reply(`❌ 처리 실패: ${(err as Error).message}`);
+      await ctx.reply(`❌ 차트 생성 실패: ${(err as Error).message}`);
     }
+  });
+
+  // ===== 전략 메뉴 callbacks =====
+
+  bot.callbackQuery('st:main', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const m = buildStrategyMainMenu();
+    try {
+      await ctx.editMessageText(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  bot.callbackQuery('st:mo', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const m = buildMarketOpenStrategyView(ctx.chat!.id);
+    try {
+      await ctx.editMessageText(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  bot.callbackQuery('st:add', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const m = buildStrategyAddPlaceholder();
+    try {
+      await ctx.editMessageText(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  bot.callbackQuery(/^st:mo:(gap|tp|sl|trail)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^st:mo:(gap|tp|sl|trail)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    await ctx.answerCallbackQuery();
+    const field = m[1]! as 'gap' | 'tp' | 'sl' | 'trail';
+    const v = buildEditField(field);
+    try {
+      await ctx.editMessageText(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  bot.callbackQuery(/^st:mo:set:(gap|tp|sl|trail):(\d+(?:\.\d+)?|off)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^st:mo:set:(gap|tp|sl|trail):(\d+(?:\.\d+)?|off)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const field = m[1]! as 'gap' | 'tp' | 'sl' | 'trail';
+    const val = m[2]!;
+    const r = applyFieldChange(ctx.chat!.id, field, val);
+    await ctx.answerCallbackQuery(r.ok ? r.message : `❌ ${r.message}`);
+    // 시가매매 화면으로 복귀
+    const view = buildMarketOpenStrategyView(ctx.chat!.id);
+    try {
+      await ctx.editMessageText(view.text, { reply_markup: view.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(view.text, { reply_markup: view.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  // ===== 거래 흐름 callbacks =====
+
+  // [💼 거래] 메인
+  bot.callbackQuery('tr:back', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    clearChatMode(ctx.chat!.id);
+    const m = buildTradeMainMenu();
+    try {
+      await ctx.editMessageText(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  // 매수 진입
+  bot.callbackQuery('tr:buy', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    clearChatMode(ctx.chat!.id);
+    const m = buildBuySymbolMenu(ctx.chat!.id);
+    try {
+      await ctx.editMessageText(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  // 매수 검색
+  bot.callbackQuery('tr:bsearch', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    setChatMode(ctx.chat!.id, 'awaiting_trade_buy_search');
+    const p = buildBuySearchPrompt();
+    try {
+      await ctx.editMessageText(p.text, { reply_markup: p.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(p.text, { reply_markup: p.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  // 매수 종목 선택 → 전략 메뉴
+  bot.callbackQuery(/^tr:bs:(\d{6})$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^tr:bs:(\d{6})$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const code = m[1]!;
+    await ctx.answerCallbackQuery();
+    const sym = await resolveSymbol(code);
+    const name = sym?.name ?? code;
+    const menu = buildBuyStrategyMenu(code, name);
+    try {
+      await ctx.editMessageText(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  // 매수 전략 선택 → 금액 메뉴
+  bot.callbackQuery(/^tr:bstr:(\d{6}):(mo)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^tr:bstr:(\d{6}):(mo)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const [, code, strategy] = m;
+    await ctx.answerCallbackQuery();
+    const sym = await resolveSymbol(code!);
+    const name = sym?.name ?? code!;
+    const menu = buildBuyAmountMenu(code!, name, strategy!);
+    try {
+      await ctx.editMessageText(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  // 매수 금액 (% 비율) 선택 → 예약 등록
+  bot.callbackQuery(/^tr:bamt:(\d{6}):(mo):p(\d+)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^tr:bamt:(\d{6}):(mo):p(\d+)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const [, code, strategy, pctStr] = m;
+    const pct = Number(pctStr);
+    await ctx.answerCallbackQuery('예약 등록 중…');
+    const amount: BuyAmountSpec = { mode: 'percent', value: pct };
+    const r = await buildBuyConfirmAndRegister({
+      chatId: ctx.chat!.id,
+      code: code!,
+      strategy: strategy!,
+      amount,
+    });
+    if ('error' in r) {
+      await ctx.reply(`❌ ${r.error}`);
+      return;
+    }
+    const kb = new InlineKeyboard()
+      .text('✅ 확정', `confirm:${r.reservationId}`)
+      .text('❌ 취소', `cancel:${r.reservationId}`);
+    try {
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+    } catch {}
+    await ctx.reply(r.text, { reply_markup: kb, parse_mode: 'HTML' });
+  });
+
+  // 매수 금액 직접 입력 진입
+  bot.callbackQuery(/^tr:binput:(\d{6}):(mo)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^tr:binput:(\d{6}):(mo)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const [, code, strategy] = m;
+    await ctx.answerCallbackQuery();
+    setChatMode(ctx.chat!.id, 'awaiting_trade_buy_amount', {
+      buyCode: code!,
+      buyStrategy: strategy!,
+    });
+    const sym = await resolveSymbol(code!);
+    const name = sym?.name ?? code!;
+    const p = buildBuyDirectInputPrompt(code!, name, strategy!);
+    try {
+      await ctx.editMessageText(p.text, { reply_markup: p.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(p.text, { reply_markup: p.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  // 매도 진입
+  bot.callbackQuery('tr:sell', async (ctx) => {
+    await ctx.answerCallbackQuery('보유 종목 조회 중…');
+    clearChatMode(ctx.chat!.id);
+    try {
+      const m = await buildSellSymbolMenu();
+      try {
+        await ctx.editMessageText(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+      } catch {
+        await ctx.reply(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+      }
+    } catch (err) {
+      await ctx.reply(`❌ 잔고 조회 실패: ${(err as Error).message}`);
+    }
+  });
+
+  // 매도 종목 선택 → 수량 메뉴
+  bot.callbackQuery(/^tr:ss:(\d{6})$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^tr:ss:(\d{6})$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const code = m[1]!;
+    await ctx.answerCallbackQuery();
+    const r = await buildSellQtyMenu(code);
+    if ('error' in r) {
+      await ctx.reply(`❌ ${r.error}`);
+      return;
+    }
+    try {
+      await ctx.editMessageText(r.text, { reply_markup: r.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(r.text, { reply_markup: r.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  // 매도 수량 (전량/절반) 선택 → 즉시 발주
+  bot.callbackQuery(/^tr:sq:(\d{6}):(all|half)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^tr:sq:(\d{6}):(all|half)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const [, code, qtyMode] = m;
+    await ctx.answerCallbackQuery('매도 발주 중…');
+    const r = await executeSell({
+      chatId: ctx.chat!.id,
+      code: code!,
+      qtyMode: qtyMode as 'all' | 'half',
+    });
+    try {
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+    } catch {}
+    await ctx.reply(r.text, { parse_mode: 'HTML' });
+  });
+
+  // 매도 수량 직접 입력 진입
+  bot.callbackQuery(/^tr:sinput:(\d{6})$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^tr:sinput:(\d{6})$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const code = m[1]!;
+    await ctx.answerCallbackQuery();
+    setChatMode(ctx.chat!.id, 'awaiting_trade_sell_qty', { sellCode: code });
+    const sym = await resolveSymbol(code);
+    const name = sym?.name ?? code;
+    await ctx.reply(
+      `✏️ <b>매도 — 수량 직접 입력</b>\n${name} (${code})\n수량을 보내주세요 (예: <code>5주</code> · <code>10</code>)`,
+      {
+        parse_mode: 'HTML',
+        reply_markup: new InlineKeyboard().text('⬅️ 뒤로', `tr:ss:${code}`),
+      },
+    );
+  });
+
+  bot.callbackQuery(/^wlrm:(\d+)$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^wlrm:(\d+)$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const id = Number(m[1]);
+    const removed = removeWatchlistOne(ctx.chat!.id, id);
+    await ctx.answerCallbackQuery(removed > 0 ? '제거됨' : '제거 실패');
+    // 제거 화면 갱신
+    const menu = buildWatchlistRemoveMenu(ctx.chat!.id);
+    try {
+      await ctx.editMessageText(menu.text, { reply_markup: menu.kb });
+    } catch {}
+  });
+
+  async function handleText(ctx: Context, text: string) {
+    await ctx.replyWithChatAction('typing');
+    const chatId = ctx.chat!.id;
+
+    // chatState — "다음 메시지 = 종목명" 모드면 그쪽으로 라우팅
+    const mode = getChatMode(chatId);
+    if (mode === 'awaiting_watchlist_add' && !text.startsWith('/')) {
+      clearChatMode(chatId);
+      const r = await handleWatchlistAdd(chatId, text);
+      if (r.kind === 'choices') {
+        await ctx.reply(r.text, { reply_markup: r.kb, parse_mode: 'HTML' });
+      } else {
+        await ctx.reply(r.text, { parse_mode: 'HTML' });
+      }
+      return;
+    }
+    if (mode === 'awaiting_chart_symbol' && !text.startsWith('/')) {
+      clearChatMode(chatId);
+      const candidates = searchSymbolCandidates(text, 10);
+      if (candidates.length === 0) {
+        await ctx.reply(
+          `❓ "${text}" 검색 결과 없음.\n다른 키워드로 시도하거나 6자리 코드를 입력해 보세요.`,
+          {
+            reply_markup: new InlineKeyboard().text('⬅️ 뒤로', 'chartmenu:back'),
+          },
+        );
+      } else {
+        const r = buildChartSearchResults(text, candidates);
+        await ctx.reply(r.text, { reply_markup: r.kb, parse_mode: 'HTML' });
+      }
+      return;
+    }
+    if (mode === 'awaiting_trade_buy_search' && !text.startsWith('/')) {
+      clearChatMode(chatId);
+      const candidates = searchSymbolCandidates(text, 10);
+      if (candidates.length === 0) {
+        await ctx.reply(
+          `❓ "${text}" 검색 결과 없음.\n다른 키워드로 시도해 보세요.`,
+          { reply_markup: new InlineKeyboard().text('⬅️ 뒤로', 'tr:buy') },
+        );
+      } else {
+        const r = buildBuySearchResults(text, candidates);
+        await ctx.reply(r.text, { reply_markup: r.kb, parse_mode: 'HTML' });
+      }
+      return;
+    }
+    if (mode === 'awaiting_trade_buy_amount' && !text.startsWith('/')) {
+      const meta = getChatMeta(chatId);
+      clearChatMode(chatId);
+      const code = meta?.buyCode;
+      const strategy = meta?.buyStrategy ?? 'mo';
+      if (!code) {
+        await ctx.reply('❌ 매수 컨텍스트 분실 — [💼 거래] 다시 시작해주세요.');
+        return;
+      }
+      const amount = parseBuyAmount(text);
+      if (!amount) {
+        await ctx.reply(
+          `❌ 형식을 못 알아들었습니다: "${text}"\n예: 10주 · 150만원 · 1500000원 · 20%`,
+        );
+        return;
+      }
+      const r = await buildBuyConfirmAndRegister({ chatId, code, strategy, amount });
+      if ('error' in r) {
+        await ctx.reply(`❌ ${r.error}`);
+      } else {
+        const kb = new InlineKeyboard()
+          .text('✅ 확정', `confirm:${r.reservationId}`)
+          .text('❌ 취소', `cancel:${r.reservationId}`);
+        await ctx.reply(r.text, { reply_markup: kb, parse_mode: 'HTML' });
+      }
+      return;
+    }
+    if (mode === 'awaiting_trade_sell_qty' && !text.startsWith('/')) {
+      const meta = getChatMeta(chatId);
+      clearChatMode(chatId);
+      const code = meta?.sellCode;
+      if (!code) {
+        await ctx.reply('❌ 매도 컨텍스트 분실 — [💼 거래] 다시 시작해주세요.');
+        return;
+      }
+      const m = text.trim().match(/^(\d+)\s*주?$/);
+      if (!m) {
+        await ctx.reply('❌ 수량 형식: <code>10주</code> 또는 <code>10</code>', {
+          parse_mode: 'HTML',
+        });
+        return;
+      }
+      const qty = Number(m[1]);
+      const r = await executeSell({ chatId, code, qtyMode: 'shares', qtyValue: qty });
+      await ctx.reply(r.text, { parse_mode: 'HTML' });
+      return;
+    }
+
+    // Reply Keyboard 버튼 텍스트 라우팅 (이모지 제거 — 한글만 추출)
+    const cleaned = text.replace(/[^ㄱ-힝]/g, '').trim();
+    if (cleaned === '관심종목') {
+      const menu = buildWatchlistMenu(chatId);
+      await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+      return;
+    }
+    if (cleaned === '차트') {
+      const menu = buildChartMainMenu(chatId);
+      await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+      return;
+    }
+    if (cleaned === '거래') {
+      const menu = buildTradeMainMenu();
+      await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+      return;
+    }
+    if (cleaned === '전략') {
+      const menu = buildStrategyMainMenu();
+      await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+      return;
+    }
+    if (cleaned === '예약') {
+      const list = listChatReservations(chatId, ['awaiting_confirm', 'pending']);
+      if (list.length === 0) {
+        await ctx.reply('예약 없음');
+        return;
+      }
+      const lines = list.map((r) => {
+        const qty =
+          r.qtyMode === 'shares'
+            ? `${r.qtyValue}주`
+            : r.qtyMode === 'amount'
+              ? `${r.qtyValue.toLocaleString()}원`
+              : `${r.qtyValue}%`;
+        const stateLabel = r.state === 'awaiting_confirm' ? '확인대기' : '예약';
+        return (
+          `• [${stateLabel}] ${r.symbolName} (${r.symbolCode}) ${qty}\n` +
+          `  발주: ${formatKst(new Date(r.scheduledFor))}\n` +
+          `  id: ${r.id}`
+        );
+      });
+      await ctx.reply(lines.join('\n\n'));
+      return;
+    }
+    if (cleaned === '포지션') {
+      const list = listChatPositions(chatId);
+      if (list.length === 0) {
+        await ctx.reply('보유/대기 포지션 없음');
+        return;
+      }
+      const lines = list.map(
+        (p) =>
+          `• [${p.state}] ${p.symbolName} (${p.market}/${p.symbolCode}) ${p.quantity}주` +
+          (p.avgPrice ? ` @ ${p.avgPrice.toLocaleString()}` : '') +
+          ` (id: ${p.id})` +
+          (p.tpPrice ? `\n   TP ${p.tpPrice.toLocaleString()}` : '') +
+          (p.slPrice ? ` / SL ${p.slPrice.toLocaleString()}` : ''),
+      );
+      await ctx.reply(lines.join('\n'));
+      return;
+    }
+    if (cleaned === '잔고') {
+      try {
+        await ctx.reply(await handleBalance(), { parse_mode: 'HTML' });
+      } catch (err) {
+        await ctx.reply(`❌ 잔고 조회 실패: ${(err as Error).message}`);
+      }
+      return;
+    }
+    if (cleaned === '도움말') {
+      await ctx.reply(HELP, { reply_markup: MAIN_KEYBOARD });
+      return;
+    }
+
+    // 차트 패턴 ("삼성전자 5분봉" / "삼성전자 차트")
+    const chartMatch = tryMatchChart(text);
+    if (chartMatch) {
+      try {
+        const r = await handleChart(chartMatch);
+        if (typeof r === 'string') {
+          await ctx.reply(r);
+        } else {
+          await ctx.replyWithPhoto(new InputFile(r.png, 'chart.png'), { caption: r.caption });
+        }
+      } catch (err) {
+        await ctx.reply(`❌ 차트 생성 실패: ${(err as Error).message}`);
+      }
+      return;
+    }
+    // 시가매매 예약 패턴 우선 (fast-path 매수와 키워드 충돌 회피)
+    const moMatch = tryMatchMarketOpen(text);
+    if (moMatch) {
+      try {
+        const r = await handleMarketOpenReserve(ctx.chat!.id, moMatch);
+        if (r.kind === 'proposal') {
+          const kb = new InlineKeyboard()
+            .text('✅ 예약', `confirm:${r.intentId}`)
+            .text('❌ 취소', `cancel:${r.intentId}`);
+          await ctx.reply(r.summary, { reply_markup: kb, parse_mode: 'HTML' });
+        } else {
+          await ctx.reply(r.text, { parse_mode: 'HTML' });
+        }
+      } catch (err) {
+        await ctx.reply(`❌ 시가매매 예약 오류: ${(err as Error).message}`);
+      }
+      return;
+    }
+    // Fast-path
+    try {
+      const fast = await tryFastPath(ctx.chat!.id, text);
+      if (fast) {
+        console.log('[bot] fastpath hit:', fast.kind);
+        if (fast.kind === 'proposal') {
+          const kb = new InlineKeyboard()
+            .text('✅ 실행', `confirm:${fast.intentId}`)
+            .text('❌ 취소', `cancel:${fast.intentId}`);
+          await ctx.reply(fast.summary, { reply_markup: kb });
+        } else {
+          await ctx.reply(fast.text, { parse_mode: 'HTML' });
+        }
+        return;
+      }
+    } catch (err) {
+      console.error('[fastpath] error', err);
+    }
+    await ctx.reply(
+      '❓ 이해하지 못했습니다. /help 로 사용 가능한 명령을 확인하세요.',
+    );
+  }
+
+  // grammy의 bot.command는 한글 BotCommand entity를 매칭 못 함.
+  // 그래서 한글 명령은 message:text에서 prefix 매칭으로 직접 라우팅.
+  // 매칭 길이가 긴 명령(/관심종목추가)을 짧은 것(/관심종목)보다 먼저 검사해야 함.
+  async function routeKoreanCommand(ctx: Context, text: string): Promise<boolean> {
+    const tryPrefix = (cmd: string): string | null => {
+      if (text === cmd) return '';
+      if (text.startsWith(cmd + ' ') || text.startsWith(cmd + '\n')) {
+        return text.slice(cmd.length).trim();
+      }
+      return null;
+    };
+    const chatId = ctx.chat!.id;
+
+    let arg: string | null;
+
+    if ((arg = tryPrefix('/도움말')) !== null || (arg = tryPrefix('/시작')) !== null) {
+      await ctx.reply(HELP, { reply_markup: MAIN_KEYBOARD });
+      return true;
+    }
+    if ((arg = tryPrefix('/상태')) !== null) {
+      const cfg = getConfig();
+      const tools = getAllTools();
+      const list = listChatPositions(chatId);
+      const open = list.filter((p) => p.state === 'open').length;
+      const pending = list.filter((p) => p.state === 'pending').length;
+      const closing = list.filter((p) => p.state === 'closing').length;
+      const mode = getMode();
+      await ctx.reply(
+        `📊 상태\n` +
+          `• 모드: <b>${mode === 'paper' ? '모의투자(paper)' : '실전(real)'}</b>\n` +
+          `• MCP 도구: ${tools.length}개\n` +
+          `• 포지션: open=${open}, pending=${pending}, closing=${closing}\n` +
+          `• 한도: 거래 ${cfg.MAX_TRADE_KRW.toLocaleString()}원\n\n` +
+          `전환: /모의투자  /실전`,
+        { parse_mode: 'HTML' },
+      );
+      return true;
+    }
+    if ((arg = tryPrefix('/모의투자')) !== null) {
+      setMode('paper');
+      await ctx.reply('🧪 <b>모의투자 모드</b>로 전환됨', { parse_mode: 'HTML' });
+      return true;
+    }
+    if ((arg = tryPrefix('/실전')) !== null || (arg = tryPrefix('/라이브계좌')) !== null) {
+      setMode('real');
+      await ctx.reply('⚠️ <b>실전 모드</b>로 전환됨\n실제 자금 거래입니다.', {
+        parse_mode: 'HTML',
+      });
+      return true;
+    }
+    if ((arg = tryPrefix('/잔고')) !== null) {
+      const market = (MARKET_FROM_INPUT[arg.toLowerCase()] || 'KRX') as Market;
+      try {
+        const res = await getBalance(market);
+        const t = JSON.stringify(res, null, 2).slice(0, 3500);
+        await ctx.reply(`잔고 (${market}):\n<pre>${t}</pre>`, { parse_mode: 'HTML' });
+      } catch (err) {
+        await ctx.reply(`❌ 잔고 조회 실패: ${(err as Error).message}`);
+      }
+      return true;
+    }
+    if ((arg = tryPrefix('/포지션')) !== null || (arg = tryPrefix('/보유')) !== null) {
+      const list = listChatPositions(chatId);
+      if (list.length === 0) {
+        await ctx.reply('보유/대기 포지션 없음');
+        return true;
+      }
+      const lines = list.map(
+        (p) =>
+          `• [${p.state}] ${p.symbolName} (${p.market}/${p.symbolCode}) ${p.quantity}주` +
+          (p.avgPrice ? ` @ ${p.avgPrice.toLocaleString()}` : '') +
+          ` (id: ${p.id})` +
+          (p.tpPrice ? `\n   TP ${p.tpPrice.toLocaleString()}` : '') +
+          (p.slPrice ? ` / SL ${p.slPrice.toLocaleString()}` : ''),
+      );
+      await ctx.reply(lines.join('\n'));
+      return true;
+    }
+    if ((arg = tryPrefix('/예약목록')) !== null || (arg = tryPrefix('/예약')) !== null) {
+      const list = listChatReservations(chatId, ['awaiting_confirm', 'pending']);
+      if (list.length === 0) {
+        await ctx.reply('예약 없음');
+        return true;
+      }
+      const lines = list.map((r) => {
+        const qty =
+          r.qtyMode === 'shares'
+            ? `${r.qtyValue}주`
+            : r.qtyMode === 'amount'
+              ? `${r.qtyValue.toLocaleString()}원`
+              : `${r.qtyValue}%`;
+        const stateLabel = r.state === 'awaiting_confirm' ? '확인대기' : '예약';
+        return (
+          `• [${stateLabel}] ${r.symbolName} (${r.symbolCode}) ${qty}\n` +
+          `  발주: ${formatKst(new Date(r.scheduledFor))}\n` +
+          `  id: ${r.id}`
+        );
+      });
+      await ctx.reply(lines.join('\n\n'));
+      return true;
+    }
+    if ((arg = tryPrefix('/시가매매')) !== null) {
+      const reply = await handleMarketOpenCommand(chatId, arg);
+      await ctx.reply(reply, { parse_mode: 'HTML' });
+      return true;
+    }
+    if ((arg = tryPrefix('/관심종목추가')) !== null) {
+      const r = await handleWatchlistAdd(chatId, arg);
+      if (r.kind === 'choices') {
+        await ctx.reply(r.text, { reply_markup: r.kb, parse_mode: 'HTML' });
+      } else {
+        await ctx.reply(r.text, { parse_mode: 'HTML' });
+      }
+      return true;
+    }
+    if ((arg = tryPrefix('/관심종목제거')) !== null) {
+      await ctx.reply(handleWatchlistRemove(chatId, arg), { parse_mode: 'HTML' });
+      return true;
+    }
+    if ((arg = tryPrefix('/관심종목')) !== null) {
+      await ctx.reply(renderWatchlist(chatId), { parse_mode: 'HTML' });
+      return true;
+    }
+    if ((arg = tryPrefix('/확정')) !== null) {
+      if (!arg) {
+        await ctx.reply('사용: /확정 <id>');
+        return true;
+      }
+      await ctx.reply(await runConfirm(chatId, arg));
+      return true;
+    }
+    if ((arg = tryPrefix('/취소')) !== null) {
+      if (!arg) {
+        await ctx.reply('사용: /취소 <id>');
+        return true;
+      }
+      await ctx.reply(runCancel(chatId, arg));
+      return true;
+    }
+    if ((arg = tryPrefix('/청산')) !== null) {
+      if (!arg) {
+        await ctx.reply('사용: /청산 <position_id>');
+        return true;
+      }
+      await ctx.reply('⏳ 청산 중…');
+      try {
+        await closePosition({ positionId: arg, reason: 'manual' });
+      } catch (err) {
+        await ctx.reply(`❌ 청산 실패: ${(err as Error).message}`);
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  // 인라인 자동완성 — 채팅창에서 "@owlimstock_bot 삼" 입력 시 종목 후보 표시
+  // (BotFather에서 inline mode 활성 필요: /mybots → 봇 → Bot Settings → Inline Mode → Turn on)
+  bot.on('inline_query', async (ctx) => {
+    const q = ctx.inlineQuery.query.trim();
+    const candidates = q ? searchSymbolCandidates(q, 12) : [];
+    if (q) {
+      const exact = await resolveSymbol(q).catch(() => null);
+      if (exact && !candidates.find((c) => c.code === exact.code)) {
+        candidates.unshift(exact);
+      }
+    }
+    const results = candidates.slice(0, 12).map((c) => ({
+      type: 'article' as const,
+      id: c.code,
+      title: c.name,
+      description: `${c.code} — 누르면 관심종목에 추가`,
+      input_message_content: {
+        message_text: `/관심종목추가 ${c.code}`,
+      },
+    }));
+    await ctx.answerInlineQuery(results, { cache_time: 0 });
+  });
+
+  bot.on('message:text', async (ctx) => {
+    const text = ctx.message.text;
+    if (text.startsWith('/')) {
+      // 한글 명령 직접 라우팅 → 매칭 안 되면 영어 명령은 grammy bot.command가 처리
+      try {
+        if (await routeKoreanCommand(ctx, text)) return;
+      } catch (err) {
+        await ctx.reply(`❌ 명령 처리 실패: ${(err as Error).message}`);
+      }
+      return;
+    }
+    console.log(`[bot] msg from ${ctx.chat?.id}: "${text}"`);
+    await handleText(ctx, text);
   });
 }

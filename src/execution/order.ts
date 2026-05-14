@@ -11,18 +11,50 @@ import { placeOrder, checkFill, type Market } from '../mcp/kis.js';
 
 type AnyRecord = Record<string, unknown>;
 
-function extract(obj: unknown, ...candidates: string[]): string | undefined {
-  if (!obj || typeof obj !== 'object') return undefined;
-  for (const key of candidates) {
-    const v = (obj as AnyRecord)[key];
-    if (typeof v === 'string' && v.trim() !== '') return v;
-    if (typeof v === 'number') return String(v);
+// 문자열이 JSON처럼 보이면 자동 파싱 (KIS MCP 응답이 data 필드를 JSON 문자열로 감싸는 패턴 대응)
+function maybeParseJson(v: unknown): unknown {
+  if (typeof v !== 'string') return v;
+  const trimmed = v.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return v;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return v;
   }
-  for (const k of Object.keys(obj as AnyRecord)) {
-    const v = (obj as AnyRecord)[k];
+}
+
+// 케이스 무시 + 중첩 객체 + JSON 문자열 자동 unwrap.
+function extract(obj: unknown, ...candidates: string[]): string | undefined {
+  if (!obj) return undefined;
+  obj = maybeParseJson(obj);
+  if (typeof obj !== 'object') return undefined;
+  const lc = candidates.map((c) => c.toLowerCase());
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const r = extract(item, ...candidates);
+      if (r) return r;
+    }
+    return undefined;
+  }
+  const o = obj as AnyRecord;
+  for (const k of Object.keys(o)) {
+    if (lc.includes(k.toLowerCase())) {
+      const v = o[k];
+      if (typeof v === 'string' && v.trim() !== '') return v;
+      if (typeof v === 'number') return String(v);
+    }
+  }
+  for (const k of Object.keys(o)) {
+    const v = o[k];
     if (v && typeof v === 'object') {
-      const found = extract(v, ...candidates);
-      if (found) return found;
+      const r = extract(v, ...candidates);
+      if (r) return r;
+    } else if (typeof v === 'string') {
+      const parsed = maybeParseJson(v);
+      if (parsed && typeof parsed === 'object') {
+        const r = extract(parsed, ...candidates);
+        if (r) return r;
+      }
     }
   }
   return undefined;
@@ -45,8 +77,9 @@ export async function placeBuyOrder(args: {
   });
 
   const orderId =
-    extract(result, 'odno', 'ord_no', 'order_id', 'orderId', 'KRX_FWDG_ORD_ORGNO') ??
+    extract(result, 'ODNO', 'odno', 'ord_no', 'order_id', 'orderId') ??
     `unknown-${Date.now()}`;
+  console.log('[order] result orderId=', orderId);
 
   let tpPrice: number | undefined;
   let slPrice: number | undefined;

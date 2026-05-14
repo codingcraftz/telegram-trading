@@ -12,16 +12,19 @@
     "start": "node dist/main.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
+    "fetch:symbols": "tsx scripts/fetch-krx-symbols.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^2.2.0",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.3",
+    "fflate": "^0.8.2",
     "grammy": "^1.32.0",
+    "iconv-lite": "^0.7.2",
     "nanoid": "^5.0.9",
+    "sharp": "^0.34.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {

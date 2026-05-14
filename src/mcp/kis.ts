@@ -6,7 +6,8 @@
 // cano (계좌번호), acnt_prdt_cd, my_htsid 는 MCP가 자동 주입하므로 우리는 안 넣음.
 
 import { callTool } from './client.js';
-import { getConfig } from '../config.js';
+import { applyDefaults } from './defaults.js';
+import { envDv as runtimeEnvDv } from '../runtime.js';
 
 export type Market =
   | 'KRX'      // 국내
@@ -37,16 +38,17 @@ const MARKET_TO_EXCD: Record<Exclude<Market, 'KRX'>, string> = {
   HSX: 'HSX',
 };
 
-export function envDv(): 'real' | 'demo' {
-  return getConfig().MODE === 'paper' ? 'demo' : 'real';
-}
+export const envDv = runtimeEnvDv;
 
 export async function callKisApi(
   category: string,
   apiType: string,
   params: Record<string, unknown>,
 ): Promise<unknown> {
-  return callTool(category, { api_type: apiType, params: { env_dv: envDv(), ...params } });
+  return callTool(category, {
+    api_type: apiType,
+    params: applyDefaults(category, apiType, params),
+  });
 }
 
 // ============================================================
@@ -62,6 +64,31 @@ export async function getQuote(market: Market, code: string): Promise<unknown> {
   return callKisApi('overseas_stock', 'price', {
     excd: MARKET_TO_EXCD[market as Exclude<Market, 'KRX'>],
     symb: code,
+  });
+}
+
+// ============================================================
+// 분봉 차트 (국내만, 당일 1분봉)
+// ============================================================
+function nowKstHhmmss(): string {
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 3600 * 1000);
+  const hh = String(kst.getUTCHours()).padStart(2, '0');
+  const mm = String(kst.getUTCMinutes()).padStart(2, '0');
+  const ss = String(kst.getUTCSeconds()).padStart(2, '0');
+  return `${hh}${mm}${ss}`;
+}
+
+export async function getMinuteChart(code: string, hour?: string): Promise<unknown> {
+  // 장중이면 현재 KST, 그 외엔 장 마감 시각(15:30:00)
+  let h = hour ?? '';
+  if (!h) {
+    const cur = nowKstHhmmss();
+    h = cur >= '090000' && cur <= '153000' ? cur : '153000';
+  }
+  return callKisApi('domestic_stock', 'inquire_time_itemchartprice', {
+    fid_input_iscd: code,
+    fid_input_hour_1: h,
   });
 }
 
@@ -90,11 +117,12 @@ export async function placeOrder(args: {
 }): Promise<unknown> {
   if (isDomestic(args.market)) {
     return callKisApi('domestic_stock', 'order_cash', {
-      ord_dv: args.side, // 'buy' | 'sell' (MCP가 KIS 형식으로 변환)
+      ord_dv: args.side, // 'buy' | 'sell'
       pdno: args.code,
       ord_qty: String(args.quantity),
       ord_unpr: String(args.orderType === 'limit' ? args.price ?? 0 : 0),
       ord_dvsn: args.orderType === 'limit' ? '00' : '01', // 00=지정가, 01=시장가
+      excg_id_dvsn_cd: 'KRX', // 필수: KRX | NXT | SOR
     });
   }
   // 해외: 시장가는 거래소·상품별로 다름. v1은 지정가 위주.

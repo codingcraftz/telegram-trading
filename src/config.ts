@@ -10,18 +10,16 @@ const Env = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(10),
   ALLOWED_CHAT_IDS: csvIds,
 
-  GEMINI_API_KEY: z.string().min(10),
-  GEMINI_MODEL: z.string().default('gemini-2.5-flash-lite'),
-
   KIS_MCP_URL: z.string().url(),
 
   // 모의(paper)/실전(real). KIS Trading MCP의 env_dv 파라미터로 전달됨.
   MODE: z.enum(['paper', 'real']).default('paper'),
 
-  MAX_TRADE_KRW: z.coerce.number().int().positive().default(1_000_000),
-  MAX_OPEN_POSITIONS: z.coerce.number().int().positive().default(5),
-  COOLDOWN_SEC: z.coerce.number().int().nonnegative().default(300),
-  DAILY_LOSS_KRW: z.coerce.number().int().nonnegative().default(300_000),
+  // 모두 0이면 해당 가드 비활성.
+  MAX_TRADE_KRW: z.coerce.number().int().nonnegative().default(1_000_000),
+  MAX_OPEN_POSITIONS: z.coerce.number().int().nonnegative().default(0),
+  COOLDOWN_SEC: z.coerce.number().int().nonnegative().default(0),
+  DAILY_LOSS_KRW: z.coerce.number().int().nonnegative().default(0),
   INTENT_TTL_MIN: z.coerce.number().int().positive().default(5),
 
   DATABASE_FILE: z.string().default('./data/tt.db'),

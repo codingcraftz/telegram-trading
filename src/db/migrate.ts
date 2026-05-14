@@ -63,6 +63,61 @@ export function ensureSchema() {
       symbol_code TEXT PRIMARY KEY,
       until INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS market_open_settings (
+      chat_id INTEGER PRIMARY KEY,
+      gap_guard_pct REAL,
+      tp_pct REAL,
+      sl_pct REAL,
+      trailing_pct REAL,
+      updated_at INTEGER NOT NULL
+    );
+    -- 기존 DB에 trailing_pct 컬럼 추가 (이미 있으면 무시)
+    -- SQLite는 IF NOT EXISTS for column 미지원. ALTER TABLE 시도 후 에러 무시.
+  `);
+
+  // 기존 테이블에 컬럼이 없으면 추가
+  try {
+    sqlite.exec(`ALTER TABLE market_open_settings ADD COLUMN trailing_pct REAL`);
+  } catch (e) {
+    // 이미 존재
+  }
+
+  sqlite.exec(`
+
+    CREATE TABLE IF NOT EXISTS market_open_reservations (
+      id TEXT PRIMARY KEY,
+      chat_id INTEGER NOT NULL,
+      market TEXT NOT NULL DEFAULT 'KRX',
+      symbol_code TEXT NOT NULL,
+      symbol_name TEXT NOT NULL,
+      qty_mode TEXT NOT NULL,
+      qty_value REAL NOT NULL,
+      gap_guard_pct REAL,
+      tp_pct REAL,
+      sl_pct REAL,
+      scheduled_for INTEGER NOT NULL,
+      state TEXT NOT NULL,
+      reject_reason TEXT,
+      position_id TEXT,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      confirmed_at INTEGER,
+      fired_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS mo_state_idx ON market_open_reservations(state);
+    CREATE INDEX IF NOT EXISTS mo_chat_state_idx ON market_open_reservations(chat_id, state);
+
+    CREATE TABLE IF NOT EXISTS watchlist (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id INTEGER NOT NULL,
+      market TEXT NOT NULL DEFAULT 'KRX',
+      symbol_code TEXT NOT NULL,
+      symbol_name TEXT NOT NULL,
+      added_at INTEGER NOT NULL,
+      UNIQUE(chat_id, market, symbol_code)
+    );
+    CREATE INDEX IF NOT EXISTS watchlist_chat_idx ON watchlist(chat_id);
   `);
 }
 

@@ -4,6 +4,7 @@ import { connectMcp, closeMcp } from './mcp/client.js';
 import { createBot } from './bot/index.js';
 import { reconcileOnBoot } from './monitor/recovery.js';
 import { startMonitor, stopMonitor } from './monitor/worker.js';
+import { startScheduler, stopScheduler } from './scheduler/worker.js';
 
 async function main() {
   const cfg = getConfig();
@@ -22,11 +23,15 @@ async function main() {
   console.log('[boot] starting monitor');
   startMonitor();
 
+  console.log('[boot] starting market-open scheduler');
+  startScheduler();
+
   console.log('[boot] starting telegram bot');
   const bot = createBot();
 
   const shutdown = async (signal: string) => {
     console.log(`[shutdown] ${signal} received`);
+    stopScheduler();
     stopMonitor();
     try {
       await bot.stop();

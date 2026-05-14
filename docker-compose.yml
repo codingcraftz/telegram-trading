@@ -38,8 +38,6 @@ services:
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       ALLOWED_CHAT_IDS: ${ALLOWED_CHAT_IDS}
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
       KIS_MCP_URL: http://kis-mcp:3000/sse
       MODE: ${MODE:-paper}
       MAX_TRADE_KRW: ${MAX_TRADE_KRW:-1000000}

@@ -68,6 +68,69 @@ export const cooldown = sqliteTable('cooldown', {
   until: integer('until').notNull(),
 });
 
+// 사용자별 관심종목.
+export const watchlist = sqliteTable(
+  'watchlist',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    chatId: integer('chat_id').notNull(),
+    market: text('market').notNull().default('KRX'),
+    symbolCode: text('symbol_code').notNull(),
+    symbolName: text('symbol_name').notNull(),
+    addedAt: integer('added_at').notNull(),
+  },
+  (t) => ({
+    chatIdx: index('watchlist_chat_idx').on(t.chatId),
+  }),
+);
+
+// 사용자별 시가매매 기본 셋팅. null 의미는 아래.
+//   gapGuardPct: null=기본(5%) / 0=끄기 / 양수=임계치
+//   tpPct, slPct: null=끄기 / 양수=매수가 기준 %
+export const marketOpenSettings = sqliteTable('market_open_settings', {
+  chatId: integer('chat_id').primaryKey(),
+  gapGuardPct: real('gap_guard_pct'),
+  tpPct: real('tp_pct'),
+  slPct: real('sl_pct'),
+  trailingPct: real('trailing_pct'),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+// 시가매매 예약. /confirm 받으면 state='pending'으로 진입.
+//   awaiting_confirm → pending → fired (or canceled / rejected / expired)
+export const marketOpenReservations = sqliteTable(
+  'market_open_reservations',
+  {
+    id: text('id').primaryKey(),
+    chatId: integer('chat_id').notNull(),
+    market: text('market').notNull().default('KRX'),
+    symbolCode: text('symbol_code').notNull(),
+    symbolName: text('symbol_name').notNull(),
+    qtyMode: text('qty_mode', { enum: ['shares', 'amount', 'percent'] }).notNull(),
+    qtyValue: real('qty_value').notNull(),
+    gapGuardPct: real('gap_guard_pct'), // 예약 시점 셋팅 스냅샷. null=끄기
+    tpPct: real('tp_pct'),
+    slPct: real('sl_pct'),
+    scheduledFor: integer('scheduled_for').notNull(), // unix ms
+    state: text('state', {
+      enum: ['awaiting_confirm', 'pending', 'fired', 'canceled', 'rejected', 'expired'],
+    }).notNull(),
+    rejectReason: text('reject_reason'),
+    positionId: text('position_id'),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(), // awaiting_confirm TTL
+    confirmedAt: integer('confirmed_at'),
+    firedAt: integer('fired_at'),
+  },
+  (t) => ({
+    stateIdx: index('mo_state_idx').on(t.state),
+    chatStateIdx: index('mo_chat_state_idx').on(t.chatId, t.state),
+  }),
+);
+
 export type Position = typeof positions.$inferSelect;
 export type NewPosition = typeof positions.$inferInsert;
 export type PendingIntent = typeof pendingIntents.$inferSelect;
+export type MarketOpenSettings = typeof marketOpenSettings.$inferSelect;
+export type MarketOpenReservation = typeof marketOpenReservations.$inferSelect;
+export type WatchlistRow = typeof watchlist.$inferSelect;
