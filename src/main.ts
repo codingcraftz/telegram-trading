@@ -14,18 +14,17 @@ async function main() {
   console.log('[boot] starting dashboard');
   startDashboard(Number(process.env.DASHBOARD_PORT ?? 8080));
 
-  // 2) DB 초기화
-  console.log('[boot] db init');
-  ensureSchema();
-
-  // 3) 봇 시작 시도 — 키 부족하면 대시보드만 동작 + 사용자가 입력하면 supervisord/docker가 재시작
+  // 2) DB 초기화 + 봇 키 검증 — 어느 단계든 실패하면 대시보드만 살아남고 봇 보류.
+  //    (ensureSchema가 내부적으로 getConfig를 호출하므로 같이 try로 감싸야 한다.)
   let cfg;
   try {
+    console.log('[boot] db init');
+    ensureSchema();
     cfg = getConfig();
   } catch (err) {
-    console.warn('[boot] 키 부족 — 봇 시작 보류. 대시보드에서 입력 후 자동 재시작.');
+    console.warn('[boot] 봇 시작 보류 (대시보드는 동작) — 대시보드에서 키 입력 후 컨테이너 재시작 시 봇이 켜집니다.');
     console.warn('[boot] reason:', (err as Error).message);
-    return; // process는 살아있음 (대시보드 + serve)
+    return;
   }
 
   console.log('[boot] mode =', cfg.MODE);

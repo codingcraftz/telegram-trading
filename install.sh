@@ -119,15 +119,20 @@ DASHBOARD_PASSWORD_HASH=$(timeout 120 docker run --rm caddy:2-alpine caddy hash-
   warn "caddy hash-password 실패 — 평문 fallback"
   DASHBOARD_PASSWORD_HASH=""
 }
+# bcrypt hash는 $2a$14$... 형태로 $ 문자 다수 포함. docker-compose는 .env의 ${VAR}/$VAR을
+# 변수 expansion하려고 해서 깨짐. $ → $$ escape하면 docker-compose가 unescape해서 컨테이너에 정상 전달.
+DASHBOARD_PASSWORD_HASH_ENV="${DASHBOARD_PASSWORD_HASH//\$/\$\$}"
 
 # .env (봇 키는 비워두고 대시보드에서 입력)
+# CADDY_EMAIL은 빈값이면 Caddy 'email' 지시문이 syntax error → 도메인 기반 dummy 자동 채움.
 cat > $INSTALL_DIR/.env <<EOF
 DASHBOARD_DOMAIN=$DASHBOARD_DOMAIN
-DASHBOARD_PASSWORD_HASH=$DASHBOARD_PASSWORD_HASH
-CADDY_EMAIL=
+DASHBOARD_PASSWORD_HASH=$DASHBOARD_PASSWORD_HASH_ENV
+CADDY_EMAIL=admin@$DASHBOARD_DOMAIN
 
+# ALLOWED_CHAT_IDS=1은 placeholder. 대시보드에서 본인 chat_id로 덮어쓰기 전엔 어떤 chat도 통과 안 함.
 TELEGRAM_BOT_TOKEN=initial-empty-will-be-overridden-by-dashboard
-ALLOWED_CHAT_IDS=0
+ALLOWED_CHAT_IDS=1
 
 KIS_PAPER_APP_KEY=
 KIS_PAPER_APP_SECRET=
