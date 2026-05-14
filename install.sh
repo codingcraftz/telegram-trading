@@ -151,6 +151,18 @@ INTENT_TTL_MIN=5
 LOG_LEVEL=info
 EOF
 
+# self-update (cron) 설치 — 인프라 파일(docker-compose.yml / Caddyfile) 자동 갱신
+mkdir -p $INSTALL_DIR/scripts
+curl -fsSL $RAW_BASE/scripts/self-update.sh -o $INSTALL_DIR/scripts/self-update.sh
+chmod +x $INSTALL_DIR/scripts/self-update.sh
+cat > /etc/cron.d/owlim-self-update <<CRONEOF
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+5 * * * * root $INSTALL_DIR/scripts/self-update.sh >> /var/log/owlim-self-update.log 2>&1
+CRONEOF
+chmod 0644 /etc/cron.d/owlim-self-update
+systemctl reload cron 2>/dev/null || systemctl restart cron 2>/dev/null || true
+
 # ---------- 5) 이미지 pull + 컨테이너 시작 + Let's Encrypt ----------
 report 5 "이미지 다운로드 중 (3~5분 소요)"
 timeout 300 docker compose pull 2>&1 | tail -20 || warn "pull 일부 실패 또는 5분 timeout"
