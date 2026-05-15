@@ -177,9 +177,16 @@ export async function callKisApi(
     const fullUrl = qs.toString() ? `${url}?${qs.toString()}` : url;
     res = await fetch(fullUrl, { method: 'GET', headers });
   } else {
-    // POST — order_cash에서 ord_dv 같은 의사 키 제거 (KIS API에 존재 X)
-    const cleaned = { ...finalParams };
-    delete cleaned.ord_dv;
+    // POST body — KIS REST는 POST 시 필드명을 대문자(CANO/PDNO/ORD_QTY 등)로 요구.
+    // GET은 case-insensitive(query) 통과하지만 POST는 lowercase 거부 → IGW00017 "상품번호 확인".
+    // 의사 키(ord_dv: tr_id 결정용, env_dv: 내부 분기용)는 KIS body에서 제거.
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(finalParams)) {
+      const lower = k.toLowerCase();
+      if (lower === 'ord_dv' || lower === 'env_dv') continue;
+      if (v === undefined || v === null) continue;
+      cleaned[k.toUpperCase()] = v;
+    }
     res = await fetch(url, {
       method: 'POST',
       headers,

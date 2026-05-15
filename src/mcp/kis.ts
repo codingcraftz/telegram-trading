@@ -136,13 +136,14 @@ export async function placeOrder(args: {
     //   after_single(07)  → price 필수 (10분 단위 단일가)
     const ordUnpr =
       args.orderType === 'limit' || args.orderType === 'after_single' ? args.price ?? 0 : 0;
+    // excg_id_dvsn_cd 제거 — KIS demo가 IGW00017("상품번호를 확인해주세요")로 거부함.
+    // 실측: 이 필드가 들어가면 매수/매도 모두 거부. 빼면 통과 (전통적 KRX 단일 주문).
     return callKisApi('domestic_stock', 'order_cash', {
       ord_dv: args.side,
       pdno: args.code,
       ord_qty: String(args.quantity),
       ord_unpr: String(ordUnpr),
       ord_dvsn: ordDvsn,
-      excg_id_dvsn_cd: 'KRX',
     });
   }
   // 해외: 시장가는 거래소·상품별로 다름. v1은 지정가 위주.
@@ -166,6 +167,7 @@ export async function cancelKrxOrder(args: {
   qty?: number;
   ordDvsn?: string;
 }): Promise<unknown> {
+  // excg_id_dvsn_cd 제거 (order_cash와 동일 이유 — IGW00017 거부)
   return callKisApi('domestic_stock', 'order_rvsecncl', {
     krx_fwdg_ord_orgno: args.orgno,
     orgn_odno: args.odno,
@@ -174,7 +176,6 @@ export async function cancelKrxOrder(args: {
     ord_qty: String(args.qty ?? 0),
     ord_unpr: '0',
     qty_all_ord_yn: 'Y',
-    excg_id_dvsn_cd: 'KRX',
   });
 }
 

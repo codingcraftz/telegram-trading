@@ -82,9 +82,10 @@ function makeDefaults(toolName: string, apiType: string): Defaults {
         };
 
       // --- 주문 (env_dv 필요) ---
+      // excg_id_dvsn_cd 제거 — KIS demo가 IGW00017로 거부함.
       case 'order_cash':
       case 'order_rvsecncl':
-        return { env_dv: dv, excg_id_dvsn_cd: 'KRX' };
+        return { env_dv: dv };
 
       // --- 랭킹 (env_dv 없음) ---
       case 'volume_rank':
