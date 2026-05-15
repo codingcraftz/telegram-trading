@@ -12,5 +12,13 @@
   <body class="bg-background text-foreground">
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
+    <script>
+      // Service Worker 등록 (PWA 활성화)
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('SW:', e));
+        });
+      }
+    </script>
   </body>
 </html>

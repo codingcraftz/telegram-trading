@@ -11,6 +11,14 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm build
 
+# ===== PWA SPA 빌드 (web/) =====
+FROM base AS web_build
+WORKDIR /web
+COPY web/package.json web/pnpm-lock.yaml* ./
+RUN pnpm install --frozen-lockfile || pnpm install
+COPY web/ ./
+RUN pnpm build
+
 FROM base AS runtime
 ENV NODE_ENV=production
 # 빌드 시 GitHub Actions가 GIT_SHA / BUILD_DATE inject → 대시보드 버전 표시용
@@ -25,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && fc-cache -fv >/dev/null 2>&1
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=web_build /web/dist ./dist/web
 COPY package.json ./
 RUN mkdir -p /app/data
 VOLUME ["/app/data"]
