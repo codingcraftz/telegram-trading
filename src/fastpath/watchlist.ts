@@ -21,7 +21,6 @@ export function removeWatchlistOne(chatId: number, id: number): number {
   return removeWatchlistByIds(chatId, [id]);
 }
 import { resolveSymbol, searchSymbolCandidates } from './symbol.js';
-import { fetchQuickQuote } from './price.js';
 import type { ResolvedSymbol } from './symbol.js';
 
 export function renderWatchlist(chatId: number): string {

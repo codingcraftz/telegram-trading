@@ -443,14 +443,21 @@ export function expireOldAwaitingReservations() {
 }
 
 // ---------- watchlist ----------
+// 관심종목은 추가/삭제 시에만 변경됨 → in-memory 캐시로 매 메뉴 진입마다 DB read 없앰.
+
+const _watchlistCache = new Map<number, WatchlistRow[]>();
 
 export function listWatchlist(chatId: number): WatchlistRow[] {
-  return getDb()
+  const cached = _watchlistCache.get(chatId);
+  if (cached) return cached;
+  const rows = getDb()
     .select()
     .from(watchlist)
     .where(eq(watchlist.chatId, chatId))
     .orderBy(watchlist.addedAt)
     .all();
+  _watchlistCache.set(chatId, rows);
+  return rows;
 }
 
 export function addWatchlist(args: {
@@ -465,6 +472,7 @@ export function addWatchlist(args: {
        VALUES (?, ?, ?, ?, ?)`,
     )
     .run(args.chatId, args.market, args.symbolCode, args.symbolName, Date.now());
+  _watchlistCache.delete(args.chatId);
   return { added: r.changes === 1, existed: r.changes === 0 };
 }
 
@@ -476,6 +484,7 @@ export function removeWatchlistByIds(chatId: number, ids: number[]): number {
       `DELETE FROM watchlist WHERE chat_id = ? AND id IN (${placeholders})`,
     )
     .run(chatId, ...ids);
+  _watchlistCache.delete(chatId);
   return r.changes;
 }
 

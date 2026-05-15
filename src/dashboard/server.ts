@@ -49,7 +49,16 @@ function shortSha(s: string): string {
   return s.length >= 7 ? s.slice(0, 7) : s;
 }
 
-const HTML = (s: Settings) => `<!DOCTYPE html>
+function hasKeys(...keys: Array<string | undefined>): boolean {
+  return keys.every((k) => !!k && k.length > 0);
+}
+
+const HTML = (s: Settings) => {
+  const paperKeysOk = hasKeys(s.KIS_PAPER_APP_KEY, s.KIS_PAPER_APP_SECRET, s.KIS_PAPER_STOCK);
+  const realKeysOk = hasKeys(s.KIS_APP_KEY, s.KIS_APP_SECRET, s.KIS_ACCT_STOCK);
+  const paperActive = paperKeysOk && s.MODE === 'paper';
+  const realActive = realKeysOk && s.MODE === 'real';
+  return `<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="utf-8">
@@ -118,31 +127,41 @@ const HTML = (s: Settings) => `<!DOCTYPE html>
     </div>
 
     <div class="card">
-      <h2>🧪 KIS 모의투자 <span class="pill ${s.MODE === 'paper' ? 'on' : 'off'}">${s.MODE === 'paper' ? '활성' : '비활성'}</span></h2>
+      <h2>🧪 KIS 모의투자
+        <span class="pill ${paperKeysOk ? 'on' : 'off'}">${paperKeysOk ? '🔑 키 등록됨' : '키 미입력'}</span>
+        <span class="pill ${paperActive ? 'on' : 'off'}">${paperActive ? '✅ 사용 중' : '대기'}</span>
+      </h2>
+      <div class="hint" style="margin-bottom:12px;">실제 현금 거래 X · KIS 모의계좌(시드 1억 자동 지급)로 테스트.</div>
       <div class="grid">
         <label>APP_KEY
-          <input type="password" name="KIS_PAPER_APP_KEY" value="${s.KIS_PAPER_APP_KEY ?? ''}" />
+          <input type="password" name="KIS_PAPER_APP_KEY" value="${s.KIS_PAPER_APP_KEY ?? ''}" placeholder="발급받은 APP_KEY" />
         </label>
         <label>APP_SECRET
-          <input type="password" name="KIS_PAPER_APP_SECRET" value="${s.KIS_PAPER_APP_SECRET ?? ''}" />
+          <input type="password" name="KIS_PAPER_APP_SECRET" value="${s.KIS_PAPER_APP_SECRET ?? ''}" placeholder="발급받은 APP_SECRET" />
         </label>
-        <label>모의 종합계좌 8자리
-          <input type="text" name="KIS_PAPER_STOCK" value="${s.KIS_PAPER_STOCK ?? ''}" placeholder="50012345" />
+        <label>모의 종합계좌
+          <input type="text" name="KIS_PAPER_STOCK" value="${s.KIS_PAPER_STOCK ?? ''}" placeholder="50012345-01" />
+          <div class="hint">계좌번호 전체(<code>50012345-01</code>) 또는 앞 8자리만 둘 다 OK.</div>
         </label>
       </div>
     </div>
 
     <div class="card">
-      <h2>🔥 KIS 실전 <span class="pill ${s.MODE === 'real' ? 'on' : 'off'}">${s.MODE === 'real' ? '활성' : '비활성'}</span></h2>
+      <h2>🔥 KIS 실전
+        <span class="pill ${realKeysOk ? 'on' : 'off'}">${realKeysOk ? '🔑 키 등록됨' : '키 미입력'}</span>
+        <span class="pill ${realActive ? 'on' : 'off'}">${realActive ? '✅ 사용 중' : '대기'}</span>
+      </h2>
+      <div class="hint" style="margin-bottom:12px;">⚠️ 실제 자금 거래 — 모드를 [real]로 바꿔야 실전이 활성됩니다.</div>
       <div class="grid">
         <label>APP_KEY
-          <input type="password" name="KIS_APP_KEY" value="${s.KIS_APP_KEY ?? ''}" />
+          <input type="password" name="KIS_APP_KEY" value="${s.KIS_APP_KEY ?? ''}" placeholder="발급받은 APP_KEY" />
         </label>
         <label>APP_SECRET
-          <input type="password" name="KIS_APP_SECRET" value="${s.KIS_APP_SECRET ?? ''}" />
+          <input type="password" name="KIS_APP_SECRET" value="${s.KIS_APP_SECRET ?? ''}" placeholder="발급받은 APP_SECRET" />
         </label>
-        <label>실전 종합계좌 8자리
-          <input type="text" name="KIS_ACCT_STOCK" value="${s.KIS_ACCT_STOCK ?? ''}" />
+        <label>실전 종합계좌
+          <input type="text" name="KIS_ACCT_STOCK" value="${s.KIS_ACCT_STOCK ?? ''}" placeholder="12345678-01" />
+          <div class="hint">계좌번호 전체(<code>12345678-01</code>) 또는 앞 8자리만. 상품코드(<code>-01</code>)가 다른 경우(선물옵션 <code>-22</code> 등)는 전체 입력 필수.</div>
         </label>
       </div>
     </div>
@@ -219,31 +238,73 @@ checkBtn.addEventListener('click', async () => {
   }
 });
 
+const initialVersion = '${shortSha(GIT_SHA)}';
+let updatePollTimer = null;
+
+function startUpdatePolling() {
+  // 1분 간격으로 GitHub vs 현재 봇 버전 비교. 같아지면 "업데이트 완료" 표시.
+  if (updatePollTimer) clearInterval(updatePollTimer);
+  updatePollTimer = setInterval(async () => {
+    try {
+      // health endpoint로 봇 살아있는지 + version은 hash로 GET /
+      const v = await fetch('/api/version').then((r) => r.json()).catch(() => null);
+      if (v && v.sha && v.sha !== initialVersion) {
+        clearInterval(updatePollTimer);
+        updatePollTimer = null;
+        // UI: 로딩 → 완료
+        checkBtn.style.display = 'inline-block';
+        doBtn.style.display = 'none';
+        badge.innerHTML = '<span class="pill on">✅ 업데이트 완료: ' + v.sha + '</span>';
+        hint.innerHTML = '✅ <b>업데이트 완료!</b> 새 버전(' + v.sha + ')으로 봇이 재시작됐습니다. <a href="javascript:location.reload()">새로고침</a>해서 전체 UI 갱신.';
+        document.getElementById('curVersion').textContent = v.sha;
+        showToast('✅ 업데이트 완료!');
+      }
+    } catch {}
+  }, 10_000);
+}
+
 doBtn.addEventListener('click', async () => {
   if (!confirm('지금 봇을 업데이트하시겠어요? 1~2분 동안 봇이 재시작됩니다.')) return;
-  doBtn.disabled = true;
-  hint.textContent = '⏳ 업데이트 요청 중...';
+  // UI: 버튼 숨김 + 로딩 표시
+  checkBtn.style.display = 'none';
+  doBtn.style.display = 'none';
+  badge.innerHTML = '<span class="pill update">⏳ 업데이트 중…</span> <span class="spinner"></span>';
+  hint.textContent = '업데이트 요청 중...';
   try {
     const res = await fetch('/api/update', { method: 'POST' });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'failed');
     showToast('✅ ' + (data.message || '업데이트 요청됨'));
-    hint.innerHTML = '✅ <b>요청 완료.</b> cron이 1분 안에 감지해 docker pull + 재시작. 1~2분 후 새로고침하면 새 버전이 표시됩니다.';
+    hint.innerHTML = '⏳ <b>업데이트 진행 중...</b><br>cron 감지 → docker pull → 컨테이너 재시작 → 새 버전 확인 (1~3분 소요).';
+    startUpdatePolling();
   } catch (e) {
     showToast('❌ ' + e.message, false);
     hint.textContent = '❌ ' + e.message;
+    // 실패 시 버튼 복구
+    checkBtn.style.display = 'inline-block';
+    doBtn.style.display = 'inline-block';
     doBtn.disabled = false;
   }
 });
 </script>
+<style>
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { display:inline-block; width:14px; height:14px; border:2px solid #94a3b8; border-top-color:#3b82f6; border-radius:50%; animation: spin 1s linear infinite; vertical-align: middle; margin-left:6px; }
+</style>
 </body>
 </html>`;
+};
 
 export function startDashboard(port = 8080): void {
   const app = new Hono();
 
   app.get('/', (c) => c.html(HTML(readSettings())));
   app.get('/health', (c) => c.text('ok'));
+
+  // 현재 봇 버전 (업데이트 폴링용)
+  app.get('/api/version', (c) =>
+    c.json({ sha: shortSha(GIT_SHA), buildDate: BUILD_DATE }),
+  );
 
   app.post('/api/settings', async (c) => {
     const body = (await c.req.json()) as Settings;
