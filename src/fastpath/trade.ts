@@ -20,6 +20,7 @@ import { resolveSymbol, type ResolvedSymbol } from './symbol.js';
 import { formatKst, getMarketSession, nextMarketOpen, sessionLabel } from '../scheduler/calendar.js';
 import type { OrderType } from '../mcp/kis.js';
 import { getConfig } from '../config.js';
+import { cached } from './cache.js';
 
 // ============================================================
 // 메인 메뉴
@@ -255,7 +256,16 @@ function pctOrOffLabel(v: string, prefix: '+' | '-'): string {
 }
 
 // 매수가능금액 조회 + 진단 정보. 실패 시 어느 단계가 왜 실패했는지 반환해서 사용자에게 보여줌.
+// 15초 캐싱 — 같은 종목/같은 가격대 반복 조회 시 KIS rate limit 회피.
 async function fetchOrderableCash(
+  code: string,
+  refPrice: number,
+): Promise<{ cash: number | null; diag: string }> {
+  const cacheKey = `psbl:${code}:${Math.round(refPrice / 100) * 100}`;
+  return cached(cacheKey, 15_000, () => _fetchOrderableCashImpl(code, refPrice));
+}
+
+async function _fetchOrderableCashImpl(
   code: string,
   refPrice: number,
 ): Promise<{ cash: number | null; diag: string }> {
@@ -329,18 +339,21 @@ async function fetchOrderableCash(
   return { cash: null, diag: diag.join(' | ') };
 }
 
+// 10초 캐싱 — 즉시매수/시세조회/차트가 짧은 시간에 같은 종목 가격을 본다.
 async function fetchCurrentPrice(code: string): Promise<number | null> {
-  try {
-    const r = await callKisApi('domestic_stock', 'inquire_price', {
-      fid_cond_mrkt_div_code: 'J',
-      fid_input_iscd: code,
-    });
-    const parsed = parseMcpResult(r);
-    if (!parsed.success) return null;
-    return num(firstOutput(parsed)?.stck_prpr);
-  } catch {
-    return null;
-  }
+  return cached(`price:${code}`, 10_000, async () => {
+    try {
+      const r = await callKisApi('domestic_stock', 'inquire_price', {
+        fid_cond_mrkt_div_code: 'J',
+        fid_input_iscd: code,
+      });
+      const parsed = parseMcpResult(r);
+      if (!parsed.success) return null;
+      return num(firstOutput(parsed)?.stck_prpr);
+    } catch {
+      return null;
+    }
+  });
 }
 
 export function buildBuyNowTpMenu(
@@ -566,21 +579,24 @@ type Holding = {
   pflsPct: number;
 };
 
+// 매도 흐름에서 종목선택 → 수량선택 → 확정 3단계가 같은 잔고를 본다. 20초 캐싱.
 async function fetchHoldings(): Promise<Holding[]> {
-  const res = await callKisApi('domestic_stock', 'inquire_balance', {});
-  const parsed = parseMcpResult(res);
-  if (!parsed.success) return [];
-  const list = outputList(parsed, 'output1');
-  return list
-    .map((h) => ({
-      code: String(h.pdno ?? ''),
-      name: String(h.prdt_name ?? h.pdno ?? ''),
-      qty: num(h.hldg_qty) ?? 0,
-      avgPrice: num(h.pchs_avg_pric) ?? 0,
-      curPrice: num(h.prpr) ?? 0,
-      pflsPct: num(h.evlu_pfls_rt) ?? 0,
-    }))
-    .filter((h) => h.qty > 0);
+  return cached('holdings', 20_000, async () => {
+    const res = await callKisApi('domestic_stock', 'inquire_balance', {});
+    const parsed = parseMcpResult(res);
+    if (!parsed.success) return [];
+    const list = outputList(parsed, 'output1');
+    return list
+      .map((h) => ({
+        code: String(h.pdno ?? ''),
+        name: String(h.prdt_name ?? h.pdno ?? ''),
+        qty: num(h.hldg_qty) ?? 0,
+        avgPrice: num(h.pchs_avg_pric) ?? 0,
+        curPrice: num(h.prpr) ?? 0,
+        pflsPct: num(h.evlu_pfls_rt) ?? 0,
+      }))
+      .filter((h) => h.qty > 0);
+  });
 }
 
 export async function buildSellSymbolMenu(): Promise<{ text: string; kb: InlineKeyboard }> {

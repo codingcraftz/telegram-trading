@@ -22,6 +22,7 @@ import { buildPositionsView } from '../fastpath/positions.js';
 import { buildOrdersView } from '../fastpath/orders.js';
 import { cancelKrxOrder } from '../mcp/kis.js';
 import { checkKisOk, parseMcpResult } from '../fastpath/extract.js';
+import { invalidate as invalidateCache } from '../fastpath/cache.js';
 import {
   handleMarketOpenCommand,
   handleMarketOpenReserve,
@@ -260,6 +261,9 @@ export function registerHandlers(bot: Bot) {
           tpPct: spec.tp_pct ?? null,
           slPct: spec.sl_pct ?? null,
         }).catch((err) => console.error('[pollFill] failed', err));
+        // 발주 직후 잔고/포지션 캐시 무효화 (체결 후엔 변경됨)
+        invalidateCache('holdings');
+        invalidateCache('balance:raw');
         return `📨 매수 주문 접수 (#${orderId})\n포지션 ${positionId} · 체결 확인 중…`;
       } catch (err) {
         logTrade({ chatId, kind: 'order_error', payload: { error: (err as Error).message } });
@@ -308,6 +312,8 @@ export function registerHandlers(bot: Bot) {
       };
       const orderId = ext(result, 'ODNO', 'odno', 'ord_no') ?? `sell-${Date.now()}`;
       logTrade({ chatId, kind: 'sell_submitted', payload: { orderId, spec } });
+      invalidateCache('holdings');
+      invalidateCache('balance:raw');
       return `📤 매도 주문 접수 (#${orderId})\n${spec.symbol_name} ${spec.quantity}주 ${spec.order_type === 'market' ? '시장가' : `${spec.price?.toLocaleString()}원`}`;
     } catch (err) {
       logTrade({ chatId, kind: 'order_error', payload: { error: (err as Error).message } });

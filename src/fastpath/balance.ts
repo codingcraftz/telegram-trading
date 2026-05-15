@@ -4,6 +4,7 @@ import { InlineKeyboard } from 'grammy';
 import { callKisApi } from '../mcp/kis.js';
 import { getMarketSession, sessionLabel } from '../scheduler/calendar.js';
 import { checkKisOk, fmtKrw, fmtNum, num, outputDict, outputList, parseMcpResult } from './extract.js';
+import { cached } from './cache.js';
 
 // STT 공백 변형 대응을 위해 normalize 후 키워드 매칭
 function normalize(s: string): string {
@@ -41,7 +42,10 @@ function nowKstShort(): string {
 }
 
 export async function buildBalanceView(): Promise<{ text: string; kb: InlineKeyboard }> {
-  const res = await callKisApi('domestic_stock', 'inquire_balance', {});
+  // 잔고 raw 응답을 20초 캐싱 — 같은 사용자가 잔고/포지션 화면 전환 시 중복 호출 방지.
+  const res = await cached('balance:raw', 20_000, () =>
+    callKisApi('domestic_stock', 'inquire_balance', {}),
+  );
   const parsed = parseMcpResult(res);
   if (!parsed.success) {
     return {

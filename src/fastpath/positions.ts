@@ -11,6 +11,7 @@ import { InlineKeyboard } from 'grammy';
 import { listChatPositions } from '../db/repo.js';
 import { callKisApi } from '../mcp/kis.js';
 import { checkKisOk, num, outputList, parseMcpResult } from './extract.js';
+import { cached } from './cache.js';
 
 type HoldingRow = {
   qty: number;
@@ -21,7 +22,10 @@ type HoldingRow = {
 };
 
 async function fetchHoldingsMap(): Promise<{ map: Map<string, HoldingRow>; error?: string }> {
-  const res = await callKisApi('domestic_stock', 'inquire_balance', {});
+  // 잔고/포지션 화면이 같은 raw 응답을 본다. 20초 캐싱.
+  const res = await cached('balance:raw', 20_000, () =>
+    callKisApi('domestic_stock', 'inquire_balance', {}),
+  );
   const parsed = parseMcpResult(res);
   const map = new Map<string, HoldingRow>();
   if (!parsed.success) return { map, error: parsed.error ?? 'MCP 파싱 실패' };
