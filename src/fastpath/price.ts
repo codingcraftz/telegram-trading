@@ -1,8 +1,9 @@
-// 현재가/시세 fast-path. LLM 호출 없이 MCP만으로 응답.
+// 현재가/시세 fast-path. KIS 응답을 10초 캐싱해 같은 종목 반복 조회 시 API rate limit 회피.
 
 import { callKisApi } from '../mcp/kis.js';
 import { firstOutput, fmtKrw, fmtNum, fmtPct, num, parseMcpResult } from './extract.js';
 import { resolveSymbol } from './symbol.js';
+import { cached } from './cache.js';
 
 // 매칭 패턴: "[종목명/코드] (현재가|시세|주가|가격|얼마|...조회)"
 const PRICE_RE =
@@ -14,15 +15,12 @@ export function tryMatchPrice(text: string): { sym: string } | null {
   return { sym: m.groups.sym.trim() };
 }
 
-// 현재가만 빠르게 추출 — 관심종목 inline 시세 표시용
+// 현재가만 빠르게 추출 — 관심종목/차트/시세조회 inline 표시용. 캐시 공유.
 export async function fetchQuickQuote(
   code: string,
 ): Promise<{ price: number; changePct: number; signLabel: string } | null> {
   try {
-    const res = await callKisApi('domestic_stock', 'inquire_price', {
-      fid_cond_mrkt_div_code: 'J',
-      fid_input_iscd: code,
-    });
+    const res = await fetchPriceRaw(code);
     const parsed = parseMcpResult(res);
     if (!parsed.success) return null;
     const d = firstOutput(parsed);
@@ -39,16 +37,23 @@ export async function fetchQuickQuote(
   }
 }
 
+// inquire_price raw 응답을 10초 캐싱. fetchQuickQuote, handlePriceQuery, chart.ts 모두 공유.
+async function fetchPriceRaw(code: string): Promise<unknown> {
+  return cached(`inquire_price:${code}`, 10_000, () =>
+    callKisApi('domestic_stock', 'inquire_price', {
+      fid_cond_mrkt_div_code: 'J',
+      fid_input_iscd: code,
+    }),
+  );
+}
+
 export async function handlePriceQuery(symbolInput: string): Promise<string> {
   const sym = await resolveSymbol(symbolInput);
   if (!sym) {
     return `❓ 종목을 찾지 못했습니다: "${symbolInput}"`;
   }
 
-  const res = await callKisApi('domestic_stock', 'inquire_price', {
-    fid_cond_mrkt_div_code: 'J',
-    fid_input_iscd: sym.code,
-  });
+  const res = await fetchPriceRaw(sym.code);
   const parsed = parseMcpResult(res);
   if (!parsed.success) {
     return `❌ 시세 조회 실패: ${parsed.error ?? '알 수 없는 오류'}`;

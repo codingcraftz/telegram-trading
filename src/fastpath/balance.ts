@@ -3,8 +3,9 @@
 import { InlineKeyboard } from 'grammy';
 import { callKisApi } from '../mcp/kis.js';
 import { getMarketSession, sessionLabel } from '../scheduler/calendar.js';
-import { checkKisOk, fmtKrw, fmtNum, num, outputDict, outputList, parseMcpResult } from './extract.js';
+import { checkKisOk, fmtKrw, num, outputDict, outputList, parseMcpResult } from './extract.js';
 import { cached } from './cache.js';
+import { renderBalanceCardPng, type BalanceHolding } from '../charts/balance-card.js';
 
 // STT 공백 변형 대응을 위해 normalize 후 키워드 매칭
 function normalize(s: string): string {
@@ -41,8 +42,13 @@ function nowKstShort(): string {
   return `${yyyy}-${mm}-${dd} ${HH}:${MI} KST`;
 }
 
-export async function buildBalanceView(): Promise<{ text: string; kb: InlineKeyboard }> {
-  // 잔고 raw 응답을 20초 캐싱 — 같은 사용자가 잔고/포지션 화면 전환 시 중복 호출 방지.
+export type BalanceView = {
+  text: string;
+  kb: InlineKeyboard;
+  png?: Buffer; // 보유종목 카드 (있으면 텍스트와 함께 전송)
+};
+
+export async function buildBalanceView(): Promise<BalanceView> {
   const res = await cached('balance:raw', 20_000, () =>
     callKisApi('domestic_stock', 'inquire_balance', {}),
   );
@@ -66,60 +72,59 @@ export async function buildBalanceView(): Promise<{ text: string; kb: InlineKeyb
   const session = getMarketSession();
   const sLabel = sessionLabel(session);
 
-  const lines: string[] = [];
-  lines.push(`💰 <b>계좌 요약</b> · ${nowKstShort()} · ${sLabel.icon} ${sLabel.label}`);
+  const totEvlu = num(summary?.tot_evlu_amt) ?? 0;
+  const dnca = num(summary?.dnca_tot_amt) ?? 0;
+  const pflsSmt = num(summary?.evlu_pfls_smtl_amt) ?? 0;
+  const pflsRt = num(summary?.asst_icdc_erng_rt) ?? 0;
 
-  if (summary) {
-    const totEvlu = num(summary.tot_evlu_amt); // 총평가
-    const dnca = num(summary.dnca_tot_amt); // 예수금
-    const pchsSmt = num(summary.pchs_amt_smtl_amt); // 매입금액합계
-    const evluSmt = num(summary.evlu_amt_smtl_amt); // 평가금액합계
-    const pflsSmt = num(summary.evlu_pfls_smtl_amt); // 평가손익
-    const pflsRt = num(summary.asst_icdc_erng_rt); // 자산증감수익률
-    const d2 = num(summary.nxdy_excc_amt); // 익일정산금액
-
-    if (dnca !== null) lines.push(`예수금: ${fmtKrw(dnca)}`);
-    if (totEvlu !== null) lines.push(`총 평가: ${fmtKrw(totEvlu)}`);
-    if (evluSmt !== null && pchsSmt !== null) {
-      lines.push(`주식 평가: ${fmtKrw(evluSmt)} (매입 ${fmtKrw(pchsSmt)})`);
-    }
-    if (pflsSmt !== null) {
-      const sign = pflsSmt >= 0 ? '+' : '';
-      const rtTxt = pflsRt !== null ? ` (${sign}${pflsRt.toFixed(2)}%)` : '';
-      lines.push(`평가손익: <b>${sign}${Math.round(pflsSmt).toLocaleString()}원</b>${rtTxt}`);
-    }
-    if (d2 !== null) lines.push(`익일정산: ${fmtKrw(d2)}`);
-  }
+  // 텍스트는 짧게 (총자산/예수금/손익 한 줄씩)
+  const sign = pflsSmt >= 0 ? '+' : '';
+  const lines = [
+    `💰 <b>내 계좌</b>  ${sLabel.icon} ${sLabel.label}`,
+    `총 평가 <b>${fmtKrw(totEvlu)}</b>  ·  예수금 ${fmtKrw(dnca)}`,
+    `평가손익 <b>${sign}${Math.round(pflsSmt).toLocaleString()}원 (${sign}${pflsRt.toFixed(2)}%)</b>`,
+  ];
 
   const kb = new InlineKeyboard();
 
-  if (holdings.length === 0) {
-    lines.push('');
-    lines.push('보유 종목 없음');
+  // 카드 이미지용 holdings 변환
+  const cardHoldings: BalanceHolding[] = holdings.map((h) => ({
+    name: String(h.prdt_name ?? h.pdno ?? ''),
+    code: String(h.pdno ?? ''),
+    qty: num(h.hldg_qty) ?? 0,
+    avg: num(h.pchs_avg_pric) ?? 0,
+    cur: num(h.prpr) ?? 0,
+    pflsAmt: num(h.evlu_pfls_amt) ?? 0,
+    pflsRt: num(h.evlu_pfls_rt) ?? 0,
+  }));
+
+  if (cardHoldings.length === 0) {
+    lines.push('', '보유 종목 없음');
   } else {
-    lines.push('');
-    lines.push(`📈 <b>보유 종목 ${holdings.length}개</b>`);
-    for (const h of holdings) {
-      const code = String(h.pdno ?? '');
-      const name = String(h.prdt_name ?? code);
-      const qty = num(h.hldg_qty) ?? 0;
-      const avg = num(h.pchs_avg_pric) ?? 0;
-      const cur = num(h.prpr) ?? 0;
-      const pfls = num(h.evlu_pfls_amt) ?? 0;
-      const pflsRt = num(h.evlu_pfls_rt) ?? 0;
-      const sign = pfls >= 0 ? '+' : '';
-      lines.push(
-        `• <b>${name}</b> (${code}) ${fmtNum(qty)}주\n` +
-          `   매입 ${fmtKrw(avg)} → 현재 ${fmtKrw(cur)}\n` +
-          `   손익 ${sign}${Math.round(pfls).toLocaleString()}원 (${sign}${pflsRt.toFixed(2)}%)`,
-      );
-      kb.text(`📤 매도 ${name}`, `bal:sell:${code}`).row();
+    lines.push('', `📈 보유 종목 ${cardHoldings.length}개 (상세는 ↓ 카드)`);
+    for (const h of cardHoldings) {
+      kb.text(`📤 매도 ${h.name}`, `bal:sell:${h.code}`).row();
     }
   }
 
   kb.text('📊 포지션', 'nav:positions').text('📋 대기', 'nav:orders');
 
-  return { text: lines.join('\n'), kb };
+  let png: Buffer | undefined;
+  if (cardHoldings.length > 0) {
+    try {
+      png = await renderBalanceCardPng({
+        totalEvlu: totEvlu,
+        cash: dnca,
+        totalPfls: pflsSmt,
+        totalPflsRt: pflsRt,
+        holdings: cardHoldings,
+      });
+    } catch (err) {
+      console.warn('[balance] card render failed:', (err as Error).message);
+    }
+  }
+
+  return { text: lines.join('\n'), kb, png };
 }
 
 // 하위 호환 — 텍스트만 필요한 곳용

@@ -188,14 +188,25 @@ export function registerHandlers(bot: Bot) {
     );
   });
 
-  bot.command('balance', async (ctx) => {
+  // 잔고: 텍스트 요약 + 보유종목 카드 PNG 함께 전송.
+  async function sendBalance(ctx: Context) {
     try {
       const v = await buildBalanceView();
-      await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+      if (v.png) {
+        await ctx.replyWithPhoto(new InputFile(v.png, 'balance.png'), {
+          caption: v.text,
+          reply_markup: v.kb,
+          parse_mode: 'HTML',
+        });
+      } else {
+        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
+      }
     } catch (err) {
       await ctx.reply(`❌ 잔고 조회 실패: ${(err as Error).message}`);
     }
-  });
+  }
+
+  bot.command('balance', (ctx) => sendBalance(ctx));
 
   bot.command(['reservations', 'orders', 'pending'], async (ctx) => {
     try {
@@ -1024,19 +1035,10 @@ export function registerHandlers(bot: Bot) {
 
   // ===== 잔고/포지션 화면 인라인 액션 =====
 
-  // 잔고 화면 → [📊 포지션] / [📋 대기] 단축
+  // 잔고 화면 → 새 메시지로 PNG 카드 + 텍스트 함께 전송 (editMessage는 photo로 못 바꿈)
   bot.callbackQuery('nav:balance', async (ctx) => {
     await ctx.answerCallbackQuery();
-    try {
-      const v = await buildBalanceView();
-      try {
-        await ctx.editMessageText(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
-      } catch {
-        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
-      }
-    } catch (err) {
-      await ctx.reply(`❌ 잔고 조회 실패: ${(err as Error).message}`);
-    }
+    await sendBalance(ctx);
   });
 
   bot.callbackQuery('nav:positions', async (ctx) => {
@@ -1393,12 +1395,7 @@ export function registerHandlers(bot: Bot) {
       return;
     }
     if (cleaned === '잔고') {
-      try {
-        const v = await buildBalanceView();
-        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
-      } catch (err) {
-        await ctx.reply(`❌ 잔고 조회 실패: ${(err as Error).message}`);
-      }
+      await sendBalance(ctx);
       return;
     }
     if (cleaned === '도움말') {
@@ -1514,12 +1511,7 @@ export function registerHandlers(bot: Bot) {
       return true;
     }
     if ((arg = tryPrefix('/잔고')) !== null) {
-      try {
-        const v = await buildBalanceView();
-        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
-      } catch (err) {
-        await ctx.reply(`❌ 잔고 조회 실패: ${(err as Error).message}`);
-      }
+      await sendBalance(ctx);
       return true;
     }
     if ((arg = tryPrefix('/포지션')) !== null || (arg = tryPrefix('/보유')) !== null) {
