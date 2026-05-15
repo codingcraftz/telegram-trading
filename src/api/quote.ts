@@ -4,6 +4,7 @@ import type { Context } from 'hono';
 import { callKisApi } from '../mcp/kis.js';
 import { cached } from '../fastpath/cache.js';
 import { checkKisOk, firstOutput, num, parseMcpResult } from '../fastpath/extract.js';
+import { fetchQuickQuote } from '../fastpath/price.js';
 import { resolveSymbol, searchSymbolCandidates } from '../fastpath/symbol.js';
 
 export async function handleQuote(c: Context) {
@@ -50,6 +51,42 @@ export async function handleQuote(c: Context) {
     eps: d.eps ?? null,
     bps: d.bps ?? null,
     foreignerRatio: num(d.hts_frgn_ehrt) ?? 0,
+  });
+}
+
+// GET /api/quotes?codes=A,B,C — N종목 시세 한 번에 (병렬 호출 + 봇 캐시 활용)
+export async function handleQuotes(c: Context) {
+  const raw = c.req.query('codes')?.trim() ?? '';
+  if (!raw) return c.json({ items: [] });
+  const codes = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => /^\d{6}$/.test(s))
+    .slice(0, 30); // 안전 한계
+  const sym = await Promise.all(codes.map((code) => resolveSymbol(code)));
+  const quotes = await Promise.all(
+    codes.map(async (code) => {
+      try {
+        const q = await fetchQuickQuote(code);
+        return q ? { code, ...q } : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return c.json({
+    items: codes.map((code, i) => {
+      const q = quotes[i];
+      const s = sym[i];
+      return {
+        code,
+        name: s?.name ?? code,
+        ok: !!q,
+        price: q?.price ?? 0,
+        changePct: q?.changePct ?? 0,
+        signLabel: q?.signLabel ?? '–',
+      };
+    }),
   });
 }
 

@@ -18,7 +18,7 @@ import {
   handleTradeSell,
 } from '../api/trade.js';
 import { handleOrders } from '../api/orders.js';
-import { handleQuote, handleSearch } from '../api/quote.js';
+import { handleQuote, handleQuotes, handleSearch } from '../api/quote.js';
 import { handleChartApi } from '../api/chart.js';
 import {
   handleWatchlistAdd,
@@ -343,6 +343,7 @@ export function startDashboard(port = 8080): void {
   app.get('/api/balance', handleBalance);
   app.get('/api/orders', handleOrders);
   app.get('/api/quote', handleQuote);
+  app.get('/api/quotes', handleQuotes); // batch (실시간 폴링용)
   app.get('/api/search', handleSearch);
   app.get('/api/chart', handleChartApi);
   app.get('/api/watchlist', handleWatchlistList);

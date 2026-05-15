@@ -30,6 +30,9 @@ export const api = {
   balance: () => request<BalanceResponse>('/api/balance'),
   orders: () => request<OrdersResponse>('/api/orders'),
   quote: (code: string) => request<QuoteResponse>(`/api/quote?code=${code}`),
+  // 실시간 폴링용 batch — 종목 N개 한 번에. 봇 캐시 (2.5s)와 클라이언트 폴링 (1~3s) 조합.
+  quotes: (codes: string[]) =>
+    request<{ items: QuotesItem[] }>(`/api/quotes?codes=${codes.join(',')}`),
   search: (q: string) => request<{ items: SearchItem[] }>(`/api/search?q=${encodeURIComponent(q)}`),
   watchlist: () => request<WatchlistResponse>('/api/watchlist'),
   strategy: () => request<StrategyResponse>('/api/strategy'),
@@ -128,6 +131,15 @@ export type QuoteResponse = {
 };
 
 export type SearchItem = { code: string; name: string };
+
+export type QuotesItem = {
+  code: string;
+  name: string;
+  ok: boolean;
+  price: number;
+  changePct: number;
+  signLabel: string;
+};
 
 export type WatchlistItem = {
   id: number;

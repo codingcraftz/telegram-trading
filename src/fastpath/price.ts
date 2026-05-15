@@ -37,9 +37,10 @@ export async function fetchQuickQuote(
   }
 }
 
-// inquire_price raw 응답을 10초 캐싱. fetchQuickQuote, handlePriceQuery, chart.ts 모두 공유.
+// inquire_price raw 응답을 2.5초 캐싱 — 1~3초 PWA 폴링과 잘 맞춤.
+// 같은 종목에 동시 다발 호출이면 한 번만 KIS, 나머지는 캐시 hit.
 async function fetchPriceRaw(code: string): Promise<unknown> {
-  return cached(`inquire_price:${code}`, 10_000, () =>
+  return cached(`inquire_price:${code}`, 2_500, () =>
     callKisApi('domestic_stock', 'inquire_price', {
       fid_cond_mrkt_div_code: 'J',
       fid_input_iscd: code,
