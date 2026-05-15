@@ -8,10 +8,11 @@
 
 import { envDv } from '../runtime.js';
 import { getAccessToken, getKisBaseUrlFor, type KisMode } from './auth.js';
-import { getKisAccount, getKisCredentials, hasRealKeys } from './config.js';
+import { getKisAccount, getKisCredentials } from './config.js';
 
-// 시장 데이터 API — 계좌 무관, read-only. 실전 키 있으면 실전으로 호출 (rate limit 분당 1080,
-// 모의는 60). 실전 키 없으면 모의로 fallback.
+// 시장 데이터 API — 계좌 무관, read-only. 항상 실전 키 사용 (분당 1080건).
+// 모의 키 fallback 금지 — 사용자 결정: 시세는 실전 only, 매매만 모의.
+// 실전 키 없으면 getAccessToken이 throw → 호출 측 명시 에러.
 const MARKET_DATA_APIS = new Set([
   'inquire_price',
   'inquire_asking_price_exp_ccn',
@@ -23,7 +24,7 @@ const MARKET_DATA_APIS = new Set([
 ]);
 
 function pickModeFor(apiType: string): KisMode {
-  if (MARKET_DATA_APIS.has(apiType) && hasRealKeys()) return 'real';
+  if (MARKET_DATA_APIS.has(apiType)) return 'real';
   return envDv();
 }
 

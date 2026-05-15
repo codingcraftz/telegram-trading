@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { RefreshCw } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import SymbolSearch from '@/components/SymbolSearch.vue';
+import TradeChart, { type TradeCandle } from '@/components/TradeChart.vue';
 import { api, type SearchItem } from '@/api/client';
 
 const INTERVALS = [
   { key: '1m', label: '1분' },
   { key: '5m', label: '5분' },
   { key: '15m', label: '15분' },
+  { key: '30m', label: '30분' },
   { key: '1h', label: '1시간' },
   { key: '4h', label: '4시간' },
   { key: '1d', label: '일봉' },
@@ -19,34 +21,47 @@ const INTERVALS = [
 const route = useRoute();
 const router = useRouter();
 const code = ref<string>((route.query.code as string) ?? '');
-const interval = ref<string>((route.query.interval as string) ?? '1d');
-const tick = ref(0); // 새로고침 트리거
+const interval = ref<string>((route.query.interval as string) ?? '5m');
+const candles = ref<TradeCandle[]>([]);
+const loading = ref(false);
 
-const imgSrc = computed(() =>
-  code.value
-    ? `${api.chartUrl(code.value, interval.value)}&t=${tick.value}`
-    : '',
-);
+async function load() {
+  if (!code.value) {
+    candles.value = [];
+    return;
+  }
+  loading.value = true;
+  try {
+    const r = await api.candles(code.value, interval.value, 200);
+    candles.value = r.candles;
+  } catch (err) {
+    console.warn(err);
+  } finally {
+    loading.value = false;
+  }
+}
 
 function pickSymbol(item: SearchItem) {
   code.value = item.code;
   router.replace({ query: { code: item.code, interval: interval.value } });
 }
-
 function selectInterval(k: string) {
   interval.value = k;
   router.replace({ query: { code: code.value, interval: k } });
-  tick.value++;
 }
 
-function refresh() {
-  tick.value++;
-}
-
-watch(() => route.query, (q) => {
-  code.value = (q.code as string) ?? '';
-  interval.value = (q.interval as string) ?? '1d';
+let timer: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  load();
+  // 5초마다 갱신
+  timer = setInterval(load, 5_000);
 });
+onUnmounted(() => {
+  if (timer) clearInterval(timer);
+});
+
+watch(code, load);
+watch(interval, load);
 </script>
 
 <template>
@@ -65,18 +80,16 @@ watch(() => route.query, (q) => {
       >
         {{ i.label }}
       </Button>
-      <Button variant="ghost" size="icon" class="ml-auto" @click="refresh">
-        <RefreshCw class="h-4 w-4" />
+      <Button variant="ghost" size="icon" class="ml-auto" :disabled="loading" @click="load">
+        <RefreshCw class="h-4 w-4" :class="loading ? 'animate-spin' : ''" />
       </Button>
     </div>
 
     <Card v-if="code">
-      <img
-        :src="imgSrc"
-        :alt="`${code} ${interval} 차트`"
-        class="w-full rounded-lg"
-        loading="lazy"
-      />
+      <TradeChart :candles="candles" :height="480" :show-volume="true" />
+      <p class="mt-2 text-[11px] text-muted-foreground text-center">
+        터치로 zoom·pan · 5초마다 자동 갱신 · 캔들 {{ candles.length }}개
+      </p>
     </Card>
     <Card v-else>
       <p class="text-sm text-muted-foreground">

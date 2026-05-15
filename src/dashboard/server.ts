@@ -20,6 +20,7 @@ import {
 import { handleOrders } from '../api/orders.js';
 import { handleQuote, handleQuotes, handleSearch } from '../api/quote.js';
 import { handleChartApi } from '../api/chart.js';
+import { handleCandles } from '../api/candles.js';
 import {
   handleWatchlistAdd,
   handleWatchlistList,
@@ -345,7 +346,8 @@ export function startDashboard(port = 8080): void {
   app.get('/api/quote', handleQuote);
   app.get('/api/quotes', handleQuotes); // batch (실시간 폴링용)
   app.get('/api/search', handleSearch);
-  app.get('/api/chart', handleChartApi);
+  app.get('/api/chart', handleChartApi); // (legacy PNG — 텔레그램 봇용)
+  app.get('/api/candles', handleCandles); // 인터랙티브 차트용 JSON
   app.get('/api/watchlist', handleWatchlistList);
   app.get('/api/strategy', handleStrategyGet);
 

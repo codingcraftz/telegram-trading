@@ -18,7 +18,8 @@
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.6.0",
     "lucide-vue-next": "^0.469.0",
-    "radix-vue": "^1.9.13"
+    "radix-vue": "^1.9.13",
+    "lightweight-charts": "^5.2.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",

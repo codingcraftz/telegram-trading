@@ -31,10 +31,10 @@ export function handleKeysStatus(c: Context) {
     tradingMode, // 'paper' | 'real' — 실제 매매에 사용
     paperKeys: hasPaper,
     realKeys: hasReal,
-    // 시장 데이터는 실전 키 있으면 그쪽으로 (rate limit 분당 1080), 없으면 모의(60)
-    marketDataMode: hasReal ? 'real' : tradingMode === 'real' ? 'real' : 'demo',
+    // 시세/차트/검색은 항상 실전 키 (실전 키 없으면 시세 조회 자체 불가)
+    marketDataMode: 'real' as const,
     notice: hasReal
-      ? '시세/차트는 실전 키 사용 (rate limit 여유), 매매는 현재 모드 사용'
-      : '실전 키가 없어 시세/차트도 모의 키로 호출 (rate limit 분당 60건)',
+      ? '시세/차트는 실전 키 (1080/min), 매매는 현재 모드'
+      : '⚠️ 실전 키 미입력 — 시세/차트 조회 불가. 설정에서 실전 키 입력 필요.',
   });
 }

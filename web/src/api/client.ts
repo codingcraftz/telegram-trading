@@ -34,6 +34,8 @@ export const api = {
   quotes: (codes: string[]) =>
     request<{ items: QuotesItem[] }>(`/api/quotes?codes=${codes.join(',')}`),
   search: (q: string) => request<{ items: SearchItem[] }>(`/api/search?q=${encodeURIComponent(q)}`),
+  candles: (code: string, interval = '5m', count = 180) =>
+    request<CandlesResponse>(`/api/candles?code=${code}&interval=${interval}&count=${count}`),
   watchlist: () => request<WatchlistResponse>('/api/watchlist'),
   strategy: () => request<StrategyResponse>('/api/strategy'),
   version: () => request<{ sha: string; buildDate: string }>('/api/version'),
@@ -131,6 +133,20 @@ export type QuoteResponse = {
 };
 
 export type SearchItem = { code: string; name: string };
+
+export type CandlesResponse = {
+  code: string;
+  interval: string;
+  count: number;
+  candles: Array<{
+    ts: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }>;
+};
 
 export type QuotesItem = {
   code: string;

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
 import { RefreshCw, Plus, Pause, Play } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import SymbolSearch from '@/components/SymbolSearch.vue';
+import TradeChart, { type TradeCandle } from '@/components/TradeChart.vue';
 import { api, type QuoteResponse, type SearchItem } from '@/api/client';
 import { fmtKrw, fmtNum, fmtPct, pflsColor } from '@/lib/format';
 
@@ -19,20 +20,18 @@ const INTERVALS = [
 const route = useRoute();
 const router = useRouter();
 const code = ref<string>((route.query.code as string) ?? '');
-const interval = ref<string>('1d');
+const interval = ref<string>('5m');
 const quote = ref<QuoteResponse | null>(null);
+const candles = ref<TradeCandle[]>([]);
 const loading = ref(false);
+const chartLoading = ref(false);
 const error = ref<string | null>(null);
-const chartTick = ref(0);
 
-// 자동 폴링 (가격 + 차트)
+// 자동 폴링 (가격만 — 차트 데이터는 5초마다)
 const paused = ref(false);
 const intervalSec = ref(3);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
-
-const chartUrl = computed(() =>
-  code.value ? `${api.chartUrl(code.value, interval.value)}&t=${chartTick.value}` : '',
-);
+let chartTick = 0; // 차트 갱신 카운터
 
 async function load() {
   if (!code.value) {
@@ -50,19 +49,31 @@ async function load() {
   }
 }
 
+async function loadCandles() {
+  if (!code.value) return;
+  chartLoading.value = true;
+  try {
+    const r = await api.candles(code.value, interval.value, 180);
+    candles.value = r.candles;
+  } catch (err) {
+    console.warn('candles fail:', (err as Error).message);
+  } finally {
+    chartLoading.value = false;
+  }
+}
+
 async function refreshAll() {
-  await load();
-  chartTick.value++;
+  await Promise.all([load(), loadCandles()]);
 }
 
 function startPolling() {
   stopPolling();
   if (paused.value || !code.value) return;
   pollTimer = setInterval(() => {
-    // 가격만 폴링, 차트는 30초마다
+    // 가격은 매 tick. 차트 데이터는 5번에 한 번 (≈ 15초 if intervalSec=3).
     load();
-    if (chartTick.value % 10 === 0) chartTick.value++;
-    chartTick.value++;
+    chartTick++;
+    if (chartTick % 5 === 0) loadCandles();
   }, intervalSec.value * 1000);
 }
 function stopPolling() {
@@ -92,14 +103,14 @@ async function addWatchlist() {
 
 watch(code, () => {
   load();
-  chartTick.value++;
+  loadCandles();
   startPolling();
 });
 watch(intervalSec, () => startPolling());
-watch(interval, () => chartTick.value++);
+watch(interval, () => loadCandles());
 
 onMounted(() => {
-  load();
+  refreshAll();
   startPolling();
 });
 onUnmounted(stopPolling);
@@ -207,12 +218,15 @@ onUnmounted(stopPolling);
       </div>
     </Card>
 
-    <!-- 차트 인라인 -->
+    <!-- 인터랙티브 차트 -->
     <Card v-if="code">
       <template #header>
         <div class="flex items-center justify-between">
-          <h3 class="text-sm font-semibold">📈 차트</h3>
-          <div class="flex gap-1">
+          <h3 class="text-sm font-semibold">
+            📈 차트
+            <span v-if="chartLoading" class="text-xs text-muted-foreground">로딩…</span>
+          </h3>
+          <div class="flex gap-1 overflow-x-auto">
             <Button
               v-for="i in INTERVALS"
               :key="i.key"
@@ -225,7 +239,14 @@ onUnmounted(stopPolling);
           </div>
         </div>
       </template>
-      <img :src="chartUrl" :alt="`${code} ${interval}`" class="w-full rounded-lg" loading="lazy" />
+      <TradeChart
+        :candles="candles"
+        :height="360"
+        :show-volume="true"
+      />
+      <p v-if="candles.length > 0" class="mt-2 text-[11px] text-muted-foreground text-center">
+        터치로 zoom · pan · crosshair · 캔들 {{ candles.length }}개
+      </p>
     </Card>
 
     <Card v-else>
