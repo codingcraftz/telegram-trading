@@ -324,6 +324,12 @@ export function startDashboard(port = 8080): void {
   const hasSpa = existsSync(WEB_INDEX);
   console.log(`[dashboard] SPA at ${WEB_ROOT}: ${hasSpa ? 'found' : 'not built yet'}`);
 
+  // 전역 에러 핸들러 — handler에서 throw 시 JSON으로 반환
+  app.onError((err, c) => {
+    console.error('[api] error:', err.message);
+    return c.json({ error: err.message }, 500);
+  });
+
   app.get('/health', (c) => c.text('ok'));
 
   // 현재 봇 버전 (업데이트 폴링용)

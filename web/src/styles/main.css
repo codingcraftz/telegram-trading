@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* shadcn 계열 다크 팔레트 — 봇 대시보드와 일관성 */
+    --background: 222 47% 11%;          /* #0f172a */
+    --foreground: 210 40% 95%;
+    --card: 217 33% 17%;                /* #1e293b */
+    --card-foreground: 210 40% 95%;
+    --primary: 217 91% 60%;             /* #3b82f6 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 25% 27%;
+    --secondary-foreground: 210 40% 95%;
+    --muted: 215 25% 27%;
+    --muted-foreground: 215 16% 60%;
+    --accent: 215 25% 27%;
+    --accent-foreground: 210 40% 95%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 25% 27%;
+    --input: 215 25% 27%;
+    --ring: 217 91% 60%;
+    --radius: 0.75rem;
+  }
+
+  html, body {
+    @apply h-full;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #app {
+    @apply min-h-screen;
+  }
+  /* iOS Safari safe-area */
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

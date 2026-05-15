@@ -8,7 +8,12 @@
   },
   "scripts": {
     "dev": "tsx watch src/main.ts",
+    "dev:bot": "tsx watch src/main.ts",
+    "dev:web": "pnpm --dir web dev",
+    "dev:all": "concurrently -n bot,web -c blue,green \"pnpm dev:bot\" \"pnpm dev:web\"",
     "build": "tsc -p tsconfig.json",
+    "build:web": "pnpm --dir web build",
+    "build:all": "pnpm build && pnpm build:web",
     "start": "node dist/main.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
@@ -31,6 +36,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.5",
+    "concurrently": "^9.1.2",
     "drizzle-kit": "^0.30.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
