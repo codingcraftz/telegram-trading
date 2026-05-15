@@ -15,8 +15,8 @@ async function load() {
 
 onMounted(() => {
   load();
-  // 30초마다 세션 갱신
-  timer = setInterval(load, 30_000);
+  // 60초마다 세션 갱신 (KIS API 부담 X — 세션은 calendar 계산만)
+  timer = setInterval(load, 60_000);
 });
 onUnmounted(() => {
   if (timer) clearInterval(timer);

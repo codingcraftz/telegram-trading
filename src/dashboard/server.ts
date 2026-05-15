@@ -26,7 +26,7 @@ import {
   handleWatchlistRemove,
 } from '../api/watchlist.js';
 import { handleStrategyGet, handleStrategyPost } from '../api/strategy.js';
-import { handleSession } from '../api/session.js';
+import { handleKeysStatus, handleSession } from '../api/session.js';
 
 const ENV_PATH = process.env.ENV_PATH ?? '/app/data/runtime.env';
 const UPDATE_SENTINEL = '/app/data/.update-now';
@@ -339,6 +339,7 @@ export function startDashboard(port = 8080): void {
 
   // ===== 데이터 조회 API (PWA용) =====
   app.get('/api/session', handleSession);
+  app.get('/api/keys-status', handleKeysStatus);
   app.get('/api/balance', handleBalance);
   app.get('/api/orders', handleOrders);
   app.get('/api/quote', handleQuote);

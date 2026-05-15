@@ -1,21 +1,27 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { RefreshCw } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import { api } from '@/api/client';
 
 const version = ref<{ sha: string; buildDate: string } | null>(null);
+const keys = ref<{
+  tradingMode: 'paper' | 'real';
+  paperKeys: boolean;
+  realKeys: boolean;
+  marketDataMode: 'demo' | 'real';
+  notice: string;
+} | null>(null);
 
-async function loadVersion() {
+async function load() {
   try {
-    version.value = await api.version();
+    [version.value, keys.value] = await Promise.all([api.version(), api.keysStatus()]);
   } catch (err) {
     console.warn(err);
   }
 }
 
-onMounted(loadVersion);
+onMounted(load);
 </script>
 
 <template>
@@ -29,18 +35,44 @@ onMounted(loadVersion);
           ({{ version.buildDate.slice(0, 10) }})
         </span>
       </p>
-      <p class="mt-2 text-xs text-muted-foreground">
-        키 입력 / 모드 전환 / 업데이트는 기존 설정 페이지를 사용하세요.
-      </p>
+    </Card>
+
+    <Card v-if="keys" title="🔑 KIS 키 상태">
+      <div class="space-y-1 text-sm">
+        <p>
+          🧪 모의 키:
+          <span :class="keys.paperKeys ? 'text-up' : 'text-muted-foreground'">
+            {{ keys.paperKeys ? '✅ 등록됨' : '❌ 미입력' }}
+          </span>
+        </p>
+        <p>
+          🔥 실전 키:
+          <span :class="keys.realKeys ? 'text-up' : 'text-muted-foreground'">
+            {{ keys.realKeys ? '✅ 등록됨' : '❌ 미입력' }}
+          </span>
+        </p>
+        <p class="pt-1">
+          📊 시세/차트:
+          <b>{{ keys.marketDataMode === 'real' ? '🔥 실전 키' : '🧪 모의 키' }}</b>
+        </p>
+        <p>
+          💼 매매:
+          <b>{{ keys.tradingMode === 'real' ? '🔥 실전' : '🧪 모의' }}</b>
+        </p>
+      </div>
+      <div class="mt-3 rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">
+        {{ keys.notice }}
+      </div>
       <a href="/" class="mt-3 inline-block">
-        <Button variant="outline" size="sm">→ 기존 설정 페이지</Button>
+        <Button variant="outline" size="sm">→ 키 입력 / 모드 전환</Button>
       </a>
     </Card>
 
     <Card title="📖 도움말">
       <ul class="space-y-1 text-sm text-muted-foreground">
         <li>홈 화면에 추가하여 앱처럼 실행 (Chrome 메뉴 → 홈 화면에 추가)</li>
-        <li>매수/매도는 KIS 모의계좌부터 검증</li>
+        <li>실전 키 등록 시 시세/차트 조회가 빨라짐 (rate limit 분당 60 → 1080)</li>
+        <li>매매는 항상 현재 모드 사용 — 검증은 모의에서, 운영은 실전</li>
         <li>장 외 시간 즉시매수는 시가매매로 자동 예약</li>
       </ul>
     </Card>

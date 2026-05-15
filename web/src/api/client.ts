@@ -34,6 +34,14 @@ export const api = {
   watchlist: () => request<WatchlistResponse>('/api/watchlist'),
   strategy: () => request<StrategyResponse>('/api/strategy'),
   version: () => request<{ sha: string; buildDate: string }>('/api/version'),
+  keysStatus: () =>
+    request<{
+      tradingMode: 'paper' | 'real';
+      paperKeys: boolean;
+      realKeys: boolean;
+      marketDataMode: 'demo' | 'real';
+      notice: string;
+    }>('/api/keys-status'),
 
   // 매매 액션
   tradeBuy: (body: TradeBuyBody) =>

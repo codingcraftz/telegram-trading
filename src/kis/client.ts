@@ -7,8 +7,25 @@
 // 응답은 KIS 직접 응답을 MCP-스타일로 wrap → parseMcpResult가 그대로 동작.
 
 import { envDv } from '../runtime.js';
-import { getAccessToken } from './auth.js';
-import { getKisAccount, getKisBaseUrl, getKisCredentials } from './config.js';
+import { getAccessToken, getKisBaseUrlFor, type KisMode } from './auth.js';
+import { getKisAccount, getKisCredentials, hasRealKeys } from './config.js';
+
+// 시장 데이터 API — 계좌 무관, read-only. 실전 키 있으면 실전으로 호출 (rate limit 분당 1080,
+// 모의는 60). 실전 키 없으면 모의로 fallback.
+const MARKET_DATA_APIS = new Set([
+  'inquire_price',
+  'inquire_asking_price_exp_ccn',
+  'inquire_time_itemchartprice',
+  'volume_rank',
+  'fluctuation',
+  'market_cap',
+  'chk_holiday',
+]);
+
+function pickModeFor(apiType: string): KisMode {
+  if (MARKET_DATA_APIS.has(apiType) && hasRealKeys()) return 'real';
+  return envDv();
+}
 
 // API 메타 — endpoint path + tr_id + HTTP method.
 // 각 endpoint마다 모의/실전 tr_id 다를 수 있음.
@@ -102,8 +119,8 @@ const API: Record<string, ApiMeta> = {
   },
 };
 
-function buildHeaders(trId: string, accessToken: string): Record<string, string> {
-  const { appKey, appSecret } = getKisCredentials();
+function buildHeaders(trId: string, accessToken: string, mode: KisMode): Record<string, string> {
+  const { appKey, appSecret } = getKisCredentials(mode);
   return {
     'content-type': 'application/json; charset=utf-8',
     Authorization: `Bearer ${accessToken}`,
@@ -114,8 +131,11 @@ function buildHeaders(trId: string, accessToken: string): Record<string, string>
   };
 }
 
-function injectAccount(params: Record<string, unknown>): Record<string, unknown> {
-  const { cano, acntPrdtCd } = getKisAccount();
+function injectAccount(
+  params: Record<string, unknown>,
+  mode: KisMode,
+): Record<string, unknown> {
+  const { cano, acntPrdtCd } = getKisAccount(mode);
   return {
     cano,
     acnt_prdt_cd: acntPrdtCd,
@@ -152,20 +172,23 @@ export async function callKisApi(
     return wrapAsMcp({ rt_cd: '1', msg1: `미지원 API: ${apiType}` });
   }
 
-  const env = envDv();
-  // order_cash는 ord_dv (buy/sell)에 따라 tr_id 다름
-  let trId = meta.trId[env];
+  // 시장 데이터는 실전 키로 (실전 키 있을 때) — 분당 호출 제한이 모의 60 → 실전 1080.
+  // 매매/잔고/주문 조회 등 계좌 종속 호출은 현재 MODE 그대로.
+  const mode = pickModeFor(apiType);
+
+  // tr_id는 mode 기준
+  let trId = meta.trId[mode];
   if (apiType === 'order_cash' && meta.orderTrId) {
     const side = (params.ord_dv as string) ?? (params.SLL_BUY_DVSN_CD as string);
     if (side === 'buy' || side === 'sell') {
-      trId = meta.orderTrId[env][side];
+      trId = meta.orderTrId[mode][side];
     }
   }
 
-  const finalParams = meta.needsAccount ? injectAccount(params) : params;
-  const accessToken = await getAccessToken();
-  const headers = buildHeaders(trId, accessToken);
-  const url = `${getKisBaseUrl()}${meta.path}`;
+  const finalParams = meta.needsAccount ? injectAccount(params, mode) : params;
+  const accessToken = await getAccessToken(mode);
+  const headers = buildHeaders(trId, accessToken, mode);
+  const url = `${getKisBaseUrlFor(mode)}${meta.path}`;
 
   let res: Response;
   if (meta.method === 'GET') {
