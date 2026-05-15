@@ -18,11 +18,12 @@ import { placeOrder, type Market } from '../mcp/kis.js';
 // KIS는 REST 직접 호출 (MCP 제거됨)
 import { tryFastPath } from '../fastpath/index.js';
 import { buildBalanceView } from '../fastpath/balance.js';
-import { buildPositionsView } from '../fastpath/positions.js';
+// 포지션 메뉴 제거 (사용자 요청 — 잔고에 통합). buildPositionsView 함수는 보존되어 있으나 호출 안 함.
 import { buildOrdersView } from '../fastpath/orders.js';
 import { cancelKrxOrder } from '../mcp/kis.js';
 import { checkKisOk, parseMcpResult } from '../fastpath/extract.js';
 import { invalidate as invalidateCache } from '../fastpath/cache.js';
+import { fetchQuickQuote } from '../fastpath/price.js';
 import {
   handleMarketOpenCommand,
   handleMarketOpenReserve,
@@ -106,8 +107,7 @@ const MAIN_KEYBOARD = new Keyboard()
   .text('⭐ 관심종목').text('💵 잔고').row()
   .text('🔍 시세조회').text('📈 차트').row()
   .text('💼 거래').text('📋 대기').row()
-  .text('📊 포지션').text('🧩 전략').row()
-  .text('📖 도움말')
+  .text('🧩 전략').text('📖 도움말')
   .resized()
   .persistent();
 
@@ -217,14 +217,7 @@ export function registerHandlers(bot: Bot) {
     }
   });
 
-  bot.command('positions', async (ctx) => {
-    try {
-      const v = await buildPositionsView(ctx.chat!.id);
-      await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
-    } catch (err) {
-      await ctx.reply(`❌ 포지션 조회 실패: ${(err as Error).message}`);
-    }
-  });
+  // /positions 명령 제거 — 사용자 요청. 잔고로 통합.
 
   // 텍스트 응답으로 confirm/cancel 처리 (callback과 공통)
   async function runConfirm(chatId: number, id: string): Promise<string> {
@@ -282,9 +275,9 @@ export function registerHandlers(bot: Bot) {
       }
     }
 
-    // sell
+    // sell — 시장가 거절 시 자동으로 지정가(현재가) 재시도. 일부 종목은 시장가 매도 거부.
     try {
-      const result = await placeOrder({
+      let result = await placeOrder({
         market: spec.market as Market,
         side: 'sell',
         code: spec.symbol_code,
@@ -292,13 +285,53 @@ export function registerHandlers(bot: Bot) {
         orderType: spec.order_type,
         price: spec.price,
       });
-      // KIS 응답 rt_cd 체크 — '0'이 아니면 거절
-      const parsed = parseMcpResult(result);
-      const kisOk = checkKisOk(parsed);
-      if (!kisOk.ok) {
-        logTrade({ chatId, kind: 'sell_rejected', payload: { spec, msg: kisOk.message } });
-        return `❌ 매도 거절 (KIS): ${kisOk.message ?? '알 수 없는 오류'}`;
+      let parsed = parseMcpResult(result);
+      let kisOk = checkKisOk(parsed);
+      let usedFallback = false;
+
+      // 시장가 매도 거절 → 지정가(현재가) 자동 재시도
+      if (!kisOk.ok && spec.order_type === 'market') {
+        try {
+          const q = await fetchQuickQuote(spec.symbol_code);
+          if (q?.price && q.price > 0) {
+            console.log('[sell] market rejected, retry as limit @', q.price);
+            result = await placeOrder({
+              market: spec.market as Market,
+              side: 'sell',
+              code: spec.symbol_code,
+              quantity: spec.quantity,
+              orderType: 'limit',
+              price: q.price,
+            });
+            parsed = parseMcpResult(result);
+            kisOk = checkKisOk(parsed);
+            if (kisOk.ok) usedFallback = true;
+          }
+        } catch (err) {
+          console.warn('[sell] fallback retry failed:', (err as Error).message);
+        }
       }
+
+      if (!kisOk.ok) {
+        const raw = (parsed.raw ?? {}) as Record<string, unknown>;
+        const msgCd = String(raw.msg_cd ?? '');
+        const rtCd = String(raw.rt_cd ?? '');
+        logTrade({ chatId, kind: 'sell_rejected', payload: { spec, msg: kisOk.message, raw } });
+        return (
+          `❌ 매도 거절 (KIS)\n` +
+          `사유: ${kisOk.message ?? '알 수 없는 오류'}\n` +
+          `<code>rt_cd=${rtCd} · msg_cd=${msgCd}</code>\n\n` +
+          `📋 발주 내용\n` +
+          `• 종목: ${spec.symbol_name} (${spec.symbol_code})\n` +
+          `• 수량: ${spec.quantity}주\n` +
+          `• 주문구분: ${spec.order_type}${spec.price ? ` · 가격 ${spec.price.toLocaleString()}원` : ''}\n\n` +
+          `💡 시도해볼 것:\n` +
+          `• 거래정지/관리종목 여부 확인\n` +
+          `• 정규장 시간 (09:00~15:30) 안에서 재시도\n` +
+          `• 보유 수량 부족이면 [잔고]에서 정확한 수량 확인`
+        );
+      }
+      const fallbackNote = usedFallback ? '\n⚙️ (시장가 거절 → 현재가 지정가로 자동 재시도 성공)' : '';
       const ext = (obj: unknown, ...keys: string[]): string | undefined => {
         if (!obj || typeof obj !== 'object') return undefined;
         const o = obj as Record<string, unknown>;
@@ -325,7 +358,7 @@ export function registerHandlers(bot: Bot) {
       logTrade({ chatId, kind: 'sell_submitted', payload: { orderId, spec } });
       invalidateCache('holdings');
       invalidateCache('balance:raw');
-      return `📤 매도 주문 접수 (#${orderId})\n${spec.symbol_name} ${spec.quantity}주 ${spec.order_type === 'market' ? '시장가' : `${spec.price?.toLocaleString()}원`}`;
+      return `📤 매도 주문 접수 (#${orderId})\n${spec.symbol_name} ${spec.quantity}주 ${spec.order_type === 'market' ? '시장가' : `${spec.price?.toLocaleString()}원`}${fallbackNote}`;
     } catch (err) {
       logTrade({ chatId, kind: 'order_error', payload: { error: (err as Error).message } });
       return `❌ 매도 실패: ${(err as Error).message}`;
@@ -1041,18 +1074,10 @@ export function registerHandlers(bot: Bot) {
     await sendBalance(ctx);
   });
 
+  // nav:positions 콜백 제거 — 잔고로 리다이렉트
   bot.callbackQuery('nav:positions', async (ctx) => {
     await ctx.answerCallbackQuery();
-    try {
-      const v = await buildPositionsView(ctx.chat!.id);
-      try {
-        await ctx.editMessageText(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
-      } catch {
-        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
-      }
-    } catch (err) {
-      await ctx.reply(`❌ 포지션 조회 실패: ${(err as Error).message}`);
-    }
+    await sendBalance(ctx);
   });
 
   // nav:orders / od:refresh — 통합 대기 뷰
@@ -1385,15 +1410,7 @@ export function registerHandlers(bot: Bot) {
       }
       return;
     }
-    if (cleaned === '포지션') {
-      try {
-        const v = await buildPositionsView(chatId);
-        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
-      } catch (err) {
-        await ctx.reply(`❌ 포지션 조회 실패: ${(err as Error).message}`);
-      }
-      return;
-    }
+    // "포지션" 텍스트 라우팅 제거 (메인 키보드에서도 제거됨)
     if (cleaned === '잔고') {
       await sendBalance(ctx);
       return;
@@ -1515,12 +1532,8 @@ export function registerHandlers(bot: Bot) {
       return true;
     }
     if ((arg = tryPrefix('/포지션')) !== null || (arg = tryPrefix('/보유')) !== null) {
-      try {
-        const v = await buildPositionsView(chatId);
-        await ctx.reply(v.text, { reply_markup: v.kb, parse_mode: 'HTML' });
-      } catch (err) {
-        await ctx.reply(`❌ 포지션 조회 실패: ${(err as Error).message}`);
-      }
+      // 포지션 메뉴 제거 — 잔고로 리다이렉트
+      await sendBalance(ctx);
       return true;
     }
     if (
