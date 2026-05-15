@@ -25,16 +25,26 @@ export function handleKeysStatus(c: Context) {
     process.env.KIS_PAPER_APP_SECRET &&
     process.env.KIS_PAPER_STOCK
   );
-  const hasReal = hasRealKeys() && !!process.env.KIS_ACCT_STOCK;
+  // 시세는 KEY/SECRET만 있으면 OK (계좌 불필요), 매매는 계좌도 필요
+  const hasRealMarketKeys = hasRealKeys();
+  const hasRealTradeKeys = hasRealMarketKeys && !!process.env.KIS_ACCT_STOCK;
   const tradingMode = getMode();
+
+  let notice = '';
+  if (!hasRealMarketKeys) {
+    notice = '⚠️ 실전 KEY/SECRET 미입력 — 시세/차트 조회 불가. 설정에서 입력 필요.';
+  } else if (!hasRealTradeKeys) {
+    notice = '시세/차트 ✅ 실전 키 사용 (1080/min). 실전 계좌 미입력 — 매매는 모의만 가능.';
+  } else {
+    notice = '시세/차트 ✅ 실전 키. 매매는 현재 모드 사용.';
+  }
+
   return c.json({
-    tradingMode, // 'paper' | 'real' — 실제 매매에 사용
+    tradingMode,
     paperKeys: hasPaper,
-    realKeys: hasReal,
-    // 시세/차트/검색은 항상 실전 키 (실전 키 없으면 시세 조회 자체 불가)
+    realKeys: hasRealTradeKeys, // 매매 가능 여부 (계좌 포함)
+    realMarketKeys: hasRealMarketKeys, // 시세 조회 가능 여부 (KEY/SECRET만)
     marketDataMode: 'real' as const,
-    notice: hasReal
-      ? '시세/차트는 실전 키 (1080/min), 매매는 현재 모드'
-      : '⚠️ 실전 키 미입력 — 시세/차트 조회 불가. 설정에서 실전 키 입력 필요.',
+    notice,
   });
 }

@@ -44,6 +44,7 @@ export const api = {
       tradingMode: 'paper' | 'real';
       paperKeys: boolean;
       realKeys: boolean;
+      realMarketKeys: boolean;
       marketDataMode: 'demo' | 'real';
       notice: string;
     }>('/api/keys-status'),

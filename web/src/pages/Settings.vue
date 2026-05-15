@@ -9,6 +9,7 @@ const keys = ref<{
   tradingMode: 'paper' | 'real';
   paperKeys: boolean;
   realKeys: boolean;
+  realMarketKeys: boolean;
   marketDataMode: 'demo' | 'real';
   notice: string;
 } | null>(null);
@@ -40,24 +41,29 @@ onMounted(load);
     <Card v-if="keys" title="🔑 KIS 키 상태">
       <div class="space-y-1 text-sm">
         <p>
-          🧪 모의 키:
+          🧪 모의 키 (전체):
           <span :class="keys.paperKeys ? 'text-up' : 'text-muted-foreground'">
-            {{ keys.paperKeys ? '✅ 등록됨' : '❌ 미입력' }}
+            {{ keys.paperKeys ? '✅' : '❌' }}
           </span>
         </p>
         <p>
-          🔥 실전 키:
+          🔥 실전 KEY/SECRET (시세용):
+          <span :class="keys.realMarketKeys ? 'text-up' : 'text-muted-foreground'">
+            {{ keys.realMarketKeys ? '✅' : '❌' }}
+          </span>
+        </p>
+        <p>
+          💼 실전 계좌 (매매용):
           <span :class="keys.realKeys ? 'text-up' : 'text-muted-foreground'">
-            {{ keys.realKeys ? '✅ 등록됨' : '❌ 미입력' }}
+            {{ keys.realKeys ? '✅' : '❌' }}
           </span>
         </p>
-        <p class="pt-1">
+        <p class="pt-2">
           📊 시세/차트:
-          <b>{{ keys.marketDataMode === 'real' ? '🔥 실전 키' : '🧪 모의 키' }}</b>
+          <b>{{ keys.realMarketKeys ? '🔥 실전 (1080/min)' : '❌ 사용 불가' }}</b>
         </p>
         <p>
-          💼 매매:
-          <b>{{ keys.tradingMode === 'real' ? '🔥 실전' : '🧪 모의' }}</b>
+          💼 매매 모드: <b>{{ keys.tradingMode === 'real' ? '🔥 실전' : '🧪 모의' }}</b>
         </p>
       </div>
       <div class="mt-3 rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">
