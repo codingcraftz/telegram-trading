@@ -77,11 +77,11 @@ export async function buildBalanceView(): Promise<BalanceView> {
   const pflsSmt = num(summary?.evlu_pfls_smtl_amt) ?? 0;
   const pflsRt = num(summary?.asst_icdc_erng_rt) ?? 0;
 
-  // 텍스트는 짧게 (총자산/예수금/손익 한 줄씩)
+  // 텍스트 — 사용자 요청대로 총평가(=내 돈) + 평가손익만. 예수금은 매수 시 별도 메뉴에서 표시.
   const sign = pflsSmt >= 0 ? '+' : '';
   const lines = [
-    `💰 <b>내 계좌</b>  ${sLabel.icon} ${sLabel.label}`,
-    `총 평가 <b>${fmtKrw(totEvlu)}</b>  ·  예수금 ${fmtKrw(dnca)}`,
+    `💰 <b>내 자산</b>  ${sLabel.icon} ${sLabel.label}`,
+    `총 평가 <b>${fmtKrw(totEvlu)}</b>`,
     `평가손익 <b>${sign}${Math.round(pflsSmt).toLocaleString()}원 (${sign}${pflsRt.toFixed(2)}%)</b>`,
   ];
 
