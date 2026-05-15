@@ -110,41 +110,23 @@ export function handleWatchlistAddCallback(
     : `이미 관심종목에 있음: ${name} (${code})`;
 }
 
-// 관심종목 메뉴 — 목록 + 현재가/등락률 + 액션 버튼
-// API 호출 N건 (관심종목 수만큼). 5종목 정도면 ~0.5초.
-export async function buildWatchlistMenu(
-  chatId: number,
-): Promise<{ text: string; kb: InlineKeyboard }> {
+// 관심종목 메뉴 — 종목명만 단순 표시. 시세는 [🔍 시세조회] 메뉴에서 별도.
+export function buildWatchlistMenu(chatId: number): { text: string; kb: InlineKeyboard } {
   const rows = listWatchlist(chatId);
-  const kb = new InlineKeyboard().text('➕ 추가', 'wlmenu:add');
-
+  const kb = new InlineKeyboard();
   if (rows.length === 0) {
+    kb.text('➕ 추가', 'wlmenu:add');
     return {
       text: '⭐ <b>관심종목 비어있음</b>\n\n[➕ 추가] 버튼으로 시작해보세요.',
       kb,
     };
   }
-
-  kb.text('🗑️ 제거', 'wlmenu:rm').row().text('🔄 시세 새로고침', 'wlmenu:back');
-
-  // 종목별 시세 병렬 조회
-  const quotes = await Promise.all(rows.map((r) => fetchQuickQuote(r.symbolCode)));
-  const lines = ['⭐ <b>관심종목</b>'];
-  rows.forEach((r, i) => {
-    const q = quotes[i];
-    if (q) {
-      const sign = q.changePct >= 0 ? '+' : '';
-      lines.push(
-        `${i + 1}. <b>${r.symbolName}</b> <code>${r.symbolCode}</code>\n   ${q.signLabel} ${q.price.toLocaleString()}원 (${sign}${q.changePct.toFixed(2)}%)`,
-      );
-    } else {
-      lines.push(`${i + 1}. <b>${r.symbolName}</b> <code>${r.symbolCode}</code>\n   (시세 조회 실패)`);
-    }
-    // 종목별 바로가기 (차트)
-    kb.text(`📈 ${r.symbolName}`, `chartpick:${r.symbolCode}`).row();
-  });
-
-  return { text: lines.join('\n'), kb };
+  const list =
+    '⭐ <b>관심종목</b>\n' +
+    rows.map((r, i) => `${i + 1}. ${r.symbolName} <code>${r.symbolCode}</code>`).join('\n') +
+    '\n\n💡 시세는 [🔍 시세조회] 메뉴에서 확인하세요.';
+  kb.text('➕ 추가', 'wlmenu:add').text('🗑️ 제거', 'wlmenu:rm');
+  return { text: list, kb };
 }
 
 // 제거 화면 — 종목별 버튼

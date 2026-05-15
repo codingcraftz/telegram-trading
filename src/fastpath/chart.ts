@@ -8,6 +8,7 @@ import { resolveSymbol, type ResolvedSymbol } from './symbol.js';
 import { renderCandlePng, type Candle } from '../charts/candle.js';
 import { fetchNaverDaily, fetchNaverMinuteBars } from '../charts/naver.js';
 import { listWatchlist } from '../db/repo.js';
+import { fetchQuickQuote } from './price.js';
 
 export type ChartInterval = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
 
@@ -120,15 +121,18 @@ export async function handleChart(intent: ChartIntent): Promise<ChartResult | st
 
   const last = candles[candles.length - 1]!;
   const first = candles[0]!;
-  const change = last.close - first.open;
-  const changePct = (change / first.open) * 100;
-  const arrow = change >= 0 ? '▲' : '▼';
   const intervalLabel =
     CHART_INTERVALS.find((c) => c.key === intent.interval)?.label ?? intent.interval;
 
+  // 관심종목/시세조회와 동일 기준 — KIS의 prdy_ctrt (전일 대비 등락률)
+  const quote = await fetchQuickQuote(sym.code).catch(() => null);
+  const livePrice = quote?.price ?? last.close;
+  const liveChangePct = quote?.changePct ?? 0;
+  const liveArrow = quote?.signLabel ?? '–';
+
   const png = await renderCandlePng({
     title: `${sym.name} (${sym.code}) — ${intervalLabel}`,
-    subtitle: `${first.time} ~ ${last.time}  ·  봉 ${candles.length}개  ·  ${last.close.toLocaleString()}원 ${arrow}${Math.abs(Math.round(change)).toLocaleString()}원 (${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%)`,
+    subtitle: `${first.time} ~ ${last.time}  ·  봉 ${candles.length}개  ·  ${livePrice.toLocaleString()}원 ${liveArrow} ${liveChangePct >= 0 ? '+' : ''}${liveChangePct.toFixed(2)}% (전일 대비)`,
     candles,
     width: 1000,
     height: 520,
@@ -139,7 +143,7 @@ export async function handleChart(intent: ChartIntent): Promise<ChartResult | st
     caption:
       `📈 ${sym.name} ${intervalLabel}\n` +
       `${first.time} ~ ${last.time} · ${candles.length}봉\n` +
-      `종가 ${last.close.toLocaleString()}원 (${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%)`,
+      `현재가 ${livePrice.toLocaleString()}원 (전일 대비 ${liveChangePct >= 0 ? '+' : ''}${liveChangePct.toFixed(2)}%)`,
   };
 }
 

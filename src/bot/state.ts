@@ -6,6 +6,7 @@ export type ChatMode =
   | 'idle'
   | 'awaiting_watchlist_add'
   | 'awaiting_chart_symbol'
+  | 'awaiting_quote_symbol'
   | 'awaiting_trade_buy_search'
   | 'awaiting_trade_buy_amount'
   | 'awaiting_trade_buy_now_amount'

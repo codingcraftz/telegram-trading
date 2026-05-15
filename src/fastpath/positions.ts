@@ -74,6 +74,7 @@ export async function buildPositionsView(
     `📊 <b>포지션</b> · open ${open} · pending ${pending}${
       closing > 0 ? ` · closing ${closing}` : ''
     }`,
+    `<i>이 봇이 만든 자동 거래만 (TP/SL 모니터링 대상)</i>`,
   ];
   if (holdingsError) {
     lines.push(`⚠️ KIS 잔고 조회 오류 — 현재가/손익 일부 누락: ${holdingsError}`);
@@ -107,21 +108,13 @@ export async function buildPositionsView(
         if (p.slPrice) parts.push(`🛑 SL ${Math.round(p.slPrice).toLocaleString()}`);
         lines.push(`   ${parts.join('  ')}`);
       }
-      lines.push(`   <code>id: ${p.id}</code>`);
-      kb.text(`📤 ${p.symbolName}`, `pos:sell:${p.symbolCode}`)
-        .text('📈', `pos:chart:${p.symbolCode}`)
-        .text('🛑 청산', `pos:close:${p.id}`)
-        .row();
+      kb.text(`📤 매도 ${p.symbolName}`, `pos:sell:${p.symbolCode}`).row();
     } else if (p.state === 'pending') {
       lines.push(
         `   주문 ${p.avgPrice ? Math.round(p.avgPrice).toLocaleString() + '원' : '시장가'} (체결대기)`,
       );
-      lines.push(`   <code>id: ${p.id}</code>`);
-      kb.text(`📈 ${p.symbolName}`, `pos:chart:${p.symbolCode}`).row();
     } else if (p.state === 'closing') {
       lines.push(`   매도 주문 접수, 청산 대기 중`);
-      lines.push(`   <code>id: ${p.id}</code>`);
-      kb.text(`📈 ${p.symbolName}`, `pos:chart:${p.symbolCode}`).row();
     }
   }
 

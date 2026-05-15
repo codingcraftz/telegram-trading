@@ -109,7 +109,7 @@ export async function buildBalanceView(): Promise<{ text: string; kb: InlineKeyb
           `   매입 ${fmtKrw(avg)} → 현재 ${fmtKrw(cur)}\n` +
           `   손익 ${sign}${Math.round(pfls).toLocaleString()}원 (${sign}${pflsRt.toFixed(2)}%)`,
       );
-      kb.text(`📤 ${name}`, `bal:sell:${code}`).text('📈 차트', `bal:chart:${code}`).row();
+      kb.text(`📤 매도 ${name}`, `bal:sell:${code}`).row();
     }
   }
 

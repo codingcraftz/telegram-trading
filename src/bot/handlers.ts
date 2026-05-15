@@ -36,6 +36,12 @@ import {
   tryMatchChart,
 } from '../fastpath/chart.js';
 import {
+  buildQuoteMainMenu,
+  buildQuoteResult,
+  buildQuoteSearchPrompt,
+  buildQuoteSearchResults,
+} from '../fastpath/quote.js';
+import {
   buildBuyAmountMenu,
   buildBuyConfirmAndRegister,
   buildBuyDirectInputPrompt,
@@ -97,9 +103,10 @@ function whitelistMiddleware() {
 // 메인 단축 버튼. /시작, /도움말 호출 시 같이 보냄.
 const MAIN_KEYBOARD = new Keyboard()
   .text('⭐ 관심종목').text('💵 잔고').row()
-  .text('🧩 전략').text('💼 거래').row()
-  .text('📊 포지션').text('📋 대기').row()
-  .text('📈 차트').text('📖 도움말')
+  .text('🔍 시세조회').text('📈 차트').row()
+  .text('💼 거래').text('📋 대기').row()
+  .text('📊 포지션').text('🧩 전략').row()
+  .text('📖 도움말')
   .resized()
   .persistent();
 
@@ -446,9 +453,9 @@ export function registerHandlers(bot: Bot) {
   });
 
   bot.callbackQuery('wlmenu:back', async (ctx) => {
-    await ctx.answerCallbackQuery('시세 조회 중…');
+    await ctx.answerCallbackQuery();
     clearChatMode(ctx.chat!.id);
-    const m = await buildWatchlistMenu(ctx.chat!.id);
+    const m = buildWatchlistMenu(ctx.chat!.id);
     try {
       await ctx.editMessageText(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
     } catch {
@@ -457,6 +464,50 @@ export function registerHandlers(bot: Bot) {
   });
 
   // ===== 차트 메뉴 callbacks =====
+
+  // ===== 시세조회 메뉴 callbacks =====
+
+  bot.callbackQuery('qm:back', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    clearChatMode(ctx.chat!.id);
+    const m = buildQuoteMainMenu(ctx.chat!.id);
+    try {
+      await ctx.editMessageText(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  bot.callbackQuery('qm:search', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    setChatMode(ctx.chat!.id, 'awaiting_quote_symbol');
+    const p = buildQuoteSearchPrompt();
+    try {
+      await ctx.editMessageText(p.text, { reply_markup: p.kb, parse_mode: 'HTML' });
+    } catch {
+      await ctx.reply(p.text, { reply_markup: p.kb, parse_mode: 'HTML' });
+    }
+  });
+
+  bot.callbackQuery(/^qm:pick:(\d{6})$/, async (ctx) => {
+    const m = ctx.callbackQuery.data!.match(/^qm:pick:(\d{6})$/);
+    if (!m) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const code = m[1]!;
+    await ctx.answerCallbackQuery('시세 조회 중…');
+    try {
+      const r = await buildQuoteResult(code);
+      try {
+        await ctx.editMessageText(r.text, { reply_markup: r.kb, parse_mode: 'HTML' });
+      } catch {
+        await ctx.reply(r.text, { reply_markup: r.kb, parse_mode: 'HTML' });
+      }
+    } catch (err) {
+      await ctx.reply(`❌ 시세 조회 실패: ${(err as Error).message}`);
+    }
+  });
 
   bot.callbackQuery('chartmenu:search', async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -1051,46 +1102,8 @@ export function registerHandlers(bot: Bot) {
     }
   });
 
-  // 포지션/잔고 종목별 차트 — 1d 디폴트
-  bot.callbackQuery(/^(pos|bal):chart:(\d{6})$/, async (ctx) => {
-    const m = ctx.callbackQuery.data!.match(/^(pos|bal):chart:(\d{6})$/);
-    if (!m) {
-      await ctx.answerCallbackQuery();
-      return;
-    }
-    const code = m[2]!;
-    await ctx.answerCallbackQuery('차트 생성 중…');
-    try {
-      const r = await handleChart({ sym: code, interval: '1d' });
-      if (typeof r === 'string') {
-        await ctx.reply(r);
-      } else {
-        await ctx.replyWithPhoto(new InputFile(r.png, 'chart.png'), { caption: r.caption });
-      }
-    } catch (err) {
-      await ctx.reply(`❌ 차트 생성 실패: ${(err as Error).message}`);
-    }
-  });
-
-  // 포지션 청산
-  bot.callbackQuery(/^pos:close:([\w-]+)$/, async (ctx) => {
-    const m = ctx.callbackQuery.data!.match(/^pos:close:([\w-]+)$/);
-    if (!m) {
-      await ctx.answerCallbackQuery();
-      return;
-    }
-    const positionId = m[1]!;
-    await ctx.answerCallbackQuery('청산 중…');
-    try {
-      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
-    } catch {}
-    await ctx.reply('⏳ 청산 중…');
-    try {
-      await closePosition({ positionId, reason: 'manual' });
-    } catch (err) {
-      await ctx.reply(`❌ 청산 실패: ${(err as Error).message}`);
-    }
-  });
+  // 포지션/잔고 차트/청산 버튼은 제거됨 (사용자 요청: 매도 버튼만 유지).
+  // 차트는 메인 키보드 [📈 차트], 청산은 매도 메뉴의 [전량] 사용.
 
   async function handleText(ctx: Context, text: string) {
     await ctx.replyWithChatAction('typing');
@@ -1105,6 +1118,29 @@ export function registerHandlers(bot: Bot) {
         await ctx.reply(r.text, { reply_markup: r.kb, parse_mode: 'HTML' });
       } else {
         await ctx.reply(r.text, { parse_mode: 'HTML' });
+      }
+      return;
+    }
+    if (mode === 'awaiting_quote_symbol' && !text.startsWith('/')) {
+      clearChatMode(chatId);
+      const candidates = searchSymbolCandidates(text, 10);
+      if (candidates.length === 0) {
+        await ctx.reply(
+          `❓ "${text}" 검색 결과 없음.\n오타가 아닌지 확인하거나 6자리 종목코드(예: <code>005930</code>)를 입력해 보세요.`,
+          {
+            parse_mode: 'HTML',
+            reply_markup: new InlineKeyboard()
+              .text('🔍 다시 입력', 'qm:search')
+              .text('⬅️ 뒤로', 'qm:back'),
+          },
+        );
+      } else if (candidates.length === 1) {
+        // 단일 결과는 바로 시세 표시
+        const r = await buildQuoteResult(candidates[0]!.code);
+        await ctx.reply(r.text, { reply_markup: r.kb, parse_mode: 'HTML' });
+      } else {
+        const r = buildQuoteSearchResults(text, candidates);
+        await ctx.reply(r.text, { reply_markup: r.kb, parse_mode: 'HTML' });
       }
       return;
     }
@@ -1287,12 +1323,17 @@ export function registerHandlers(bot: Bot) {
     // Reply Keyboard 버튼 텍스트 라우팅 (이모지 제거 — 한글만 추출)
     const cleaned = text.replace(/[^ㄱ-힝]/g, '').trim();
     if (cleaned === '관심종목') {
-      const menu = await buildWatchlistMenu(chatId);
+      const menu = buildWatchlistMenu(chatId);
       await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
       return;
     }
     if (cleaned === '차트') {
       const menu = buildChartMainMenu(chatId);
+      await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
+      return;
+    }
+    if (cleaned === '시세조회') {
+      const menu = buildQuoteMainMenu(chatId);
       await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
       return;
     }

@@ -53,7 +53,10 @@ export async function buildOrdersView(
   const total =
     intents.length + reservations.length + (kisItems.ok ? kisItems.items.length : 0);
 
-  const lines: string[] = [`📋 <b>대기 주문</b> · 총 ${total}건`];
+  const lines: string[] = [
+    `📋 <b>대기 주문</b> · 총 ${total}건`,
+    `<i>아직 발주되지 않은 예약 + 발주됐지만 체결 안 된 미체결</i>`,
+  ];
   const kb = new InlineKeyboard();
 
   // ===== 1. 즉시 주문 대기 =====
