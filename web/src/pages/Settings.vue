@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
+import { CircleCheck, CircleX, Info } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
-import Button from '@/components/ui/Button.vue';
 import { api } from '@/api/client';
 
 const version = ref<{ sha: string; buildDate: string } | null>(null);
@@ -22,64 +22,75 @@ async function load() {
   }
 }
 
+const buildDate = computed(() => version.value?.buildDate ? version.value.buildDate.slice(0, 10) : '');
+
 onMounted(load);
 </script>
 
 <template>
   <div class="space-y-3">
-    <h2 class="text-lg font-bold">⚙️ 설정</h2>
+    <div class="px-1">
+      <h2 class="text-base font-semibold tracking-tight">설정</h2>
+    </div>
 
-    <Card title="🔧 버전 / 업데이트">
-      <p v-if="version" class="text-sm font-mono">
-        현재 버전: <b>{{ version.sha }}</b>
-        <span v-if="version.buildDate" class="text-xs text-muted-foreground">
-          ({{ version.buildDate.slice(0, 10) }})
-        </span>
-      </p>
+    <Card v-if="keys">
+      <template #header>
+        <h3 class="text-sm font-semibold tracking-tight">키 상태</h3>
+      </template>
+      <ul class="space-y-2 text-sm">
+        <li class="flex items-center justify-between">
+          <span class="text-muted-foreground">모의 키</span>
+          <CircleCheck v-if="keys.paperKeys" class="h-4 w-4 text-up" />
+          <CircleX v-else class="h-4 w-4 text-muted-foreground/50" />
+        </li>
+        <li class="flex items-center justify-between">
+          <span class="text-muted-foreground">실전 KEY/SECRET (시세)</span>
+          <CircleCheck v-if="keys.realMarketKeys" class="h-4 w-4 text-up" />
+          <CircleX v-else class="h-4 w-4 text-muted-foreground/50" />
+        </li>
+        <li class="flex items-center justify-between">
+          <span class="text-muted-foreground">실전 계좌 (매매)</span>
+          <CircleCheck v-if="keys.realKeys" class="h-4 w-4 text-up" />
+          <CircleX v-else class="h-4 w-4 text-muted-foreground/50" />
+        </li>
+      </ul>
+      <div class="mt-4 space-y-2 border-t border-border pt-3 text-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-muted-foreground">시세 / 차트</span>
+          <span class="font-semibold" :class="keys.realMarketKeys ? 'text-up' : 'text-destructive'">
+            {{ keys.realMarketKeys ? '실전 · 1080/min' : '사용 불가' }}
+          </span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-muted-foreground">매매 모드</span>
+          <span class="font-semibold">{{ keys.tradingMode === 'real' ? '실전' : '모의' }}</span>
+        </div>
+      </div>
+      <div class="mt-3 flex items-start gap-2 rounded-xl bg-muted/40 px-3 py-2.5 text-[11px] text-muted-foreground">
+        <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>{{ keys.notice }}</span>
+      </div>
     </Card>
 
-    <Card v-if="keys" title="🔑 KIS 키 상태">
-      <div class="space-y-1 text-sm">
-        <p>
-          🧪 모의 키 (전체):
-          <span :class="keys.paperKeys ? 'text-up' : 'text-muted-foreground'">
-            {{ keys.paperKeys ? '✅' : '❌' }}
-          </span>
-        </p>
-        <p>
-          🔥 실전 KEY/SECRET (시세용):
-          <span :class="keys.realMarketKeys ? 'text-up' : 'text-muted-foreground'">
-            {{ keys.realMarketKeys ? '✅' : '❌' }}
-          </span>
-        </p>
-        <p>
-          💼 실전 계좌 (매매용):
-          <span :class="keys.realKeys ? 'text-up' : 'text-muted-foreground'">
-            {{ keys.realKeys ? '✅' : '❌' }}
-          </span>
-        </p>
-        <p class="pt-2">
-          📊 시세/차트:
-          <b>{{ keys.realMarketKeys ? '🔥 실전 (1080/min)' : '❌ 사용 불가' }}</b>
-        </p>
-        <p>
-          💼 매매 모드: <b>{{ keys.tradingMode === 'real' ? '🔥 실전' : '🧪 모의' }}</b>
-        </p>
+    <Card v-if="version">
+      <template #header>
+        <h3 class="text-sm font-semibold tracking-tight">버전</h3>
+      </template>
+      <div class="flex items-center justify-between text-sm">
+        <span class="text-muted-foreground">빌드</span>
+        <span class="font-mono text-xs tabular-nums">{{ version.sha }}<span v-if="buildDate" class="ml-1.5 text-muted-foreground">{{ buildDate }}</span></span>
       </div>
-      <div class="mt-3 rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">
-        {{ keys.notice }}
-      </div>
-      <a href="/" class="mt-3 inline-block">
-        <Button variant="outline" size="sm">→ 키 입력 / 모드 전환</Button>
-      </a>
     </Card>
 
-    <Card title="📖 도움말">
-      <ul class="space-y-1 text-sm text-muted-foreground">
-        <li>홈 화면에 추가하여 앱처럼 실행 (Chrome 메뉴 → 홈 화면에 추가)</li>
-        <li>실전 키 등록 시 시세/차트 조회가 빨라짐 (rate limit 분당 60 → 1080)</li>
-        <li>매매는 항상 현재 모드 사용 — 검증은 모의에서, 운영은 실전</li>
-        <li>장 외 시간 즉시매수는 시가매매로 자동 예약</li>
+    <Card>
+      <template #header>
+        <h3 class="text-sm font-semibold tracking-tight">도움말</h3>
+      </template>
+      <ul class="space-y-1.5 text-xs text-muted-foreground">
+        <li>홈 화면에 추가하여 네이티브 앱처럼 사용</li>
+        <li>실전 KEY 등록 시 시세 rate limit 분당 60 → 1080</li>
+        <li>매매는 현재 모드 사용 — 검증은 모의, 운영은 실전</li>
+        <li>장외 시간 즉시매수는 시가매매로 자동 예약</li>
       </ul>
     </Card>
   </div>

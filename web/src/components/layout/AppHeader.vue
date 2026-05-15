@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { api, type SessionResponse } from '@/api/client';
 
 const session = ref<SessionResponse | null>(null);
@@ -8,14 +8,20 @@ let timer: ReturnType<typeof setInterval> | null = null;
 async function load() {
   try {
     session.value = await api.session();
-  } catch (err) {
-    console.warn('session load failed:', err);
+  } catch {
+    /* silent */
   }
 }
 
+const dotColor = computed(() => {
+  const s = session.value?.session;
+  if (s === 'regular') return 'bg-emerald-400';
+  if (s === 'closed' || s === 'holiday') return 'bg-zinc-500';
+  return 'bg-amber-400';
+});
+
 onMounted(() => {
   load();
-  // 60초마다 세션 갱신 (KIS API 부담 X — 세션은 calendar 계산만)
   timer = setInterval(load, 60_000);
 });
 onUnmounted(() => {
@@ -24,15 +30,18 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <header class="sticky top-0 z-20 border-b border-border bg-card/80 backdrop-blur">
-    <div class="flex h-14 items-center justify-between px-4">
-      <h1 class="text-base font-bold tracking-tight">
-        📈 OWLIM STOCK
-        <span class="text-xs font-normal text-muted-foreground">매매도우미</span>
-      </h1>
-      <div v-if="session" class="text-xs font-medium">
-        <span>{{ session.icon }}</span>
-        <span class="ml-1">{{ session.label }}</span>
+  <header class="sticky top-0 z-20 border-b border-border bg-background/80 backdrop-blur-lg">
+    <div class="flex h-14 items-center justify-between px-5">
+      <h1 class="text-base font-bold tracking-tighter">OWLIM STOCK</h1>
+      <div v-if="session" class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <span class="relative flex h-2 w-2">
+          <span
+            v-if="session.session === 'regular'"
+            class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60"
+          />
+          <span class="relative inline-flex h-2 w-2 rounded-full" :class="dotColor" />
+        </span>
+        <span>{{ session.label }}</span>
       </div>
     </div>
   </header>

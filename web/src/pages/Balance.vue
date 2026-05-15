@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { RouterLink } from 'vue-router';
-import { RefreshCw } from 'lucide-vue-next';
+import { RefreshCw, ArrowDownRight } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import { api, type BalanceResponse } from '@/api/client';
@@ -28,66 +28,64 @@ onMounted(load);
 
 <template>
   <div class="space-y-3">
-    <div class="flex items-center justify-between">
-      <h2 class="text-lg font-bold">💵 잔고</h2>
-      <Button variant="ghost" size="icon" :disabled="loading" @click="load">
+    <div class="flex items-center justify-between px-1">
+      <h2 class="text-base font-semibold tracking-tight">잔고</h2>
+      <button class="rounded-md p-1.5 text-muted-foreground transition hover:bg-accent" :disabled="loading" @click="load">
         <RefreshCw class="h-4 w-4" :class="loading ? 'animate-spin' : ''" />
-      </Button>
+      </button>
     </div>
 
-    <p v-if="error" class="text-sm text-destructive">❌ {{ error }}</p>
+    <p v-if="error" class="text-sm text-destructive">{{ error }}</p>
 
     <Card v-if="balance">
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <p class="text-xs text-muted-foreground">총 평가</p>
-          <p class="text-xl font-bold">{{ fmtKrw(balance.totalEvlu) }}</p>
-        </div>
-        <div>
-          <p class="text-xs text-muted-foreground">예수금</p>
-          <p class="text-base font-semibold">{{ fmtKrw(balance.cash) }}</p>
-        </div>
-      </div>
-      <div class="mt-3 border-t border-border pt-3">
-        <p class="text-xs text-muted-foreground">평가손익</p>
-        <p class="text-lg font-bold" :class="pflsColor(balance.totalPfls)">
-          {{ fmtSigned(balance.totalPfls) }}원
-          <span class="text-sm">({{ fmtPct(balance.totalPflsRt) }})</span>
+      <div>
+        <p class="text-xs text-muted-foreground">총 자산</p>
+        <p class="mt-1 text-3xl font-bold tabular-nums tracking-tighter">{{ fmtKrw(balance.totalEvlu) }}</p>
+        <p class="mt-2 text-sm font-semibold tabular-nums" :class="pflsColor(balance.totalPfls)">
+          {{ fmtSigned(balance.totalPfls) }}원 ({{ fmtPct(balance.totalPflsRt) }})
         </p>
+      </div>
+      <div class="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">
+        예수금 <span class="ml-2 font-semibold text-foreground tabular-nums">{{ fmtKrw(balance.cash) }}</span>
       </div>
     </Card>
 
-    <Card v-if="balance && balance.holdings.length > 0" title="📈 보유 종목" :subtitle="`${balance.holdings.length}개`">
-      <div class="space-y-3">
-        <div
-          v-for="h in balance.holdings"
-          :key="h.code"
-          class="rounded-lg border border-border/50 p-3"
-        >
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="font-semibold">{{ h.name }}</p>
-              <p class="text-[11px] text-muted-foreground">{{ h.code }} · {{ h.qty }}주</p>
-            </div>
-            <div class="text-right">
-              <p class="font-bold" :class="pflsColor(h.pflsAmt)">{{ fmtPct(h.pflsRt) }}</p>
-              <p class="text-xs" :class="pflsColor(h.pflsAmt)">{{ fmtSigned(h.pflsAmt) }}원</p>
-            </div>
-          </div>
-          <div class="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-            <span>매입 {{ fmtKrw(h.avg) }} → 현재 {{ fmtKrw(h.cur) }}</span>
-          </div>
-          <div class="mt-3 flex gap-2">
-            <RouterLink :to="`/quote?code=${h.code}`" class="flex-1">
-              <Button variant="outline" size="sm" class="w-full">시세</Button>
-            </RouterLink>
-            <RouterLink :to="`/trade/sell?code=${h.code}`" class="flex-1">
-              <Button variant="destructive" size="sm" class="w-full">📤 매도</Button>
-            </RouterLink>
+    <section v-if="balance && balance.holdings.length > 0" class="space-y-2 pt-1">
+      <h3 class="px-1 text-sm font-semibold">보유 종목 <span class="text-muted-foreground">{{ balance.holdings.length }}</span></h3>
+      <div
+        v-for="h in balance.holdings"
+        :key="h.code"
+        class="rounded-2xl bg-card p-4"
+      >
+        <div class="flex items-start justify-between">
+          <RouterLink :to="`/quote?code=${h.code}`" class="flex-1">
+            <p class="text-sm font-semibold">{{ h.name }}</p>
+            <p class="text-[11px] text-muted-foreground tabular-nums">{{ h.code }} · {{ h.qty }}주</p>
+          </RouterLink>
+          <div class="text-right tabular-nums">
+            <p class="text-base font-bold" :class="pflsColor(h.pflsAmt)">
+              {{ fmtPct(h.pflsRt) }}
+            </p>
+            <p class="text-xs" :class="pflsColor(h.pflsAmt)">{{ fmtSigned(h.pflsAmt) }}원</p>
           </div>
         </div>
+        <div class="mt-2 grid grid-cols-2 gap-2 text-xs">
+          <div class="rounded-lg bg-muted/50 px-2.5 py-1.5">
+            <span class="text-muted-foreground">평단</span>
+            <span class="ml-auto block text-right font-medium tabular-nums">{{ fmtKrw(h.avg) }}</span>
+          </div>
+          <div class="rounded-lg bg-muted/50 px-2.5 py-1.5">
+            <span class="text-muted-foreground">현재</span>
+            <span class="ml-auto block text-right font-medium tabular-nums">{{ fmtKrw(h.cur) }}</span>
+          </div>
+        </div>
+        <RouterLink :to="`/trade/sell?code=${h.code}`" class="mt-3 block">
+          <Button variant="secondary" size="md" class="w-full">
+            <ArrowDownRight class="mr-1 h-4 w-4 text-down" />매도
+          </Button>
+        </RouterLink>
       </div>
-    </Card>
+    </section>
 
     <Card v-else-if="balance && balance.holdings.length === 0">
       <p class="text-sm text-muted-foreground">보유 종목 없음</p>

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
-import { RefreshCw, Plus, Pause, Play } from 'lucide-vue-next';
+import { RefreshCw, Plus, ArrowUpRight, ArrowDownRight } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import SymbolSearch from '@/components/SymbolSearch.vue';
 import TradeChart, { type TradeCandle } from '@/components/TradeChart.vue';
 import { api, type QuoteResponse, type SearchItem } from '@/api/client';
 import { fmtKrw, fmtNum, fmtPct, pflsColor } from '@/lib/format';
+import { toast } from '@/lib/toast';
 
 const INTERVALS = [
   { key: '1m', label: '1분' },
@@ -27,11 +28,9 @@ const loading = ref(false);
 const chartLoading = ref(false);
 const error = ref<string | null>(null);
 
-// 자동 폴링 (가격만 — 차트 데이터는 5초마다)
-const paused = ref(false);
-const intervalSec = ref(3);
+const POLL_MS = 2500;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
-let chartTick = 0; // 차트 갱신 카운터
+let chartTick = 0;
 
 async function load() {
   if (!code.value) {
@@ -68,22 +67,20 @@ async function refreshAll() {
 
 function startPolling() {
   stopPolling();
-  if (paused.value || !code.value) return;
+  if (!code.value || document.hidden) return;
   pollTimer = setInterval(() => {
-    // 가격은 매 tick. 차트 데이터는 5번에 한 번 (≈ 15초 if intervalSec=3).
     load();
     chartTick++;
-    if (chartTick % 5 === 0) loadCandles();
-  }, intervalSec.value * 1000);
+    if (chartTick % 4 === 0) loadCandles();
+  }, POLL_MS);
 }
 function stopPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
 }
-function togglePause() {
-  paused.value = !paused.value;
-  if (paused.value) stopPolling();
-  else startPolling();
+function onVisibility() {
+  if (document.hidden) stopPolling();
+  else { load(); startPolling(); }
 }
 
 function pickSymbol(item: SearchItem) {
@@ -95,9 +92,10 @@ async function addWatchlist() {
   if (!code.value) return;
   try {
     const r = await api.watchlistAdd(code.value);
-    alert(r.existed ? `이미 관심종목에 있음` : `✅ 추가됨: ${r.name}`);
+    if (r.existed) toast.info('이미 관심종목에 있습니다');
+    else toast.success(`${r.name} 추가됨`);
   } catch (err) {
-    alert(`❌ ${(err as Error).message}`);
+    toast.error((err as Error).message);
   }
 }
 
@@ -106,153 +104,129 @@ watch(code, () => {
   loadCandles();
   startPolling();
 });
-watch(intervalSec, () => startPolling());
 watch(interval, () => loadCandles());
 
 onMounted(() => {
   refreshAll();
   startPolling();
+  document.addEventListener('visibilitychange', onVisibility);
 });
-onUnmounted(stopPolling);
+onUnmounted(() => {
+  stopPolling();
+  document.removeEventListener('visibilitychange', onVisibility);
+});
 </script>
 
 <template>
   <div class="space-y-3">
-    <h2 class="text-lg font-bold">🔍 시세조회</h2>
+    <div class="px-1">
+      <h2 class="text-base font-semibold tracking-tight">시세</h2>
+    </div>
 
-    <SymbolSearch placeholder="종목명 또는 6자리 코드 입력" @pick="pickSymbol" />
+    <SymbolSearch placeholder="종목명 또는 6자리 코드" @pick="pickSymbol" />
 
-    <p v-if="error" class="text-sm text-destructive">❌ {{ error }}</p>
+    <p v-if="error" class="text-sm text-destructive">{{ error }}</p>
 
     <Card v-if="quote">
       <template #header>
         <div class="flex items-start justify-between">
           <div>
-            <h3 class="text-lg font-bold">{{ quote.name }}</h3>
-            <p class="text-xs text-muted-foreground">
+            <h3 class="text-base font-bold tracking-tight">{{ quote.name }}</h3>
+            <p class="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
               {{ quote.code }}<span v-if="quote.industry"> · {{ quote.industry }}</span>
             </p>
           </div>
-          <div class="flex gap-1">
-            <Button variant="ghost" size="icon" :disabled="loading" @click="refreshAll">
-              <RefreshCw class="h-4 w-4" :class="loading ? 'animate-spin' : ''" />
-            </Button>
-          </div>
+          <button class="rounded-md p-1.5 text-muted-foreground transition hover:bg-accent" :disabled="loading" @click="refreshAll">
+            <RefreshCw class="h-4 w-4" :class="loading ? 'animate-spin' : ''" />
+          </button>
         </div>
       </template>
 
-      <div class="flex items-baseline gap-2">
-        <span class="text-3xl font-bold">{{ fmtKrw(quote.price) }}</span>
-        <span class="text-base font-semibold" :class="pflsColor(quote.change)">
-          {{ quote.signLabel }} {{ fmtPct(quote.changeRate) }}
-        </span>
-      </div>
-      <p class="mt-1 text-sm" :class="pflsColor(quote.change)">
-        {{ quote.change >= 0 ? '+' : '' }}{{ fmtKrw(quote.change) }} (전일 대비)
-      </p>
-
-      <!-- 폴링 컨트롤 -->
-      <div class="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-        <span>🔄 {{ paused ? '일시정지' : `${intervalSec}초마다 자동 갱신` }}</span>
-        <div class="flex gap-1">
-          <Button
-            v-for="sec in [1, 3, 5]"
-            :key="sec"
-            :variant="intervalSec === sec ? 'primary' : 'outline'"
-            size="sm"
-            @click="intervalSec = sec"
-          >
-            {{ sec }}s
-          </Button>
-          <Button variant="ghost" size="icon" @click="togglePause">
-            <Pause v-if="!paused" class="h-4 w-4" />
-            <Play v-else class="h-4 w-4" />
-          </Button>
+      <div>
+        <p class="text-3xl font-bold tabular-nums tracking-tighter">{{ fmtKrw(quote.price) }}</p>
+        <div class="mt-1.5 flex items-center gap-1.5 text-sm">
+          <ArrowUpRight v-if="quote.change > 0" class="h-4 w-4 text-up" />
+          <ArrowDownRight v-else-if="quote.change < 0" class="h-4 w-4 text-down" />
+          <span class="font-semibold tabular-nums" :class="pflsColor(quote.change)">
+            {{ quote.change >= 0 ? '+' : '' }}{{ fmtKrw(quote.change) }}
+          </span>
+          <span class="tabular-nums text-xs" :class="pflsColor(quote.change)">
+            ({{ fmtPct(quote.changeRate) }})
+          </span>
         </div>
       </div>
 
-      <div class="mt-4 grid grid-cols-3 gap-2 text-xs">
-        <div class="rounded-lg bg-muted/40 p-2">
-          <p class="text-muted-foreground">시가</p>
-          <p class="font-semibold">{{ fmtKrw(quote.open) }}</p>
+      <div class="mt-4 grid grid-cols-3 gap-1.5 text-xs">
+        <div class="rounded-lg bg-muted/50 px-2.5 py-2">
+          <p class="text-[10px] text-muted-foreground">시가</p>
+          <p class="mt-0.5 font-semibold tabular-nums">{{ fmtKrw(quote.open) }}</p>
         </div>
-        <div class="rounded-lg bg-muted/40 p-2">
-          <p class="text-muted-foreground">고가</p>
-          <p class="font-semibold text-up">{{ fmtKrw(quote.high) }}</p>
+        <div class="rounded-lg bg-muted/50 px-2.5 py-2">
+          <p class="text-[10px] text-muted-foreground">고가</p>
+          <p class="mt-0.5 font-semibold tabular-nums text-up">{{ fmtKrw(quote.high) }}</p>
         </div>
-        <div class="rounded-lg bg-muted/40 p-2">
-          <p class="text-muted-foreground">저가</p>
-          <p class="font-semibold text-down">{{ fmtKrw(quote.low) }}</p>
+        <div class="rounded-lg bg-muted/50 px-2.5 py-2">
+          <p class="text-[10px] text-muted-foreground">저가</p>
+          <p class="mt-0.5 font-semibold tabular-nums text-down">{{ fmtKrw(quote.low) }}</p>
         </div>
-        <div class="col-span-3 rounded-lg bg-muted/40 p-2">
-          <p class="text-muted-foreground">거래량</p>
-          <p class="font-semibold">{{ fmtNum(quote.volume) }}주</p>
+        <div class="col-span-3 rounded-lg bg-muted/50 px-2.5 py-2">
+          <p class="text-[10px] text-muted-foreground">거래량</p>
+          <p class="mt-0.5 font-semibold tabular-nums">{{ fmtNum(quote.volume) }}주</p>
         </div>
-        <div v-if="quote.week52High > 0" class="col-span-3 rounded-lg bg-muted/40 p-2">
-          <p class="text-muted-foreground">52주 최저 ~ 최고</p>
-          <p class="font-semibold">
-            {{ fmtKrw(quote.week52Low) }} ~ {{ fmtKrw(quote.week52High) }}
+        <div v-if="quote.week52High > 0" class="col-span-3 rounded-lg bg-muted/50 px-2.5 py-2">
+          <p class="text-[10px] text-muted-foreground">52주 최저 — 최고</p>
+          <p class="mt-0.5 font-semibold tabular-nums">
+            {{ fmtKrw(quote.week52Low) }} — {{ fmtKrw(quote.week52High) }}
           </p>
         </div>
-        <div v-if="quote.per" class="rounded-lg bg-muted/40 p-2">
-          <p class="text-muted-foreground">PER</p>
-          <p class="font-semibold">{{ quote.per }}</p>
+        <div v-if="quote.per" class="rounded-lg bg-muted/50 px-2.5 py-2">
+          <p class="text-[10px] text-muted-foreground">PER</p>
+          <p class="mt-0.5 font-semibold tabular-nums">{{ quote.per }}</p>
         </div>
-        <div v-if="quote.pbr" class="rounded-lg bg-muted/40 p-2">
-          <p class="text-muted-foreground">PBR</p>
-          <p class="font-semibold">{{ quote.pbr }}</p>
+        <div v-if="quote.pbr" class="rounded-lg bg-muted/50 px-2.5 py-2">
+          <p class="text-[10px] text-muted-foreground">PBR</p>
+          <p class="mt-0.5 font-semibold tabular-nums">{{ quote.pbr }}</p>
         </div>
-        <div v-if="quote.foreignerRatio > 0" class="rounded-lg bg-muted/40 p-2">
-          <p class="text-muted-foreground">외인</p>
-          <p class="font-semibold">{{ quote.foreignerRatio.toFixed(2) }}%</p>
+        <div v-if="quote.foreignerRatio > 0" class="rounded-lg bg-muted/50 px-2.5 py-2">
+          <p class="text-[10px] text-muted-foreground">외인</p>
+          <p class="mt-0.5 font-semibold tabular-nums">{{ quote.foreignerRatio.toFixed(2) }}%</p>
         </div>
       </div>
 
       <div class="mt-4 grid grid-cols-2 gap-2">
         <RouterLink :to="`/trade/buy?code=${code}`">
-          <Button variant="primary" size="md" class="w-full">📥 매수</Button>
+          <Button variant="primary" size="md" class="w-full">
+            <ArrowUpRight class="mr-1 h-4 w-4" />매수
+          </Button>
         </RouterLink>
-        <Button variant="outline" size="md" class="w-full" @click="addWatchlist">
+        <Button variant="secondary" size="md" class="w-full" @click="addWatchlist">
           <Plus class="mr-1 h-4 w-4" />관심 추가
         </Button>
       </div>
     </Card>
 
-    <!-- 인터랙티브 차트 -->
     <Card v-if="code">
       <template #header>
         <div class="flex items-center justify-between">
-          <h3 class="text-sm font-semibold">
-            📈 차트
-            <span v-if="chartLoading" class="text-xs text-muted-foreground">로딩…</span>
-          </h3>
+          <h3 class="text-sm font-semibold tracking-tight">차트</h3>
           <div class="flex gap-1 overflow-x-auto">
-            <Button
+            <button
               v-for="i in INTERVALS"
               :key="i.key"
-              :variant="i.key === interval ? 'primary' : 'outline'"
-              size="sm"
+              class="rounded-md px-2.5 py-1 text-[11px] font-semibold transition"
+              :class="i.key === interval ? 'bg-primary text-primary-foreground' : 'bg-muted/50 text-muted-foreground hover:bg-muted'"
               @click="interval = i.key"
             >
               {{ i.label }}
-            </Button>
+            </button>
           </div>
         </div>
       </template>
-      <TradeChart
-        :candles="candles"
-        :height="360"
-        :show-volume="true"
-      />
-      <p v-if="candles.length > 0" class="mt-2 text-[11px] text-muted-foreground text-center">
-        터치로 zoom · pan · crosshair · 캔들 {{ candles.length }}개
-      </p>
+      <TradeChart :candles="candles" :height="360" :show-volume="true" />
     </Card>
 
     <Card v-else>
-      <p class="text-sm text-muted-foreground">
-        위 검색창에서 종목을 선택하거나 6자리 코드를 입력하세요.
-      </p>
+      <p class="text-sm text-muted-foreground">위 검색창에서 종목을 선택하세요.</p>
     </Card>
   </div>
 </template>

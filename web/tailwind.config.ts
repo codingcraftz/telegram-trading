@@ -48,13 +48,18 @@ export default {
       },
       fontFamily: {
         sans: [
+          'Pretendard Variable',
+          'Pretendard',
           '-apple-system',
           'BlinkMacSystemFont',
-          'Pretendard',
           '"Apple SD Gothic Neo"',
           'sans-serif',
         ],
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+      },
+      letterSpacing: {
+        tight: '-0.011em',
+        tighter: '-0.022em',
       },
     },
   },
