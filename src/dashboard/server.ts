@@ -4,9 +4,29 @@
 
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
+
+import { handleBalance } from '../api/balance.js';
+import {
+  handleCancelKis,
+  handleTradeBuy,
+  handleTradeCancel,
+  handleTradeConfirm,
+  handleTradeSell,
+} from '../api/trade.js';
+import { handleOrders } from '../api/orders.js';
+import { handleQuote, handleSearch } from '../api/quote.js';
+import { handleChartApi } from '../api/chart.js';
+import {
+  handleWatchlistAdd,
+  handleWatchlistList,
+  handleWatchlistRemove,
+} from '../api/watchlist.js';
+import { handleStrategyGet, handleStrategyPost } from '../api/strategy.js';
+import { handleSession } from '../api/session.js';
 
 const ENV_PATH = process.env.ENV_PATH ?? '/app/data/runtime.env';
 const UPDATE_SENTINEL = '/app/data/.update-now';
@@ -298,13 +318,38 @@ doBtn.addEventListener('click', async () => {
 export function startDashboard(port = 8080): void {
   const app = new Hono();
 
-  app.get('/', (c) => c.html(HTML(readSettings())));
+  // 정적 SPA 파일이 있으면 어떤 경로인지 확인 (Dockerfile에서 dist/web으로 복사)
+  const WEB_ROOT = resolve('./dist/web');
+  const WEB_INDEX = `${WEB_ROOT}/index.html`;
+  const hasSpa = existsSync(WEB_INDEX);
+  console.log(`[dashboard] SPA at ${WEB_ROOT}: ${hasSpa ? 'found' : 'not built yet'}`);
+
   app.get('/health', (c) => c.text('ok'));
 
   // 현재 봇 버전 (업데이트 폴링용)
   app.get('/api/version', (c) =>
     c.json({ sha: shortSha(GIT_SHA), buildDate: BUILD_DATE }),
   );
+
+  // ===== 데이터 조회 API (PWA용) =====
+  app.get('/api/session', handleSession);
+  app.get('/api/balance', handleBalance);
+  app.get('/api/orders', handleOrders);
+  app.get('/api/quote', handleQuote);
+  app.get('/api/search', handleSearch);
+  app.get('/api/chart', handleChartApi);
+  app.get('/api/watchlist', handleWatchlistList);
+  app.get('/api/strategy', handleStrategyGet);
+
+  // ===== 액션 API =====
+  app.post('/api/trade/buy', handleTradeBuy);
+  app.post('/api/trade/sell', handleTradeSell);
+  app.post('/api/trade/confirm/:id', handleTradeConfirm);
+  app.post('/api/trade/cancel/:id', handleTradeCancel);
+  app.post('/api/trade/cancel-kis', handleCancelKis);
+  app.post('/api/watchlist/add', handleWatchlistAdd);
+  app.post('/api/watchlist/remove/:id', handleWatchlistRemove);
+  app.post('/api/strategy', handleStrategyPost);
 
   app.post('/api/settings', async (c) => {
     const body = (await c.req.json()) as Settings;
@@ -356,6 +401,18 @@ export function startDashboard(port = 8080): void {
       return c.json({ error: (err as Error).message }, 500);
     }
   });
+
+  // SPA가 빌드되어 있으면: 정적 파일 + SPA fallback
+  // SPA 없으면: 옛 HTML 폼 (키 입력 등)
+  if (hasSpa) {
+    // PWA용 manifest / icons / app.js / css 등 정적 파일 서빙
+    app.use('/*', serveStatic({ root: './dist/web' }));
+    // SPA history 모드 fallback: 매치 안 된 모든 GET → index.html
+    app.get('*', (c) => c.html(readFileSync(WEB_INDEX, 'utf-8')));
+  } else {
+    // PWA 빌드 전: 기존 SSR HTML 폼 유지 (대시보드 설정만 가능)
+    app.get('/', (c) => c.html(HTML(readSettings())));
+  }
 
   serve({ fetch: app.fetch, port });
   console.log(`[dashboard] listening on :${port}  ·  version=${shortSha(GIT_SHA)}`);
