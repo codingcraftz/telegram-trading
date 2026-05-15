@@ -18,6 +18,11 @@ ARG GIT_SHA=dev
 ARG BUILD_DATE=
 ENV GIT_SHA=${GIT_SHA}
 ENV BUILD_DATE=${BUILD_DATE}
+# 한글 차트 렌더링용 폰트 (sharp가 SVG → PNG 변환 시 시스템 폰트 사용)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      fontconfig fonts-nanum fonts-nanum-coding \
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -fv >/dev/null 2>&1
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./

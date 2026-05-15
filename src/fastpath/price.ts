@@ -4,14 +4,39 @@ import { callKisApi } from '../mcp/kis.js';
 import { firstOutput, fmtKrw, fmtNum, fmtPct, num, parseMcpResult } from './extract.js';
 import { resolveSymbol } from './symbol.js';
 
-// 매칭 패턴: "[종목명/코드] (현재가|시세|주가|가격|얼마)"
+// 매칭 패턴: "[종목명/코드] (현재가|시세|주가|가격|얼마|...조회)"
 const PRICE_RE =
-  /^(?<sym>[A-Za-z가-힣0-9\s]+?)\s*(?:의|이|가)?\s*(?:현재가|시세|주가|가격|얼마|얼만지)\??\s*$/;
+  /^(?<sym>[A-Za-z가-힣0-9\s]+?)\s*(?:의|이|가)?\s*(?:현재가|시세|시세조회|주가|주가조회|가격|가격조회|얼마|얼만지)(?:\s*(?:조회|봐|봐줘|알려줘))?\??\s*$/;
 
 export function tryMatchPrice(text: string): { sym: string } | null {
   const m = text.trim().match(PRICE_RE);
   if (!m?.groups?.sym) return null;
   return { sym: m.groups.sym.trim() };
+}
+
+// 현재가만 빠르게 추출 — 관심종목 inline 시세 표시용
+export async function fetchQuickQuote(
+  code: string,
+): Promise<{ price: number; changePct: number; signLabel: string } | null> {
+  try {
+    const res = await callKisApi('domestic_stock', 'inquire_price', {
+      fid_cond_mrkt_div_code: 'J',
+      fid_input_iscd: code,
+    });
+    const parsed = parseMcpResult(res);
+    if (!parsed.success) return null;
+    const d = firstOutput(parsed);
+    if (!d) return null;
+    const price = num(d.stck_prpr);
+    if (!price || price <= 0) return null;
+    const changePct = num(d.prdy_ctrt) ?? 0;
+    const sign = String(d.prdy_vrss_sign ?? '3');
+    const signLabel =
+      sign === '1' || sign === '2' ? '▲' : sign === '4' || sign === '5' ? '▼' : '–';
+    return { price, changePct, signLabel };
+  } catch {
+    return null;
+  }
 }
 
 export async function handlePriceQuery(symbolInput: string): Promise<string> {

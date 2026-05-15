@@ -50,7 +50,7 @@ export function buildCandleSvg(args: CandleChartArgs): string {
 
   const candles = args.candles;
   if (candles.length === 0) {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="${COLOR_BG}"/><text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="${COLOR_TEXT}" font-size="20" font-family="sans-serif">데이터 없음</text></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="${COLOR_BG}"/><text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="${COLOR_TEXT}" font-size="20" font-family="NanumGothic, Nanum Gothic, sans-serif">데이터 없음</text></svg>`;
   }
 
   // 0/NaN/음수 가격 row는 noise — 통계에서 제외하되 캔들은 그대로 그림 (사용자가 봉 누락 인지)
@@ -92,7 +92,7 @@ export function buildCandleSvg(args: CandleChartArgs): string {
       `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${padL + plotW}" y2="${y.toFixed(1)}" stroke="${COLOR_GRID}" stroke-width="1" />`,
     );
     gridLines.push(
-      `<text x="${padL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="11" font-family="sans-serif" fill="${COLOR_AXIS}">${Math.round(p).toLocaleString()}</text>`,
+      `<text x="${padL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="11" font-family="NanumGothic, Nanum Gothic, sans-serif" fill="${COLOR_AXIS}">${Math.round(p).toLocaleString()}</text>`,
     );
   }
 
@@ -102,7 +102,7 @@ export function buildCandleSvg(args: CandleChartArgs): string {
   for (let i = 0; i < candles.length; i += labelEvery) {
     const x = xToPx(i);
     xLabels.push(
-      `<text x="${x.toFixed(1)}" y="${(padT + plotH + 18).toFixed(1)}" text-anchor="middle" font-size="11" font-family="sans-serif" fill="${COLOR_AXIS}">${escapeXml(candles[i]!.time)}</text>`,
+      `<text x="${x.toFixed(1)}" y="${(padT + plotH + 18).toFixed(1)}" text-anchor="middle" font-size="11" font-family="NanumGothic, Nanum Gothic, sans-serif" fill="${COLOR_AXIS}">${escapeXml(candles[i]!.time)}</text>`,
     );
   }
 
@@ -140,7 +140,7 @@ export function buildCandleSvg(args: CandleChartArgs): string {
     lastLine =
       `<line x1="${padL}" y1="${ly.toFixed(1)}" x2="${padL + plotW}" y2="${ly.toFixed(1)}" stroke="${lineColor}" stroke-width="1" stroke-dasharray="4 3" opacity="0.6" />` +
       `<rect x="${padL + plotW + 1}" y="${(ly - 9).toFixed(1)}" width="${padR - 2}" height="18" fill="${lineColor}" />` +
-      `<text x="${padL + plotW + padR / 2}" y="${(ly + 4).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="600" font-family="sans-serif" fill="#fff">${Math.round(lastClose!).toLocaleString()}</text>`;
+      `<text x="${padL + plotW + padR / 2}" y="${(ly + 4).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="600" font-family="NanumGothic, Nanum Gothic, sans-serif" fill="#fff">${Math.round(lastClose!).toLocaleString()}</text>`;
   }
 
   // 외곽 박스
@@ -148,8 +148,8 @@ export function buildCandleSvg(args: CandleChartArgs): string {
 
   // 헤더
   const header = `
-    <text x="${padL}" y="28" font-size="18" font-family="sans-serif" font-weight="600" fill="${COLOR_TEXT}">${escapeXml(args.title)}</text>
-    ${args.subtitle ? `<text x="${padL}" y="48" font-size="12" font-family="sans-serif" fill="${COLOR_AXIS}">${escapeXml(args.subtitle)}</text>` : ''}
+    <text x="${padL}" y="28" font-size="18" font-family="NanumGothic, Nanum Gothic, sans-serif" font-weight="600" fill="${COLOR_TEXT}">${escapeXml(args.title)}</text>
+    ${args.subtitle ? `<text x="${padL}" y="48" font-size="12" font-family="NanumGothic, Nanum Gothic, sans-serif" fill="${COLOR_AXIS}">${escapeXml(args.subtitle)}</text>` : ''}
   `;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">

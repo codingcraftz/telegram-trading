@@ -446,9 +446,9 @@ export function registerHandlers(bot: Bot) {
   });
 
   bot.callbackQuery('wlmenu:back', async (ctx) => {
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery('시세 조회 중…');
     clearChatMode(ctx.chat!.id);
-    const m = buildWatchlistMenu(ctx.chat!.id);
+    const m = await buildWatchlistMenu(ctx.chat!.id);
     try {
       await ctx.editMessageText(m.text, { reply_markup: m.kb, parse_mode: 'HTML' });
     } catch {
@@ -1287,7 +1287,7 @@ export function registerHandlers(bot: Bot) {
     // Reply Keyboard 버튼 텍스트 라우팅 (이모지 제거 — 한글만 추출)
     const cleaned = text.replace(/[^ㄱ-힝]/g, '').trim();
     if (cleaned === '관심종목') {
-      const menu = buildWatchlistMenu(chatId);
+      const menu = await buildWatchlistMenu(chatId);
       await ctx.reply(menu.text, { reply_markup: menu.kb, parse_mode: 'HTML' });
       return;
     }
