@@ -3,7 +3,7 @@ defineProps<{ title?: string; subtitle?: string }>();
 </script>
 
 <template>
-  <section class="rounded-2xl bg-card">
+  <section class="rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0">
     <div v-if="title || subtitle || $slots.header" class="px-4 pt-4 pb-2">
       <slot name="header">
         <h3 v-if="title" class="text-sm font-semibold tracking-tight text-foreground">{{ title }}</h3>
