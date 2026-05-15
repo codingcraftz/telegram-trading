@@ -623,6 +623,92 @@ export async function buildSellQtyMenu(
   };
 }
 
+// 매도 확정 메시지 + pendingIntent 등록. 매수처럼 confirm/cancel 받음.
+// 실제 발주는 confirm 콜백 → handlers.ts runConfirm의 sell 분기에서 진행.
+export async function buildSellConfirmAndRegister(args: {
+  chatId: number;
+  code: string;
+  qtyMode: 'all' | 'half' | 'shares';
+  qtyValue?: number;
+}): Promise<{ ok: true; text: string; intentId: string } | { ok: false; text: string }> {
+  const holdings = await fetchHoldings();
+  const h = holdings.find((x) => x.code === args.code);
+  if (!h) return { ok: false, text: '❌ 보유 종목 정보 없음 — 매도 불가' };
+
+  let qty: number;
+  if (args.qtyMode === 'all') qty = h.qty;
+  else if (args.qtyMode === 'half') qty = Math.max(1, Math.floor(h.qty / 2));
+  else qty = Math.floor(args.qtyValue ?? 0);
+
+  if (qty <= 0 || qty > h.qty) {
+    return { ok: false, text: `❌ 잘못된 수량: ${qty}주 (보유 ${h.qty}주)` };
+  }
+
+  // 세션별 ord_dvsn 결정
+  const session = getMarketSession();
+  const sLabel = sessionLabel(session);
+  if (session === 'closed' || session === 'holiday') {
+    return {
+      ok: false,
+      text:
+        `🔴 ${sLabel.label} — 매도 불가\n` +
+        `${h.name} ${qty}주 매도는 정규장/시간외 거래 시간에 다시 시도해 주세요.`,
+    };
+  }
+
+  let orderType: OrderType = 'market';
+  let price: number | undefined;
+  let typeLabel = '시장가';
+  if (session === 'pre_extended') {
+    orderType = 'pre_extended';
+    typeLabel = '장전 시간외 종가';
+  } else if (session === 'post_extended') {
+    orderType = 'post_extended';
+    typeLabel = '장후 시간외 종가';
+  } else if (session === 'after_single') {
+    orderType = 'after_single';
+    price = h.curPrice;
+    typeLabel = '시간외 단일가 (현재가)';
+  }
+
+  const spec: OrderSpec = {
+    action: 'sell',
+    market: 'KRX',
+    symbol_code: args.code,
+    symbol_name: h.name,
+    order_type: orderType,
+    price,
+    quantity: qty,
+    tp_pct: null,
+    sl_pct: null,
+  };
+
+  const cfg = getConfig();
+  const intentId = insertPendingIntent({
+    chatId: args.chatId,
+    llmProposal: '',
+    orderSpec: spec,
+    ttlMin: cfg.INTENT_TTL_MIN,
+  });
+
+  const expectedPnl =
+    h.curPrice > 0 && h.avgPrice > 0 ? (h.curPrice - h.avgPrice) * qty : 0;
+  const pnlSign = expectedPnl >= 0 ? '+' : '';
+  const ttl = fmtTtl(Date.now() + cfg.INTENT_TTL_MIN * 60 * 1000);
+  const text = [
+    `📤 <b>매도 확인</b>  ${sLabel.icon} ${sLabel.label}`,
+    `${h.name} (${h.code}) ${qty}주 ${typeLabel}`,
+    `매입평균 ${h.avgPrice.toLocaleString()}원 → 현재가 ${h.curPrice.toLocaleString()}원`,
+    `예상손익 <b>${pnlSign}${Math.round(expectedPnl).toLocaleString()}원</b>`,
+    '',
+    `⌛ 확정 만료: ${ttl}`,
+    `<code>/확정 ${intentId}</code>  또는  <code>/취소 ${intentId}</code>`,
+  ].join('\n');
+
+  return { ok: true, text, intentId };
+}
+
+// (deprecated, 유지 — fastpath/sell.ts handleSell이 호출 안 함. UI 매도는 buildSellConfirmAndRegister로 전환)
 export async function executeSell(args: {
   chatId: number;
   code: string;

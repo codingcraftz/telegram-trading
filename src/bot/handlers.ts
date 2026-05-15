@@ -21,7 +21,7 @@ import { buildBalanceView } from '../fastpath/balance.js';
 import { buildPositionsView } from '../fastpath/positions.js';
 import { buildOrdersView } from '../fastpath/orders.js';
 import { cancelKrxOrder } from '../mcp/kis.js';
-import { parseMcpResult } from '../fastpath/extract.js';
+import { checkKisOk, parseMcpResult } from '../fastpath/extract.js';
 import {
   handleMarketOpenCommand,
   handleMarketOpenReserve,
@@ -53,10 +53,10 @@ import {
   buildBuySearchResults,
   buildBuyStrategyMenu,
   buildBuySymbolMenu,
+  buildSellConfirmAndRegister,
   buildSellQtyMenu,
   buildSellSymbolMenu,
   buildTradeMainMenu,
-  executeSell,
   parseBuyAmount,
   type BuyAmountSpec,
 } from '../fastpath/trade.js';
@@ -277,6 +277,13 @@ export function registerHandlers(bot: Bot) {
         orderType: spec.order_type,
         price: spec.price,
       });
+      // KIS 응답 rt_cd 체크 — '0'이 아니면 거절
+      const parsed = parseMcpResult(result);
+      const kisOk = checkKisOk(parsed);
+      if (!kisOk.ok) {
+        logTrade({ chatId, kind: 'sell_rejected', payload: { spec, msg: kisOk.message } });
+        return `❌ 매도 거절 (KIS): ${kisOk.message ?? '알 수 없는 오류'}`;
+      }
       const ext = (obj: unknown, ...keys: string[]): string | undefined => {
         if (!obj || typeof obj !== 'object') return undefined;
         const o = obj as Record<string, unknown>;
@@ -945,7 +952,7 @@ export function registerHandlers(bot: Bot) {
     }
   });
 
-  // 매도 수량 (전량/절반) 선택 → 즉시 발주
+  // 매도 수량 (전량/절반) 선택 → pendingIntent 등록 + confirm 메시지 (매수와 동일 흐름)
   bot.callbackQuery(/^tr:sq:(\d{6}):(all|half)$/, async (ctx) => {
     const m = ctx.callbackQuery.data!.match(/^tr:sq:(\d{6}):(all|half)$/);
     if (!m) {
@@ -953,8 +960,8 @@ export function registerHandlers(bot: Bot) {
       return;
     }
     const [, code, qtyMode] = m;
-    await ctx.answerCallbackQuery('매도 발주 중…');
-    const r = await executeSell({
+    await ctx.answerCallbackQuery();
+    const r = await buildSellConfirmAndRegister({
       chatId: ctx.chat!.id,
       code: code!,
       qtyMode: qtyMode as 'all' | 'half',
@@ -962,7 +969,14 @@ export function registerHandlers(bot: Bot) {
     try {
       await ctx.editMessageReplyMarkup({ reply_markup: undefined });
     } catch {}
-    await ctx.reply(r.text, { parse_mode: 'HTML' });
+    if (!r.ok) {
+      await ctx.reply(r.text, { parse_mode: 'HTML' });
+      return;
+    }
+    const kb = new InlineKeyboard()
+      .text('✅ 매도 발주', `confirm:${r.intentId}`)
+      .text('❌ 취소', `cancel:${r.intentId}`);
+    await ctx.reply(r.text, { reply_markup: kb, parse_mode: 'HTML' });
   });
 
   // 매도 수량 직접 입력 진입
@@ -1315,8 +1329,15 @@ export function registerHandlers(bot: Bot) {
         return;
       }
       const qty = Number(m[1]);
-      const r = await executeSell({ chatId, code, qtyMode: 'shares', qtyValue: qty });
-      await ctx.reply(r.text, { parse_mode: 'HTML' });
+      const r = await buildSellConfirmAndRegister({ chatId, code, qtyMode: 'shares', qtyValue: qty });
+      if (!r.ok) {
+        await ctx.reply(r.text, { parse_mode: 'HTML' });
+        return;
+      }
+      const kb = new InlineKeyboard()
+        .text('✅ 매도 발주', `confirm:${r.intentId}`)
+        .text('❌ 취소', `cancel:${r.intentId}`);
+      await ctx.reply(r.text, { reply_markup: kb, parse_mode: 'HTML' });
       return;
     }
 

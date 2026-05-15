@@ -9,6 +9,7 @@ import {
 } from '../db/repo.js';
 import { notify } from '../notify/telegram.js';
 import { placeOrder, checkFill, type Market } from '../mcp/kis.js';
+import { checkKisOk, parseMcpResult } from '../fastpath/extract.js';
 
 type AnyRecord = Record<string, unknown>;
 
@@ -76,6 +77,13 @@ export async function placeBuyOrder(args: {
     orderType: spec.order_type,
     price: spec.price,
   });
+
+  // KIS rt_cd 체크 — 거절이면 throw (호출 측 catch에서 사용자에게 메시지)
+  const parsed = parseMcpResult(result);
+  const kisOk = checkKisOk(parsed);
+  if (!kisOk.ok) {
+    throw new Error(`KIS 거절: ${kisOk.message ?? '알 수 없는 오류'}`);
+  }
 
   const orderId =
     extract(result, 'ODNO', 'odno', 'ord_no', 'order_id', 'orderId') ??
