@@ -1,19 +1,23 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { HelpCircle } from 'lucide-vue-next';
 import Modal from '@/components/ui/Modal.vue';
 import Button from '@/components/ui/Button.vue';
+import { usePrefs } from '@/stores/prefs';
 
 defineProps<{
   title: string;
   description: string;
 }>();
 
+const prefs = usePrefs();
+const isEasy = computed(() => prefs.mode === 'easy');
 const open = ref(false);
 </script>
 
 <template>
   <button
+    v-if="isEasy"
     type="button"
     class="-ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground"
     aria-label="도움말"

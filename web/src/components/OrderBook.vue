@@ -1,0 +1,207 @@
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
+import { api, type AskingResponse, type AskingLevel } from '@/api/client';
+import { fmtKrw, fmtNum } from '@/lib/format';
+
+const props = withDefaults(
+  defineProps<{
+    code: string;
+    /** REST 폴링 주기 (ms). SSE가 살아있으면 무시됨 */
+    intervalMs?: number;
+    /** 표시할 호가 단계 — 5 또는 10 */
+    levels?: 5 | 10;
+    /** compact: 폭이 좁을 때 (좌우 split 폼) — 가격/잔량 한 행, 잔량 막대 배경 강조 */
+    compact?: boolean;
+    /** false면 SSE 안 쓰고 REST 폴링만 */
+    useStream?: boolean;
+  }>(),
+  { intervalMs: 1500, levels: 10, compact: false, useStream: true },
+);
+
+const emit = defineEmits<{ pickPrice: [price: number] }>();
+
+const data = ref<AskingResponse | null>(null);
+const streamLive = ref(false);
+let timer: ReturnType<typeof setInterval> | null = null;
+let es: EventSource | null = null;
+
+async function load() {
+  if (!props.code) return;
+  try {
+    data.value = await api.asking(props.code);
+  } catch {
+    /* silent */
+  }
+}
+
+function openStream() {
+  closeStream();
+  if (!props.useStream || !props.code) return;
+  try {
+    es = new EventSource(`/api/stream/asking?code=${props.code}`);
+    es.addEventListener('asking', (ev) => {
+      try {
+        const snap = JSON.parse((ev as MessageEvent).data) as AskingResponse;
+        data.value = snap;
+        streamLive.value = true;
+        // SSE 살아있으면 REST 폴링 정지
+        stopPolling();
+      } catch { /* ignore */ }
+    });
+    es.addEventListener('ready', () => { /* first ack */ });
+    es.addEventListener('error', () => {
+      streamLive.value = false;
+      // SSE 실패 → REST 폴링 fallback
+      startPolling();
+    });
+  } catch {
+    streamLive.value = false;
+    startPolling();
+  }
+}
+function closeStream() {
+  if (es) { try { es.close(); } catch {} es = null; }
+  streamLive.value = false;
+}
+
+function startPolling() {
+  stopPolling();
+  if (!props.code || props.intervalMs <= 0 || document.hidden) return;
+  load();
+  timer = setInterval(load, props.intervalMs);
+}
+function stopPolling() {
+  if (timer) clearInterval(timer);
+  timer = null;
+}
+function onVisibility() {
+  if (document.hidden) {
+    stopPolling();
+    closeStream();
+  } else {
+    load();
+    if (props.useStream) openStream();
+    else startPolling();
+  }
+}
+
+// 매도: 1단계가 현재가에 가장 가까움 → 표시는 위에서 아래로 (먼→가까운). reverse.
+const askRows = computed<AskingLevel[]>(() => {
+  if (!data.value) return [];
+  return data.value.asks.slice(0, props.levels).slice().reverse();
+});
+const bidRows = computed<AskingLevel[]>(() => {
+  if (!data.value) return [];
+  return data.value.bids.slice(0, props.levels);
+});
+
+const maxQty = computed(() => {
+  if (!data.value) return 1;
+  let m = 1;
+  for (const a of data.value.asks.slice(0, props.levels)) if (a.qty > m) m = a.qty;
+  for (const b of data.value.bids.slice(0, props.levels)) if (b.qty > m) m = b.qty;
+  return m;
+});
+
+function barWidth(qty: number) {
+  return `${Math.min(100, (qty / maxQty.value) * 100).toFixed(1)}%`;
+}
+
+onMounted(() => {
+  load();
+  if (props.useStream) openStream();
+  else startPolling();
+  document.addEventListener('visibilitychange', onVisibility);
+});
+onUnmounted(() => {
+  stopPolling();
+  closeStream();
+  document.removeEventListener('visibilitychange', onVisibility);
+});
+
+watch(() => props.code, () => {
+  data.value = null;
+  closeStream();
+  load();
+  if (props.useStream) openStream();
+  else startPolling();
+});
+watch(() => props.intervalMs, () => { if (!streamLive.value) startPolling(); });
+</script>
+
+<template>
+  <div class="text-xs tabular-nums">
+    <!-- compact: 좁은 컬럼용. 한 셀에 가격 좌 / 잔량 우, 잔량 막대 배경 -->
+    <template v-if="compact">
+      <div class="space-y-px">
+        <button
+          v-for="(row, idx) in askRows"
+          :key="`a-${idx}-${row.price}`"
+          type="button"
+          class="relative flex w-full items-center justify-between rounded px-1.5 py-1 text-[11px] transition active:scale-[0.98]"
+          @click="emit('pickPrice', row.price)"
+        >
+          <div class="absolute inset-y-0 right-0 rounded bg-down/10" :style="{ width: barWidth(row.qty) }" />
+          <span class="relative z-10 font-bold text-down">{{ fmtKrw(row.price) }}</span>
+          <span class="relative z-10 text-muted-foreground">{{ fmtNum(row.qty) }}</span>
+        </button>
+      </div>
+      <div class="my-1 h-px bg-border" />
+      <div class="space-y-px">
+        <button
+          v-for="(row, idx) in bidRows"
+          :key="`b-${idx}-${row.price}`"
+          type="button"
+          class="relative flex w-full items-center justify-between rounded px-1.5 py-1 text-[11px] transition active:scale-[0.98]"
+          @click="emit('pickPrice', row.price)"
+        >
+          <div class="absolute inset-y-0 right-0 rounded bg-up/10" :style="{ width: barWidth(row.qty) }" />
+          <span class="relative z-10 font-bold text-up">{{ fmtKrw(row.price) }}</span>
+          <span class="relative z-10 text-muted-foreground">{{ fmtNum(row.qty) }}</span>
+        </button>
+      </div>
+    </template>
+
+    <!-- normal: 풀폭 -->
+    <template v-else>
+      <div class="space-y-0.5">
+        <button
+          v-for="(row, idx) in askRows"
+          :key="`a-${idx}-${row.price}`"
+          type="button"
+          class="relative grid w-full grid-cols-[1fr_auto] items-center gap-2 rounded-md px-2 py-1 text-left transition active:scale-[0.99]"
+          @click="emit('pickPrice', row.price)"
+        >
+          <div class="absolute inset-y-0 right-0 rounded-md bg-down/10" :style="{ width: barWidth(row.qty) }" />
+          <span class="relative z-10 font-semibold text-down">{{ fmtKrw(row.price) }}</span>
+          <span class="relative z-10 text-muted-foreground">{{ fmtNum(row.qty) }}</span>
+        </button>
+      </div>
+      <div class="my-1 h-px bg-border" />
+      <div class="space-y-0.5">
+        <button
+          v-for="(row, idx) in bidRows"
+          :key="`b-${idx}-${row.price}`"
+          type="button"
+          class="relative grid w-full grid-cols-[1fr_auto] items-center gap-2 rounded-md px-2 py-1 text-left transition active:scale-[0.99]"
+          @click="emit('pickPrice', row.price)"
+        >
+          <div class="absolute inset-y-0 right-0 rounded-md bg-up/10" :style="{ width: barWidth(row.qty) }" />
+          <span class="relative z-10 font-semibold text-up">{{ fmtKrw(row.price) }}</span>
+          <span class="relative z-10 text-muted-foreground">{{ fmtNum(row.qty) }}</span>
+        </button>
+      </div>
+    </template>
+
+    <div v-if="data && !compact" class="mt-1.5 grid grid-cols-2 gap-2 border-t border-border pt-1.5 text-[10px] text-muted-foreground">
+      <div class="flex items-center justify-between">
+        <span>매도 잔량</span>
+        <span class="font-semibold text-down">{{ fmtNum(data.totalAskQty) }}</span>
+      </div>
+      <div class="flex items-center justify-between">
+        <span>매수 잔량</span>
+        <span class="font-semibold text-up">{{ fmtNum(data.totalBidQty) }}</span>
+      </div>
+    </div>
+  </div>
+</template>

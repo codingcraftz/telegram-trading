@@ -21,6 +21,10 @@ import { handleOrders } from '../api/orders.js';
 import { handleQuote, handleQuotes, handleSearch } from '../api/quote.js';
 import { handleChartApi } from '../api/chart.js';
 import { handleCandles } from '../api/candles.js';
+import { handleIndices } from '../api/indices.js';
+import { handleAsking } from '../api/asking.js';
+import { handleStreamAsking } from '../api/stream-asking.js';
+import { handleStreamTick } from '../api/stream-tick.js';
 import {
   handleWatchlistAdd,
   handleWatchlistList,
@@ -348,6 +352,10 @@ export function startDashboard(port = 8080): void {
   app.get('/api/search', handleSearch);
   app.get('/api/chart', handleChartApi); // (legacy PNG — 텔레그램 봇용)
   app.get('/api/candles', handleCandles); // 인터랙티브 차트용 JSON
+  app.get('/api/indices', handleIndices); // 코스피·코스닥·나스닥·다우
+  app.get('/api/asking', handleAsking); // 10단계 호가 + 잔량 (REST fallback)
+  app.get('/api/stream/asking', handleStreamAsking); // KIS WS → SSE 실시간 호가
+  app.get('/api/stream/tick', handleStreamTick); // KIS WS → SSE 실시간 체결가
   app.get('/api/watchlist', handleWatchlistList);
   app.get('/api/strategy', handleStrategyGet);
 

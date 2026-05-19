@@ -21,7 +21,6 @@ import {
   logTrade,
   insertMarketOpenReservation,
   getMarketOpenSettings,
-  DEFAULT_GAP_GUARD_PCT,
   type OrderSpec,
 } from '../db/repo.js';
 import { getConfig } from '../config.js';
@@ -142,12 +141,7 @@ export async function handleBuy(chatId: number, intent: BuyIntent): Promise<Hand
   // closed/holiday → 자동 시가매매 예약
   if (session === 'closed' || session === 'holiday') {
     const settings = getMarketOpenSettings(chatId);
-    const gapGuardPct =
-      settings?.gapGuardPct === undefined || settings?.gapGuardPct === null
-        ? DEFAULT_GAP_GUARD_PCT
-        : settings.gapGuardPct === 0
-          ? null
-          : settings.gapGuardPct;
+    const gapGuardPct = null; // 갭가드 비활성화 (사용자 요청)
     const tpPct = settings?.tpPct ?? null;
     const slPct = settings?.slPct ?? null;
     const fireAt = nextMarketOpen();
@@ -172,8 +166,7 @@ export async function handleBuy(chatId: number, intent: BuyIntent): Promise<Hand
         ? `예산: ${intent.qtyKrw.toLocaleString()}원 (≈${qty}주, 현재가 ${curPrice.toLocaleString()}원)`
         : `수량: ${qty}주 (≈${(curPrice * qty).toLocaleString()}원)`,
       `발주: ${formatKst(fireAt)}`,
-      `갭가드: ${gapGuardPct === null ? '끄기' : `±${gapGuardPct}%`}` +
-        ` · TP: ${tpPct === null ? '끄기' : `+${tpPct}%`}` +
+      `TP: ${tpPct === null ? '끄기' : `+${tpPct}%`}` +
         ` · SL: ${slPct === null ? '끄기' : `-${slPct}%`}`,
       '',
       `⌛ 확정 만료: ${ttl}`,

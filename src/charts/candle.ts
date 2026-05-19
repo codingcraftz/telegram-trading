@@ -6,7 +6,9 @@
 import sharp from 'sharp';
 
 export type Candle = {
-  time: string; // HH:MM
+  time: string; // 표시용 라벨 (HH:MM, MM/DD 등)
+  /** 정확한 epoch ms — 연도 없는 time 라벨의 한계를 우회 */
+  tsMs?: number;
   open: number;
   high: number;
   low: number;

@@ -2,7 +2,7 @@
 //
 // 사용:
 //   /시가매매                          → 현재 셋팅 표시
-//   /시가매매 set gap=5 tp=5 sl=3      → 셋팅 갱신 (gap=0=끄기, tp=/sl= 빈값=끄기)
+//   /시가매매 set tp=5 sl=3            → 셋팅 갱신 (tp=/sl= 빈값=끄기)
 //   "삼성전자 시가매매 10주"            → shares=10
 //   "삼성전자 시가매매 150만원"         → amount=1,500,000
 //   "삼성전자 시가매매 1500000원"        → amount=1,500,000
@@ -11,7 +11,6 @@
 import { getConfig } from '../config.js';
 import { callKisApi } from '../mcp/kis.js';
 import {
-  DEFAULT_GAP_GUARD_PCT,
   getMarketOpenSettings,
   insertMarketOpenReservation,
   upsertMarketOpenSettings,
@@ -58,22 +57,21 @@ export async function handleMarketOpenCommand(chatId: number, args: string): Pro
   if (!arg) {
     return renderSettings(chatId);
   }
-  // set gap=5 tp=5 sl=3
+  // set tp=5 sl=3
   const setMatch = arg.match(/^set\s+(.+)$/i);
   if (!setMatch) {
     return [
       '사용법:',
       '  /시가매매             — 현재 셋팅 보기',
-      '  /시가매매 set gap=5 tp=5 sl=3',
-      '    gap=0    → 갭가드 끄기',
+      '  /시가매매 set tp=5 sl=3',
       '    tp=, sl= → 빈값으로 두면 해당 항목 끄기',
     ].join('\n');
   }
 
-  const updates: { gapGuardPct?: number | null; tpPct?: number | null; slPct?: number | null } = {};
+  const updates: { tpPct?: number | null; slPct?: number | null } = {};
   const tokens = setMatch[1]!.split(/\s+/).filter(Boolean);
   for (const tok of tokens) {
-    const kv = tok.match(/^(gap|tp|sl)=(.*)$/i);
+    const kv = tok.match(/^(tp|sl)=(.*)$/i);
     if (!kv) return `알 수 없는 옵션: ${tok}`;
     const key = kv[1]!.toLowerCase();
     const val = kv[2]!;
@@ -85,8 +83,7 @@ export async function handleMarketOpenCommand(chatId: number, args: string): Pro
       if (!Number.isFinite(n) || n < 0) return `잘못된 숫자: ${tok}`;
       parsed = n;
     }
-    if (key === 'gap') updates.gapGuardPct = parsed;
-    else if (key === 'tp') updates.tpPct = parsed;
+    if (key === 'tp') updates.tpPct = parsed;
     else if (key === 'sl') updates.slPct = parsed;
   }
 
@@ -96,32 +93,18 @@ export async function handleMarketOpenCommand(chatId: number, args: string): Pro
 
 function renderSettings(chatId: number): string {
   const s = getMarketOpenSettings(chatId);
-  const gap = s?.gapGuardPct;
   const tp = s?.tpPct;
   const sl = s?.slPct;
-  const gapStr =
-    gap === null || gap === undefined
-      ? `${DEFAULT_GAP_GUARD_PCT}% (기본)`
-      : gap === 0
-        ? '끄기'
-        : `±${gap}%`;
   const tpStr = tp === null || tp === undefined ? '끄기' : `+${tp}%`;
   const slStr = sl === null || sl === undefined ? '끄기' : `-${sl}%`;
   return [
     '⚙️ <b>시가매매 셋팅</b>',
-    `  갭가드: ${gapStr}`,
     `  TP: ${tpStr}`,
     `  SL: ${slStr}`,
     '',
-    '갱신: <code>/시가매매 set gap=5 tp=5 sl=3</code>',
+    '갱신: <code>/시가매매 set tp=5 sl=3</code>',
     '예약: <code>삼성전자 시가매매 10주</code> / <code>150만원</code> / <code>100%</code>',
   ].join('\n');
-}
-
-function effectiveGapGuard(stored: number | null | undefined): number | null {
-  if (stored === undefined || stored === null) return DEFAULT_GAP_GUARD_PCT;
-  if (stored === 0) return null; // 끄기
-  return stored;
 }
 
 // ---------- 예약 등록 ----------
@@ -149,9 +132,9 @@ export async function handleMarketOpenReserve(
   const priceData = firstOutput(priceParsed);
   const curPrice = num(priceData?.stck_prpr);
 
-  // 셋팅 로드
+  // 셋팅 로드 — 갭가드는 비활성화 (사용자 요청)
   const settings = getMarketOpenSettings(chatId);
-  const gapGuardPct = effectiveGapGuard(settings?.gapGuardPct);
+  const gapGuardPct = null;
   const tpPct = settings?.tpPct ?? null;
   const slPct = settings?.slPct ?? null;
 
@@ -197,8 +180,7 @@ export async function handleMarketOpenReserve(
     curPrice && curPrice > 0 ? `현재가: ${curPrice.toLocaleString()}원 (참고)` : '',
     `수량: ${estQtyText}`,
     `발주: ${formatKst(fireAt)} 시장가`,
-    `갭가드: ${gapGuardPct === null ? '끄기' : `±${gapGuardPct}%`}` +
-      ` · TP: ${tpPct === null ? '끄기' : `+${tpPct}%`}` +
+    `TP: ${tpPct === null ? '끄기' : `+${tpPct}%`}` +
       ` · SL: ${slPct === null ? '끄기' : `-${slPct}%`}`,
     '',
     `⌛ 확정 만료: ${ttl}`,

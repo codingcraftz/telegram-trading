@@ -9,8 +9,9 @@ const props = withDefaults(
     min?: number;
     max?: number;
     suffix?: string;
+    compact?: boolean;
   }>(),
-  { step: 10_000, min: 0, suffix: '원' },
+  { step: 10_000, min: 0, suffix: '원', compact: false },
 );
 const emit = defineEmits<{ 'update:modelValue': [v: number] }>();
 
@@ -31,30 +32,36 @@ function onInput(e: Event) {
 </script>
 
 <template>
-  <div class="flex items-center gap-2">
+  <div class="flex items-center" :class="compact ? 'gap-1' : 'gap-2'">
     <button
       type="button"
-      class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-muted text-foreground transition active:scale-95 hover:bg-accent"
+      class="shrink-0 rounded-full bg-muted text-foreground transition active:scale-95 hover:bg-accent flex items-center justify-center"
+      :class="compact ? 'h-8 w-8' : 'h-12 w-12'"
       @click="dec"
     >
-      <Minus class="h-5 w-5" />
+      <Minus :class="compact ? 'h-3.5 w-3.5' : 'h-5 w-5'" />
     </button>
-    <div class="flex flex-1 items-baseline justify-center gap-1 rounded-2xl bg-muted/40 px-3 py-3">
+    <div
+      class="flex flex-1 items-baseline justify-center gap-1 rounded-xl bg-muted/40"
+      :class="compact ? 'px-1.5 py-1.5' : 'px-3 py-3'"
+    >
       <input
         :value="display"
         type="text"
         inputmode="numeric"
-        class="w-full bg-transparent text-center text-2xl font-bold tabular-nums tracking-tighter focus:outline-none"
+        class="w-full bg-transparent text-center font-bold tabular-nums tracking-tighter focus:outline-none"
+        :class="compact ? 'text-sm' : 'text-2xl'"
         @input="onInput"
       />
-      <span class="text-sm font-semibold text-muted-foreground">{{ suffix }}</span>
+      <span class="font-semibold text-muted-foreground" :class="compact ? 'text-[10px]' : 'text-sm'">{{ suffix }}</span>
     </div>
     <button
       type="button"
-      class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-muted text-foreground transition active:scale-95 hover:bg-accent"
+      class="shrink-0 rounded-full bg-muted text-foreground transition active:scale-95 hover:bg-accent flex items-center justify-center"
+      :class="compact ? 'h-8 w-8' : 'h-12 w-12'"
       @click="inc"
     >
-      <Plus class="h-5 w-5" />
+      <Plus :class="compact ? 'h-3.5 w-3.5' : 'h-5 w-5'" />
     </button>
   </div>
 </template>

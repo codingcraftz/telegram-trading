@@ -51,16 +51,22 @@ export async function fetchNaverMinuteBars(
   const res = await fetch(url, { headers: HEADERS });
   if (!res.ok) throw new Error(`NAVER ${endpoint} HTTP ${res.status}`);
   const data = (await res.json()) as NaverMinute[];
-  return data.map((r) => ({
-    // 다일치라 MM/DD HH:MM 형태로
-    time:
-      `${r.localDateTime.slice(4, 6)}/${r.localDateTime.slice(6, 8)} ${r.localDateTime.slice(8, 10)}:${r.localDateTime.slice(10, 12)}`,
-    open: r.openPrice,
-    high: r.highPrice,
-    low: r.lowPrice,
-    close: r.currentPrice,
-    volume: r.accumulatedTradingVolume,
-  }));
+  return data.map((r) => {
+    const yyyy = Number(r.localDateTime.slice(0, 4));
+    const mm = Number(r.localDateTime.slice(4, 6));
+    const dd = Number(r.localDateTime.slice(6, 8));
+    const hh = Number(r.localDateTime.slice(8, 10));
+    const mn = Number(r.localDateTime.slice(10, 12));
+    return {
+      time: `${r.localDateTime.slice(4, 6)}/${r.localDateTime.slice(6, 8)} ${r.localDateTime.slice(8, 10)}:${r.localDateTime.slice(10, 12)}`,
+      tsMs: Date.UTC(yyyy, mm - 1, dd, hh, mn) - 9 * 3600 * 1000, // KST → UTC ms
+      open: r.openPrice,
+      high: r.highPrice,
+      low: r.lowPrice,
+      close: r.currentPrice,
+      volume: r.accumulatedTradingVolume,
+    };
+  });
 }
 
 // 일봉 — count만큼.
@@ -72,12 +78,18 @@ export async function fetchNaverDaily(code: string, count = 100): Promise<Candle
   if (!res.ok) throw new Error(`NAVER day HTTP ${res.status}`);
   const data = (await res.json()) as NaverDay[];
   const trimmed = data.slice(-count);
-  return trimmed.map((r) => ({
-    time: `${r.localDate.slice(4, 6)}/${r.localDate.slice(6, 8)}`, // MM/DD
-    open: r.openPrice,
-    high: r.highPrice,
-    low: r.lowPrice,
-    close: r.closePrice,
-    volume: r.accumulatedTradingVolume,
-  }));
+  return trimmed.map((r) => {
+    const yyyy = Number(r.localDate.slice(0, 4));
+    const mm = Number(r.localDate.slice(4, 6));
+    const dd = Number(r.localDate.slice(6, 8));
+    return {
+      time: `${r.localDate.slice(4, 6)}/${r.localDate.slice(6, 8)}`,
+      tsMs: Date.UTC(yyyy, mm - 1, dd) - 9 * 3600 * 1000, // KST 자정 → UTC ms
+      open: r.openPrice,
+      high: r.highPrice,
+      low: r.lowPrice,
+      close: r.closePrice,
+      volume: r.accumulatedTradingVolume,
+    };
+  });
 }

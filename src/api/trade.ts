@@ -34,6 +34,10 @@ type BuyBody = {
   amount?: { mode: 'percent' | 'amount' | 'shares'; value: number };
   tp?: number | null; // 즉시매수만
   sl?: number | null;
+  /** 지정가 — 있으면 시장가 대신 이 가격으로 매수 (즉시매수만) */
+  limitPrice?: number | null;
+  /** true면 intent 등록 + 즉시 발주를 한 번에 (1 round-trip) */
+  execute?: boolean;
 };
 
 export async function handleTradeBuy(c: Context) {
@@ -61,6 +65,18 @@ export async function handleTradeBuy(c: Context) {
       amount: amount as BuyAmountSpec,
     });
     if ('error' in r) return c.json({ error: r.error }, 400);
+
+    // execute=true → 등록과 동시에 예약 확정 (사용자가 한 번 더 확인 누를 필요 없음)
+    if (body.execute) {
+      const result = await executeConfirm(chatId, r.reservationId);
+      return c.json({
+        kind: 'reservation',
+        id: r.reservationId,
+        text: r.text,
+        executed: true,
+        result,
+      });
+    }
     return c.json({ kind: 'reservation', id: r.reservationId, text: r.text });
   }
 
@@ -73,8 +89,21 @@ export async function handleTradeBuy(c: Context) {
     tp,
     sl,
     amount: amount as BuyAmountSpec,
+    limitPrice: typeof body.limitPrice === 'number' && body.limitPrice > 0 ? body.limitPrice : undefined,
   });
   if ('error' in r) return c.json({ error: r.error }, 400);
+
+  // execute 옵션: intent 등록 + 즉시 발주 한 번에 (1 round-trip)
+  if (body.execute) {
+    const result = await executeConfirm(chatId, r.intentId);
+    return c.json({
+      kind: 'pending_intent',
+      id: r.intentId,
+      text: r.text,
+      executed: true,
+      result,
+    });
+  }
   return c.json({ kind: 'pending_intent', id: r.intentId, text: r.text });
 }
 
@@ -82,6 +111,7 @@ type SellBody = {
   code?: string;
   qtyMode?: 'all' | 'half' | 'shares';
   qtyValue?: number;
+  execute?: boolean;
 };
 
 export async function handleTradeSell(c: Context) {
@@ -104,6 +134,16 @@ export async function handleTradeSell(c: Context) {
     qtyValue: body.qtyValue,
   });
   if (!r.ok) return c.json({ error: r.text }, 400);
+  if (body.execute) {
+    const result = await executeConfirm(chatId, r.intentId);
+    return c.json({
+      kind: 'pending_intent',
+      id: r.intentId,
+      text: r.text,
+      executed: true,
+      result,
+    });
+  }
   return c.json({ kind: 'pending_intent', id: r.intentId, text: r.text });
 }
 

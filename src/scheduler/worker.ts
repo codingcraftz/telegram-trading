@@ -2,8 +2,8 @@
 // 60초 간격 폴링: state='pending' AND scheduledFor <= now 인 예약 1회 발주.
 // 발주 흐름:
 //   1) tryClaimReservation으로 단일 발사 클레임
-//   2) 시초가/전일종가 조회 → 갭가드 평가
-//   3) 수량 모드별 재계산 (시초가 기준)
+//   2) 시초가 조회 (없으면 현재가) — 수량 계산용
+//   3) 수량 모드별 재계산
 //   4) placeBuyOrder + pollFill
 //   5) 체결되면 시장가 평균 기준으로 TP/SL 가격 update
 
@@ -22,7 +22,6 @@ import {
 import { callKisApi, type Market } from '../mcp/kis.js';
 import { firstOutput, num, parseMcpResult } from '../fastpath/extract.js';
 import { fetchNaverDaily, fetchNaverMinuteBars } from '../charts/naver.js';
-import { evaluateGap } from './gap-guard.js';
 import { placeBuyOrder, pollFill } from '../execution/order.js';
 import { notify } from '../notify/telegram.js';
 import { nextMarketOpen } from './calendar.js';
@@ -146,22 +145,7 @@ async function fireReservation(rId: string): Promise<void> {
     return;
   }
 
-  // 갭가드
-  if (snapshot.prevClose && snapshot.prevClose > 0) {
-    const gap = evaluateGap({
-      prevClose: snapshot.prevClose,
-      openPrice: ref,
-      thresholdPct: r.gapGuardPct,
-    });
-    if (!gap.ok) {
-      rejectReservation(r.id, `gap_guard:${gap.reason}`);
-      await notify(
-        r.chatId,
-        `⚠️ <b>시가매매 취소</b>\n${r.symbolName} (${r.symbolCode})\n전일 종가 ${snapshot.prevClose.toLocaleString()} → 시초가 ${ref.toLocaleString()}\n${gap.reason}`,
-      );
-      return;
-    }
-  } // prevClose 없으면 갭가드 패스
+  // 갭가드 제거됨 — 시초가가 크게 벌어져도 그대로 발주 (사용자 요청)
 
   // 수량 재계산
   let qty: number;

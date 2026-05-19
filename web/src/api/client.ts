@@ -36,6 +36,8 @@ export const api = {
   search: (q: string) => request<{ items: SearchItem[] }>(`/api/search?q=${encodeURIComponent(q)}`),
   candles: (code: string, interval = '5m', count = 180) =>
     request<CandlesResponse>(`/api/candles?code=${code}&interval=${interval}&count=${count}`),
+  indices: () => request<IndicesResponse>('/api/indices'),
+  asking: (code: string) => request<AskingResponse>(`/api/asking?code=${code}`),
   watchlist: () => request<WatchlistResponse>('/api/watchlist'),
   strategy: () => request<StrategyResponse>('/api/strategy'),
   version: () => request<{ sha: string; buildDate: string }>('/api/version'),
@@ -149,6 +151,36 @@ export type CandlesResponse = {
   }>;
 };
 
+export type IndexItem = {
+  key: string;
+  label: string;
+  price: number;
+  change: number;
+  changePct: number;
+  prevClose: number;
+  series: number[];
+};
+export type IndicesResponse = { items: IndexItem[] };
+
+export type AskingLevel = { price: number; qty: number };
+export type AskingResponse = {
+  code: string;
+  asks: AskingLevel[];
+  bids: AskingLevel[];
+  totalAskQty: number;
+  totalBidQty: number;
+};
+
+export type TickSnapshot = {
+  code: string;
+  price: number;
+  change: number;
+  changePct: number;
+  volume: number;
+  cumVolume: number;
+  ts: number;
+};
+
 export type QuotesItem = {
   code: string;
   name: string;
@@ -188,7 +220,6 @@ export type OrdersResponse = {
     name: string;
     qtyMode: 'shares' | 'amount' | 'percent';
     qtyValue: number;
-    gapGuardPct: number | null;
     tpPct: number | null;
     slPct: number | null;
     scheduledFor: number;
@@ -216,11 +247,9 @@ export type OrdersResponse = {
 };
 
 export type StrategyResponse = {
-  gapGuardPct: number | null;
   tpPct: number | null;
   slPct: number | null;
   trailingPct: number | null;
-  defaultGapGuardPct: number;
 };
 
 export type TradeBuyBody = {
@@ -229,14 +258,25 @@ export type TradeBuyBody = {
   amount: { mode: 'percent' | 'amount' | 'shares'; value: number };
   tp?: number | null;
   sl?: number | null;
+  /** 지정가 — 있으면 시장가 대신 이 가격으로 매수 (정규장만) */
+  limitPrice?: number | null;
+  /** true면 intent 등록 + 즉시 발주 한 번에 (1 round-trip, 빠른 발주) */
+  execute?: boolean;
 };
 export type TradeSellBody = {
   code: string;
   qtyMode: 'all' | 'half' | 'shares';
   qtyValue?: number;
+  execute?: boolean;
 };
-export type TradeBuyResponse = { kind: string; id: string; text: string };
-export type TradeSellResponse = { kind: string; id: string; text: string };
+export type TradeExecuteResult = {
+  ok: boolean;
+  message: string;
+  positionId?: string;
+  orderId?: string;
+};
+export type TradeBuyResponse = { kind: string; id: string; text: string; executed?: boolean; result?: TradeExecuteResult };
+export type TradeSellResponse = { kind: string; id: string; text: string; executed?: boolean; result?: TradeExecuteResult };
 export type TradeConfirmResponse = {
   ok: boolean;
   message: string;

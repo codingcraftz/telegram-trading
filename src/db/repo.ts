@@ -348,24 +348,31 @@ export function listChatReservations(
     'pending',
   ],
 ): MarketOpenReservation[] {
-  const placeholders = states.map(() => '?').join(',');
-  return getRawSqlite()
-    .prepare(
-      `SELECT * FROM market_open_reservations
-       WHERE chat_id = ? AND state IN (${placeholders})
-       ORDER BY scheduled_for ASC`,
+  return getDb()
+    .select()
+    .from(marketOpenReservations)
+    .where(
+      and(
+        eq(marketOpenReservations.chatId, chatId),
+        sql`${marketOpenReservations.state} IN (${sql.join(states.map((s) => sql`${s}`), sql`, `)})`,
+      ),
     )
-    .all(chatId, ...states) as unknown as MarketOpenReservation[];
+    .orderBy(marketOpenReservations.scheduledFor)
+    .all();
 }
 
 export function listDueReservations(now: number): MarketOpenReservation[] {
-  return getRawSqlite()
-    .prepare(
-      `SELECT * FROM market_open_reservations
-       WHERE state = 'pending' AND scheduled_for <= ?
-       ORDER BY scheduled_for ASC`,
+  return getDb()
+    .select()
+    .from(marketOpenReservations)
+    .where(
+      and(
+        eq(marketOpenReservations.state, 'pending'),
+        lte(marketOpenReservations.scheduledFor, now),
+      ),
     )
-    .all(now) as unknown as MarketOpenReservation[];
+    .orderBy(marketOpenReservations.scheduledFor)
+    .all();
 }
 
 export function confirmReservation(id: string): boolean {

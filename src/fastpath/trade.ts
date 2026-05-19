@@ -171,14 +171,9 @@ export async function buildBuyConfirmAndRegister(args: {
     if (parsed.success) curPrice = num(firstOutput(parsed)?.stck_prpr);
   } catch {}
 
-  // 시가매매 셋팅
+  // 시가매매 셋팅 — 갭가드는 더 이상 사용하지 않음 (항상 null)
   const settings = getMarketOpenSettings(args.chatId);
-  const gapGuardPct =
-    settings?.gapGuardPct === undefined || settings?.gapGuardPct === null
-      ? DEFAULT_GAP_GUARD_PCT
-      : settings.gapGuardPct === 0
-        ? null
-        : settings.gapGuardPct;
+  const gapGuardPct = null;
   const tpPct = settings?.tpPct ?? null;
   const slPct = settings?.slPct ?? null;
 
@@ -225,8 +220,7 @@ export async function buildBuyConfirmAndRegister(args: {
     curPrice && curPrice > 0 ? `현재가: ${curPrice.toLocaleString()}원 (참고)` : '',
     estimateLine,
     `전략: 시가매매 — ${formatKst(fireAt)} 시장가`,
-    `갭가드: ${gapGuardPct === null ? '끄기' : `±${gapGuardPct}%`}` +
-      ` · TP: ${tpPct === null ? '끄기' : `+${tpPct}%`}` +
+    `TP: ${tpPct === null ? '끄기' : `+${tpPct}%`}` +
       ` · SL: ${slPct === null ? '끄기' : `-${slPct}%`}`,
     '',
     `⌛ 확정 만료: ${ttl}`,
@@ -450,24 +444,29 @@ export async function buildBuyNowConfirmAndRegister(args: {
   tp: string; // 'off' or '3' '5' '10'
   sl: string;
   amount: BuyAmountSpec;
+  /** 지정가 (원). 있으면 시장가 대신 이 가격으로 매수 (정규장에서만) */
+  limitPrice?: number;
 }): Promise<{ text: string; intentId: string } | { error: string }> {
   const cfg = getConfig();
   const sym = await resolveSymbol(args.code);
   if (!sym) return { error: `종목 정보 없음 (${args.code})` };
 
-  // 현재가 + 매수가능금액 (inquire_psbl_order — 시가매매 워커와 동일 방식)
+  // 현재가 (검증 + 시간외 종가 계산용)
   const curPrice = (await fetchCurrentPrice(args.code)) ?? 0;
   if (curPrice <= 0) return { error: '현재가 조회 실패' };
-  const cashResult = await fetchOrderableCash(args.code, curPrice);
-  const cash = cashResult.cash ?? 0;
 
-  // 수량 계산
+  // 수량 계산 — 지정가가 있으면 지정가 기준, 없으면 현재가 기준
+  const pricingBase = args.limitPrice && args.limitPrice > 0 ? args.limitPrice : curPrice;
   let qty = 0;
   if (args.amount.mode === 'shares') {
+    // shares 모드는 매수가능금액 조회 불필요 — 200ms 절약
     qty = Math.floor(args.amount.value);
   } else if (args.amount.mode === 'amount') {
-    qty = Math.floor(args.amount.value / curPrice);
+    qty = Math.floor(args.amount.value / pricingBase);
   } else {
+    // percent 모드만 매수가능금액 필요
+    const cashResult = await fetchOrderableCash(args.code, curPrice);
+    const cash = cashResult.cash ?? 0;
     if (cash <= 0) {
       return {
         error:
@@ -477,9 +476,9 @@ export async function buildBuyNowConfirmAndRegister(args: {
       };
     }
     const budget = (cash * args.amount.value) / 100;
-    qty = Math.floor(budget / curPrice);
+    qty = Math.floor(budget / pricingBase);
   }
-  if (qty <= 0) return { error: `매수 수량 0주 (현재가 ${curPrice.toLocaleString()}원)` };
+  if (qty <= 0) return { error: `매수 수량 0주 (기준가 ${pricingBase.toLocaleString()}원)` };
 
   const tpPct = args.tp === 'off' ? null : Number(args.tp);
   const slPct = args.sl === 'off' ? null : Number(args.sl);
@@ -500,6 +499,11 @@ export async function buildBuyNowConfirmAndRegister(args: {
   else if (session === 'after_single') {
     orderType = 'after_single';
     price = curPrice;
+  }
+  // 지정가 우선 — 정규장에서만 (시간외 단일가/장전·장후 종가에는 무시)
+  if (args.limitPrice && args.limitPrice > 0 && session === 'regular') {
+    orderType = 'limit';
+    price = args.limitPrice;
   }
 
   const spec: OrderSpec = {
@@ -574,6 +578,8 @@ type Holding = {
   code: string;
   name: string;
   qty: number;
+  /** 즉시 매도 가능한 수량 (ord_psbl_qty). T+0 매수분이 포함되지 않을 수 있음 */
+  orderable: number;
   avgPrice: number;
   curPrice: number;
   pflsPct: number;
@@ -591,6 +597,7 @@ async function fetchHoldings(): Promise<Holding[]> {
         code: String(h.pdno ?? ''),
         name: String(h.prdt_name ?? h.pdno ?? ''),
         qty: num(h.hldg_qty) ?? 0,
+        orderable: num(h.ord_psbl_qty) ?? num(h.hldg_qty) ?? 0,
         avgPrice: num(h.pchs_avg_pric) ?? 0,
         curPrice: num(h.prpr) ?? 0,
         pflsPct: num(h.evlu_pfls_rt) ?? 0,
@@ -651,13 +658,28 @@ export async function buildSellConfirmAndRegister(args: {
   const h = holdings.find((x) => x.code === args.code);
   if (!h) return { ok: false, text: '❌ 보유 종목 정보 없음 — 매도 불가' };
 
+  // 매도는 ord_psbl_qty 기준. T+0 매수분 등 미정산 보유는 hldg_qty엔 있어도 매도 불가.
+  const cap = h.orderable > 0 ? h.orderable : h.qty;
+  if (cap <= 0) {
+    return {
+      ok: false,
+      text: `❌ ${h.name} — 지금 팔 수 있는 주식이 없어요 (보유 ${h.qty}주, 매도 가능 0주)\n오늘 산 종목은 결제 완료 후 매도할 수 있어요.`,
+    };
+  }
+
   let qty: number;
-  if (args.qtyMode === 'all') qty = h.qty;
-  else if (args.qtyMode === 'half') qty = Math.max(1, Math.floor(h.qty / 2));
+  if (args.qtyMode === 'all') qty = cap;
+  else if (args.qtyMode === 'half') qty = Math.max(1, Math.floor(cap / 2));
   else qty = Math.floor(args.qtyValue ?? 0);
 
-  if (qty <= 0 || qty > h.qty) {
-    return { ok: false, text: `❌ 잘못된 수량: ${qty}주 (보유 ${h.qty}주)` };
+  if (qty <= 0 || qty > cap) {
+    return {
+      ok: false,
+      text:
+        h.orderable < h.qty
+          ? `❌ 잘못된 수량: ${qty}주 (매도 가능 ${cap}주 · 보유 ${h.qty}주)`
+          : `❌ 잘못된 수량: ${qty}주 (보유 ${h.qty}주)`,
+    };
   }
 
   // 세션별 ord_dvsn 결정

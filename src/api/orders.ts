@@ -54,7 +54,6 @@ export async function handleOrders(c: Context) {
       name: r.symbolName,
       qtyMode: r.qtyMode,
       qtyValue: r.qtyValue,
-      gapGuardPct: r.gapGuardPct,
       tpPct: r.tpPct,
       slPct: r.slPct,
       scheduledFor: r.scheduledFor,

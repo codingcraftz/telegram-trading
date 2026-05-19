@@ -1,7 +1,6 @@
 <script lang="ts">
-// 타입 export는 <script lang> (setup 아닌)에서 가능.
 export type TradeCandle = {
-  ts: number; // milliseconds
+  ts: number;
   open: number;
   high: number;
   low: number;
@@ -11,9 +10,6 @@ export type TradeCandle = {
 </script>
 
 <script setup lang="ts">
-// 인터랙티브 캔들 차트 (lightweight-charts).
-// kiwoom 차트 컴포넌트 Vue 포팅. 모바일 터치 친화 + 실시간 봉 업데이트.
-
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import {
   CandlestickSeries,
@@ -36,31 +32,22 @@ const props = withDefaults(
     entry?: number | null;
     stopLoss?: number | null;
     takeProfit?: number | null;
+    /** 처음 보이는 바 개수 (이후엔 pinch zoom으로 조절) */
+    visibleBars?: number | null;
   }>(),
-  { height: 360, showVolume: true, entry: null, stopLoss: null, takeProfit: null },
+  { height: 360, showVolume: true, entry: null, stopLoss: null, takeProfit: null, visibleBars: null },
 );
 
-// 한국식 색상 (양봉=빨강, 음봉=파랑)
+function readCssColor(name: string, fallback: string) {
+  if (typeof window === 'undefined') return fallback;
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v ? `hsl(${v})` : fallback;
+}
+
 const THEME = {
-  bg: '#0f172a',
-  text: '#cbd5e1',
-  grid: '#1e293b',
-  border: '#334155',
-  candle: {
-    up: '#ef4444',
-    down: '#3b82f6',
-    upWick: '#ef4444',
-    downWick: '#3b82f6',
-  },
-  volume: {
-    up: '#ef444466',
-    down: '#3b82f666',
-  },
-  lines: {
-    entry: '#f59e0b',
-    sl: '#3b82f6',
-    tp: '#22c55e',
-  },
+  candle: { up: '#e23744', down: '#1e88e5' },
+  volume: { up: 'rgba(226, 55, 68, 0.45)', down: 'rgba(30, 136, 229, 0.45)' },
+  lines: { entry: '#f59e0b', sl: '#3b82f6', tp: '#22c55e' },
 };
 
 const containerRef = ref<HTMLDivElement | null>(null);
@@ -70,32 +57,54 @@ let volumeSeries: ISeriesApi<'Histogram'> | null = null;
 let priceLines: IPriceLine[] = [];
 let ro: ResizeObserver | null = null;
 
+function themedOptions() {
+  const isDark = document.documentElement.classList.contains('dark');
+  const bg = readCssColor('--card', isDark ? '#181b21' : '#ffffff');
+  const text = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.5)';
+  const grid = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)';
+  const border = 'transparent';
+  return { bg, text, grid, border };
+}
+
 function buildChart() {
   const el = containerRef.value;
   if (!el) return;
+  const t = themedOptions();
   chart = createChart(el, {
     width: el.clientWidth,
     height: props.height,
     layout: {
-      background: { color: THEME.bg },
-      textColor: THEME.text,
+      background: { color: t.bg },
+      textColor: t.text,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontSize: 11,
       attributionLogo: false,
     },
     grid: {
-      vertLines: { color: THEME.grid },
-      horzLines: { color: THEME.grid },
+      vertLines: { color: t.grid, style: LineStyle.Dotted },
+      horzLines: { color: t.grid, style: LineStyle.Dotted },
     },
-    rightPriceScale: { borderColor: THEME.border },
+    rightPriceScale: {
+      borderColor: t.border,
+      borderVisible: false,
+      scaleMargins: { top: 0.08, bottom: 0.26 },
+      entireTextOnly: true,
+    },
     timeScale: {
-      borderColor: THEME.border,
-      timeVisible: true,
+      borderColor: t.border,
+      borderVisible: false,
+      timeVisible: false,
       secondsVisible: false,
-      rightOffset: 6,
-      barSpacing: 6,
+      rightOffset: 4,
+      barSpacing: 8,
+      fixLeftEdge: false,
+      fixRightEdge: false,
     },
-    crosshair: { mode: 1 }, // Magnet 모드
-    // 모바일 터치 친화: pinch zoom + drag pan
+    crosshair: {
+      mode: 1,
+      vertLine: { color: 'rgba(127,127,127,0.5)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#222' },
+      horzLine: { color: 'rgba(127,127,127,0.5)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#222' },
+    },
     handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
     handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
   });
@@ -103,18 +112,23 @@ function buildChart() {
   candleSeries = chart.addSeries(CandlestickSeries, {
     upColor: THEME.candle.up,
     downColor: THEME.candle.down,
-    wickUpColor: THEME.candle.upWick,
-    wickDownColor: THEME.candle.downWick,
+    wickUpColor: THEME.candle.up,
+    wickDownColor: THEME.candle.down,
     borderVisible: false,
+    priceFormat: { type: 'price', precision: 0, minMove: 1 },
+    priceLineVisible: false,
+    lastValueVisible: true,
   });
 
   volumeSeries = chart.addSeries(HistogramSeries, {
     priceFormat: { type: 'volume' },
     priceScaleId: 'volume',
     visible: props.showVolume,
+    priceLineVisible: false,
+    lastValueVisible: false,
   });
   chart.priceScale('volume').applyOptions({
-    scaleMargins: props.showVolume ? { top: 0.78, bottom: 0 } : { top: 1, bottom: 0 },
+    scaleMargins: props.showVolume ? { top: 0.82, bottom: 0 } : { top: 1, bottom: 0 },
   });
 
   ro = new ResizeObserver((entries) => {
@@ -131,7 +145,6 @@ function setData() {
     return;
   }
   const sorted = [...props.candles].sort((a, b) => a.ts - b.ts);
-  // dedup
   const dedup: TradeCandle[] = [];
   let lastTs = -1;
   for (const c of sorted) {
@@ -143,10 +156,7 @@ function setData() {
   }
   const cdata: CandlestickData[] = dedup.map((c) => ({
     time: Math.floor(c.ts / 1000) as UTCTimestamp,
-    open: c.open,
-    high: c.high,
-    low: c.low,
-    close: c.close,
+    open: c.open, high: c.high, low: c.low, close: c.close,
   }));
   const vdata: HistogramData[] = dedup.map((c) => ({
     time: Math.floor(c.ts / 1000) as UTCTimestamp,
@@ -155,33 +165,31 @@ function setData() {
   }));
   candleSeries.setData(cdata);
   volumeSeries.setData(vdata);
-  chart?.timeScale().fitContent();
+
+  const ts = chart?.timeScale();
+  if (!ts) return;
+  if (props.visibleBars && dedup.length > props.visibleBars) {
+    const total = dedup.length;
+    ts.setVisibleLogicalRange({ from: total - props.visibleBars, to: total - 0.5 });
+  } else {
+    ts.fitContent();
+  }
 }
 
 function refreshLines() {
   const s = candleSeries;
   if (!s) return;
   for (const pl of priceLines) {
-    try {
-      s.removePriceLine(pl);
-    } catch {
-      /* ignore */
-    }
+    try { s.removePriceLine(pl); } catch { /* ignore */ }
   }
   priceLines = [];
-
   const add = (price: number | null | undefined, title: string, color: string, style: LineStyle) => {
     if (price == null || !Number.isFinite(price)) return;
     priceLines.push(
       s.createPriceLine({
-        price,
-        color,
-        lineStyle: style,
-        lineWidth: 2,
-        axisLabelVisible: true,
-        title,
-        axisLabelColor: color,
-        axisLabelTextColor: '#fff',
+        price, color, lineStyle: style, lineWidth: 1,
+        axisLabelVisible: true, title,
+        axisLabelColor: color, axisLabelTextColor: '#fff',
       }),
     );
   };
@@ -204,27 +212,17 @@ onUnmounted(() => {
   priceLines = [];
 });
 
-// 부모가 candles 갱신하면 차트 재렌더
 watch(() => props.candles, () => setData(), { deep: false });
-watch(
-  () => [props.entry, props.stopLoss, props.takeProfit],
-  () => refreshLines(),
-);
-watch(
-  () => props.height,
-  (h) => chart?.applyOptions({ height: h }),
-);
-watch(
-  () => props.showVolume,
-  (sv) => {
-    volumeSeries?.applyOptions({ visible: sv });
-    chart?.priceScale('volume').applyOptions({
-      scaleMargins: sv ? { top: 0.78, bottom: 0 } : { top: 1, bottom: 0 },
-    });
-  },
-);
+watch(() => [props.entry, props.stopLoss, props.takeProfit], () => refreshLines());
+watch(() => props.height, (h) => chart?.applyOptions({ height: h }));
+watch(() => props.showVolume, (sv) => {
+  volumeSeries?.applyOptions({ visible: sv });
+  chart?.priceScale('volume').applyOptions({
+    scaleMargins: sv ? { top: 0.82, bottom: 0 } : { top: 1, bottom: 0 },
+  });
+});
 </script>
 
 <template>
-  <div ref="containerRef" class="w-full select-none rounded-lg overflow-hidden" :style="{ height: `${height}px` }" />
+  <div ref="containerRef" class="w-full select-none overflow-hidden rounded-lg" :style="{ height: `${height}px` }" />
 </template>

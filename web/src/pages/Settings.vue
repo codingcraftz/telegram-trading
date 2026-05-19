@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
-import { CircleCheck, CircleX, Info } from 'lucide-vue-next';
+import { CircleCheck, CircleX, Info, ExternalLink, Smartphone } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
@@ -21,7 +21,7 @@ const keys = ref<{
 } | null>(null);
 
 const strat = ref<StrategyResponse | null>(null);
-const stratForm = ref({ gapGuardPct: '', tpPct: '', slPct: '' });
+const stratForm = ref({ tpPct: '', slPct: '' });
 const stratSaving = ref(false);
 
 async function loadAll() {
@@ -31,7 +31,6 @@ async function loadAll() {
     keys.value = k;
     strat.value = s;
     stratForm.value = {
-      gapGuardPct: s.gapGuardPct?.toString() ?? '',
       tpPct: s.tpPct?.toString() ?? '',
       slPct: s.slPct?.toString() ?? '',
     };
@@ -44,7 +43,6 @@ async function saveStrategy() {
   stratSaving.value = true;
   try {
     await api.strategySave({
-      gapGuardPct: stratForm.value.gapGuardPct === '' ? null : Number(stratForm.value.gapGuardPct),
       tpPct: stratForm.value.tpPct === '' ? null : Number(stratForm.value.tpPct),
       slPct: stratForm.value.slPct === '' ? null : Number(stratForm.value.slPct),
     });
@@ -57,6 +55,18 @@ async function saveStrategy() {
 }
 
 const buildDate = computed(() => version.value?.buildDate ? version.value.buildDate.slice(0, 10) : '');
+
+// 한국투자증권 앱 — 입출금 같은 KIS API 미지원 기능은 본 앱에서.
+const KIS_APP = {
+  ios: 'https://apps.apple.com/kr/app/id1621986905',
+  android: 'https://play.google.com/store/apps/details?id=com.truefriend.neosmartarenewal',
+};
+function openKisApp() {
+  const ua = navigator.userAgent || '';
+  const isAndroid = /Android/i.test(ua);
+  const url = isAndroid ? KIS_APP.android : KIS_APP.ios;
+  window.open(url, '_blank', 'noopener');
+}
 
 onMounted(loadAll);
 </script>
@@ -84,7 +94,7 @@ onMounted(loadAll);
             @update:model-value="(v) => (prefs.mode = v)"
           />
           <p class="mt-1.5 text-[11px] text-muted-foreground">
-            {{ prefs.mode === 'easy' ? '꼭 필요한 옵션만 보여줘요.' : '비율/주식수·자동 매도 옵션까지 모두 보여줘요.' }}
+            {{ prefs.mode === 'easy' ? '낯선 용어 옆에 작은 도움말이 함께 떠요.' : '도움말을 숨기고 화면을 간결하게 보여드려요.' }}
           </p>
         </div>
         <div>
@@ -134,16 +144,6 @@ onMounted(loadAll);
       </template>
       <div class="space-y-4">
         <label class="block">
-          <span class="text-[11px] font-medium text-muted-foreground">시가가 너무 튀면 안 사기 (±%)</span>
-          <input
-            v-model="stratForm.gapGuardPct"
-            type="number"
-            step="0.5"
-            placeholder="예: 5"
-            class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2.5 text-base font-semibold tabular-nums focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </label>
-        <label class="block">
           <span class="text-[11px] font-medium text-muted-foreground">목표가 도달 시 자동 매도 (%)</span>
           <input
             v-model="stratForm.tpPct"
@@ -167,6 +167,28 @@ onMounted(loadAll);
           {{ stratSaving ? '저장 중…' : '저장' }}
         </Button>
       </div>
+    </Card>
+
+    <!-- 한국투자증권 앱 연결 -->
+    <Card>
+      <template #header>
+        <h3 class="text-sm font-bold tracking-tight">한국투자증권 앱</h3>
+      </template>
+      <button
+        class="-mx-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-accent"
+        @click="openKisApp"
+      >
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
+          <Smartphone class="h-5 w-5 text-muted-foreground" />
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-semibold">앱 열기</p>
+          <p class="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+            입출금·계좌이체 같은 기능은 한국투자증권 공식 앱에서 처리해요.
+          </p>
+        </div>
+        <ExternalLink class="h-4 w-4 shrink-0 text-muted-foreground" />
+      </button>
     </Card>
 
     <p class="px-1 text-[11px] text-muted-foreground tabular-nums">

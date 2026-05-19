@@ -1,29 +1,22 @@
-// GET/POST /api/strategy — 시가매매 기본 셋팅 (gapGuard/TP/SL/trailing)
+// GET/POST /api/strategy — 시가매매 기본 셋팅 (TP/SL/trailing). 갭가드 제거됨.
 
 import type { Context } from 'hono';
-import {
-  DEFAULT_GAP_GUARD_PCT,
-  getMarketOpenSettings,
-  upsertMarketOpenSettings,
-} from '../db/repo.js';
+import { getMarketOpenSettings, upsertMarketOpenSettings } from '../db/repo.js';
 import { getDefaultChatId } from './_auth.js';
 
 export function handleStrategyGet(c: Context) {
   const chatId = getDefaultChatId();
   const s = getMarketOpenSettings(chatId);
   return c.json({
-    gapGuardPct: s?.gapGuardPct ?? DEFAULT_GAP_GUARD_PCT,
     tpPct: s?.tpPct ?? null,
     slPct: s?.slPct ?? null,
     trailingPct: s?.trailingPct ?? null,
-    defaultGapGuardPct: DEFAULT_GAP_GUARD_PCT,
   });
 }
 
 export async function handleStrategyPost(c: Context) {
   const chatId = getDefaultChatId();
   let body: {
-    gapGuardPct?: number | null;
     tpPct?: number | null;
     slPct?: number | null;
     trailingPct?: number | null;
@@ -35,7 +28,6 @@ export async function handleStrategyPost(c: Context) {
   }
   upsertMarketOpenSettings({
     chatId,
-    gapGuardPct: body.gapGuardPct,
     tpPct: body.tpPct,
     slPct: body.slPct,
     trailingPct: body.trailingPct,

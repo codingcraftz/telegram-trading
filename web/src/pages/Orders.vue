@@ -1,19 +1,20 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { RefreshCw, X, Check, ArrowUpRight, ArrowDownRight, Inbox } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import Modal from '@/components/ui/Modal.vue';
 import EmptyState from '@/components/EmptyState.vue';
-import { api, type OrdersResponse } from '@/api/client';
+import { api } from '@/api/client';
 import { fmtKrw, fmtKstTime, fmtTtl } from '@/lib/format';
 import { toast } from '@/lib/toast';
+import { useOrdersStore } from '@/stores/orders';
 
 const router = useRouter();
-const data = ref<OrdersResponse | null>(null);
-const loading = ref(true);
-const error = ref<string | null>(null);
+const store = useOrdersStore();
+const data = computed(() => store.data);
+const loading = computed(() => store.loading);
 
 type Item =
   | { kind: 'intent'; id: string; side: 'buy' | 'sell'; name: string; code: string; qty: number; price: string; tip: string; remainingMs: number }
@@ -21,16 +22,10 @@ type Item =
   | { kind: 'kis'; orgno: string; odno: string; ordDvsn: string; side: string; name: string; code: string; qty: number; remaining: number; price: number; time: string };
 
 const cancelTarget = ref<Item | null>(null);
+const confirmTarget = ref<Item | null>(null);
 
 async function load() {
-  loading.value = true;
-  try {
-    data.value = await api.orders();
-  } catch (err) {
-    error.value = (err as Error).message;
-  } finally {
-    loading.value = false;
-  }
+  await store.refresh();
 }
 
 const items = computed<Item[]>(() => {
@@ -81,7 +76,14 @@ const items = computed<Item[]>(() => {
   return list;
 });
 
-async function confirmAction(id: string) {
+async function doConfirm() {
+  const t = confirmTarget.value;
+  if (!t) return;
+  const id = t.kind === 'kis' ? '' : t.id;
+  confirmTarget.value = null;
+  if (!id) return;
+  // optimistic: 즉시 토스트 + 백그라운드 발주
+  toast.info('주문 보내는 중…');
   try {
     const r = await api.tradeConfirm(id);
     if (r.ok) toast.success(r.message || '주문 넣었어요');
@@ -115,7 +117,12 @@ function intentActionLabel(it: Extract<Item, { kind: 'intent' }>) {
   return it.side === 'buy' ? '지금 사기' : '지금 팔기';
 }
 
-onMounted(load);
+onMounted(() => {
+  store.subscribe(4000);
+});
+onUnmounted(() => {
+  store.unsubscribe();
+});
 </script>
 
 <template>
@@ -126,8 +133,6 @@ onMounted(load);
         <RefreshCw class="h-4 w-4" :class="loading ? 'animate-spin' : ''" />
       </button>
     </div>
-
-    <p v-if="error" class="text-sm text-destructive">{{ error }}</p>
 
     <p class="px-1 text-sm text-muted-foreground">
       거래 대기 중 <span class="font-bold text-foreground tabular-nums">{{ items.length }}건</span>
@@ -156,65 +161,105 @@ onMounted(load);
                 <p class="truncate text-sm font-bold">{{ it.name }}</p>
                 <span class="text-[10px] text-muted-foreground tabular-nums">{{ it.code }}</span>
               </div>
-              <p class="mt-1 text-xs tabular-nums">
-                {{ it.qty }}주 · {{ it.price }}
-              </p>
+              <p class="mt-1 text-xs tabular-nums">{{ it.qty }}주 · {{ it.price }}</p>
               <p class="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{{ it.tip }} · {{ fmtTtl(it.remainingMs) }} 남음</p>
             </div>
+            <button
+              class="shrink-0 rounded-full p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
+              aria-label="취소"
+              @click="cancelTarget = it"
+            >
+              <X class="h-4 w-4" />
+            </button>
           </div>
-          <div class="mt-3 grid grid-cols-2 gap-2">
-            <Button variant="ghost" size="sm" @click="cancelTarget = it">
-              <X class="mr-1 h-3.5 w-3.5" />취소
-            </Button>
-            <Button variant="primary" size="sm" @click="confirmAction(it.id)">
-              <Check class="mr-1 h-3.5 w-3.5" />{{ intentActionLabel(it) }}
-            </Button>
-          </div>
+          <Button variant="primary" size="md" class="mt-3 w-full" @click="confirmTarget = it">
+            <Check class="mr-1 h-4 w-4" />{{ intentActionLabel(it) }}
+          </Button>
         </template>
 
         <!-- 시가매매 예약 -->
         <template v-else-if="it.kind === 'reservation'">
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-bold">{{ it.name }} <span class="text-[10px] text-muted-foreground tabular-nums">{{ it.code }}</span></p>
-            <p class="mt-1 text-xs tabular-nums">내일 시가 매수 · {{ it.qty }}</p>
-            <p class="mt-1.5 text-[11px] text-muted-foreground tabular-nums">
-              발주 예정 {{ fmtKstTime(it.scheduledFor) }}
-              <span v-if="it.state === 'awaiting_confirm' && it.remainingMs"> · 확인 대기 {{ fmtTtl(it.remainingMs) }}</span>
-            </p>
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-bold">{{ it.name }} <span class="text-[10px] text-muted-foreground tabular-nums">{{ it.code }}</span></p>
+              <p class="mt-1 text-xs tabular-nums">내일 시가 매수 · {{ it.qty }}</p>
+              <p class="mt-1.5 text-[11px] text-muted-foreground tabular-nums">
+                발주 예정 {{ fmtKstTime(it.scheduledFor) }}
+                <span v-if="it.state === 'awaiting_confirm' && it.remainingMs"> · 확인 대기 {{ fmtTtl(it.remainingMs) }}</span>
+              </p>
+            </div>
+            <button
+              class="shrink-0 rounded-full p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
+              aria-label="예약 취소"
+              @click="cancelTarget = it"
+            >
+              <X class="h-4 w-4" />
+            </button>
           </div>
-          <div class="mt-3 grid gap-2" :class="it.state === 'awaiting_confirm' ? 'grid-cols-2' : 'grid-cols-1'">
-            <Button variant="ghost" size="sm" @click="cancelTarget = it">
-              <X class="mr-1 h-3.5 w-3.5" />예약 취소
-            </Button>
-            <Button v-if="it.state === 'awaiting_confirm'" variant="primary" size="sm" @click="confirmAction(it.id)">
-              <Check class="mr-1 h-3.5 w-3.5" />확인
-            </Button>
-          </div>
+          <Button v-if="it.state === 'awaiting_confirm'" variant="primary" size="md" class="mt-3 w-full" @click="confirmTarget = it">
+            <Check class="mr-1 h-4 w-4" />확인
+          </Button>
         </template>
 
         <!-- KIS 미체결 -->
         <template v-else>
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-1.5">
-              <p class="truncate text-sm font-bold">{{ it.name }}</p>
-              <span class="text-[10px] text-muted-foreground tabular-nums">{{ it.code }}</span>
-              <span class="ml-auto rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">증권사 대기</span>
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5">
+                <p class="truncate text-sm font-bold">{{ it.name }}</p>
+                <span class="text-[10px] text-muted-foreground tabular-nums">{{ it.code }}</span>
+                <span class="ml-auto rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">증권사 대기</span>
+              </div>
+              <p class="mt-1 text-xs tabular-nums">
+                {{ it.side }} · {{ it.price > 0 ? fmtKrw(it.price) : '시장가' }} · {{ it.qty }}주 (남은 {{ it.remaining }}주)
+              </p>
             </div>
-            <p class="mt-1 text-xs tabular-nums">
-              {{ it.side }} · {{ it.price > 0 ? fmtKrw(it.price) : '시장가' }} · {{ it.qty }}주 (남은 {{ it.remaining }}주)
-            </p>
-          </div>
-          <div class="mt-3">
-            <Button variant="ghost" size="sm" class="w-full" @click="cancelTarget = it">
-              <X class="mr-1 h-3.5 w-3.5" />취소
-            </Button>
+            <button
+              class="shrink-0 rounded-full p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
+              aria-label="취소"
+              @click="cancelTarget = it"
+            >
+              <X class="h-4 w-4" />
+            </button>
           </div>
         </template>
       </Card>
     </div>
 
-    <Modal :open="!!cancelTarget" title="주문을 취소할까요?" @close="cancelTarget = null">
-      <p class="text-sm text-muted-foreground">취소하면 되돌릴 수 없어요.</p>
+    <!-- 확정 (실제 발주) -->
+    <Modal :open="!!confirmTarget" title="주문을 보낼까요?" @close="confirmTarget = null">
+      <div v-if="confirmTarget" class="rounded-xl bg-muted/40 p-3 text-sm">
+        <p class="font-semibold">{{ confirmTarget.name }} <span class="text-[10px] text-muted-foreground tabular-nums">{{ confirmTarget.code }}</span></p>
+        <p v-if="confirmTarget.kind === 'intent'" class="mt-1 text-xs text-muted-foreground tabular-nums">
+          {{ confirmTarget.side === 'buy' ? '사기' : '팔기' }} · {{ confirmTarget.qty }}주 · {{ confirmTarget.price }}
+        </p>
+        <p v-else-if="confirmTarget.kind === 'reservation'" class="mt-1 text-xs text-muted-foreground tabular-nums">
+          내일 시가 매수 예약 · {{ confirmTarget.qty }}
+        </p>
+      </div>
+      <p class="mt-3 text-xs text-muted-foreground">
+        {{ confirmTarget?.kind === 'reservation' ? '예약을 확정하면 내일 시가에 자동으로 주문이 들어가요.' : '주문이 증권사로 곧바로 전송돼요.' }}
+      </p>
+      <div class="mt-5 grid grid-cols-2 gap-2">
+        <Button variant="secondary" @click="confirmTarget = null">아니요</Button>
+        <Button variant="primary" @click="doConfirm">{{ confirmTarget?.kind === 'reservation' ? '예약 확정' : '보내기' }}</Button>
+      </div>
+    </Modal>
+
+    <Modal :open="!!cancelTarget" title="이 주문을 취소할까요?" @close="cancelTarget = null">
+      <div v-if="cancelTarget" class="rounded-xl bg-muted/40 p-3 text-sm">
+        <p class="font-semibold">{{ cancelTarget.name }} <span class="text-[10px] text-muted-foreground tabular-nums">{{ cancelTarget.code }}</span></p>
+        <p v-if="cancelTarget.kind === 'intent'" class="mt-1 text-xs text-muted-foreground tabular-nums">
+          {{ cancelTarget.qty }}주 · {{ cancelTarget.price }}
+        </p>
+        <p v-else-if="cancelTarget.kind === 'reservation'" class="mt-1 text-xs text-muted-foreground tabular-nums">
+          내일 시가 매수 · {{ cancelTarget.qty }}
+        </p>
+        <p v-else-if="cancelTarget.kind === 'kis'" class="mt-1 text-xs text-muted-foreground tabular-nums">
+          {{ cancelTarget.side }} · {{ cancelTarget.qty }}주 (남은 {{ cancelTarget.remaining }}주)
+        </p>
+      </div>
+      <p class="mt-3 text-xs text-muted-foreground">취소하면 되돌릴 수 없어요.</p>
       <div class="mt-5 grid grid-cols-2 gap-2">
         <Button variant="secondary" @click="cancelTarget = null">아니요</Button>
         <Button variant="destructive" @click="doCancel">취소하기</Button>
