@@ -6,6 +6,8 @@ data/*.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
+# KIS API 토큰/승인키 — 절대 커밋 금지
+data/.kis-*.json
 .DS_Store
 *.log
 

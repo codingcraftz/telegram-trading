@@ -28,6 +28,10 @@ export const api = {
   // 조회
   session: () => request<SessionResponse>('/api/session'),
   balance: () => request<BalanceResponse>('/api/balance'),
+  orderable: (code: string, price: number) =>
+    request<{ cash: number | null; qty: number | null; error?: string }>(
+      `/api/orderable?code=${code}&price=${Math.round(price)}`,
+    ),
   orders: () => request<OrdersResponse>('/api/orders'),
   quote: (code: string) => request<QuoteResponse>(`/api/quote?code=${code}`),
   // 실시간 폴링용 batch — 종목 N개 한 번에. 봇 캐시 (2.5s)와 클라이언트 폴링 (1~3s) 조합.
@@ -37,6 +41,10 @@ export const api = {
   candles: (code: string, interval = '5m', count = 180) =>
     request<CandlesResponse>(`/api/candles?code=${code}&interval=${interval}&count=${count}`),
   indices: () => request<IndicesResponse>('/api/indices'),
+  ranking: (category: RankingCategory) =>
+    request<RankingResponse>(`/api/ranking?category=${category}`),
+  ordersFilled: (days = 7) =>
+    request<FilledOrdersResponse>(`/api/orders/filled?days=${days}`),
   asking: (code: string) => request<AskingResponse>(`/api/asking?code=${code}`),
   watchlist: () => request<WatchlistResponse>('/api/watchlist'),
   strategy: () => request<StrategyResponse>('/api/strategy'),
@@ -78,6 +86,37 @@ export const api = {
   // 시가매매 셋팅
   strategySave: (body: Partial<StrategyResponse>) =>
     request<{ ok: boolean }>('/api/strategy', { method: 'POST', body: JSON.stringify(body) }),
+
+  // ===== 전략 시스템 (스텝 5/6) =====
+  strategies: () => request<{ items: StrategyItem[] }>('/api/strategies'),
+  strategyDetail: (id: string) =>
+    request<{ strategy: StrategyItem; applications: StrategyApplicationRow[] }>(
+      `/api/strategies/${id}`,
+    ),
+  createStrategy: (input: CreateStrategyInput) =>
+    request<StrategyItem>('/api/strategies', { method: 'POST', body: JSON.stringify(input) }),
+  updateStrategy: (id: string, input: UpdateStrategyInput) =>
+    request<StrategyItem>(`/api/strategies/${id}`, {
+      method: 'PUT', body: JSON.stringify(input),
+    }),
+  deleteStrategy: (id: string) =>
+    request<{ ok: boolean }>(`/api/strategies/${id}`, { method: 'DELETE' }),
+  cloneStrategy: (id: string) =>
+    request<StrategyItem>(`/api/strategies/${id}/clone`, { method: 'POST' }),
+  applyStrategy: (id: string, body: { stockCode: string }) =>
+    request<StrategyApplicationRow>(`/api/strategies/${id}/apply`, {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  removeApplication: (strategyId: string, appId: string) =>
+    request<{ ok: boolean }>(`/api/strategies/${strategyId}/applications/${appId}`, {
+      method: 'DELETE',
+    }),
+  toggleStrategy: (id: string, active: boolean) =>
+    request<StrategyItem>(`/api/strategies/${id}/toggle`, {
+      method: 'POST', body: JSON.stringify({ active }),
+    }),
+  strategyExecutions: (id: string, limit = 20) =>
+    request<{ items: StrategyExecutionRow[] }>(`/api/strategies/${id}/executions?limit=${limit}`),
 
   // 차트 PNG URL (img src에 직접 사용)
   chartUrl: (code: string, interval = '1d') => `/api/chart?code=${code}&interval=${interval}`,
@@ -277,10 +316,142 @@ export type TradeExecuteResult = {
 };
 export type TradeBuyResponse = { kind: string; id: string; text: string; executed?: boolean; result?: TradeExecuteResult };
 export type TradeSellResponse = { kind: string; id: string; text: string; executed?: boolean; result?: TradeExecuteResult };
+export type RankingCategory = 'volume' | 'qty' | 'change_up' | 'change_down';
+export type RankingItem = {
+  rank: number;
+  code: string;
+  name: string;
+  price: number;
+  changePct: number;
+  volume: number;
+  tradeAmount: number;
+};
+export type RankingResponse = {
+  category: RankingCategory;
+  items: RankingItem[];
+};
+
+export type FilledOrder = {
+  ts: number;
+  orderDate: string;
+  orderTime: string;
+  code: string;
+  name: string;
+  side: 'buy' | 'sell';
+  qty: number;
+  price: number;
+  amount: number;
+  orgno: string;
+  odno: string;
+  /** 매도 체결의 실현 손익(원). 서버가 채워주면 표시. 없으면 미표시. */
+  pnl?: number | null;
+};
+export type FilledOrdersResponse = {
+  days: number;
+  items: FilledOrder[];
+  error?: string;
+};
+
 export type TradeConfirmResponse = {
   ok: boolean;
   message: string;
   positionId?: string;
   orderId?: string;
   diagnostics?: unknown;
+};
+
+// ===== 전략 시스템 (스텝 5/6) =====
+export type StagedMorningStage = {
+  entryPct: number;
+  triggerDropPct?: number;
+};
+export type StagedMorningTp = {
+  tp1?: { enabled: boolean; atPct: number; sellPct: number };
+  tp2?: { enabled: boolean; atPct: number };
+};
+export type StagedMorningSl = { enabled: boolean; atPct: number };
+export type StagedMorningBudget =
+  | { mode: 'fixed_amount'; value: number }
+  | { mode: 'cash_ratio'; value: number };
+
+export type StrategyEntry =
+  | { type: 'morning' }
+  | { type: 'limit_price'; targetPrice: number; direction: 'above' | 'below' }
+  | {
+      type: 'morning_staged';
+      budget: StagedMorningBudget;
+      stages: StagedMorningStage[];
+      takeProfit?: StagedMorningTp;
+      stopLoss?: StagedMorningSl;
+    };
+
+export type StrategyOrderMethod =
+  | { method: 'market' }
+  | { method: 'limit'; limitPrice: number };
+
+export type StrategyQuantity =
+  | { mode: 'fixed_shares'; value: number }
+  | { mode: 'fixed_amount'; value: number }
+  | { mode: 'cash_ratio'; value: number };
+
+export type StrategyExit = {
+  takeProfit?: { enabled: boolean; pct: number };
+  stopLoss?: { enabled: boolean; pct: number };
+};
+
+export type StrategyValidity = { type: 'once' } | { type: 'forever' };
+
+export type StrategyDefinition = {
+  entry: StrategyEntry;
+  order: StrategyOrderMethod;
+  quantity: StrategyQuantity;
+  exit?: StrategyExit;
+  validity: StrategyValidity;
+};
+
+export type StrategyItem = {
+  id: string;
+  name: string;
+  version: number;
+  active: boolean;
+  definition: StrategyDefinition;
+  createdAt: number;
+  updatedAt: number;
+  applicationCount: number;
+};
+
+export type StrategyApplicationRow = {
+  id: string;
+  strategyId: string;
+  chatId: number;
+  stockCode: string;
+  status: 'active' | 'paused' | 'completed' | 'failed';
+  appliedAt: number;
+  lastEvaluatedAt: number | null;
+};
+
+export type StrategyExecutionRow = {
+  id: string;
+  strategyId: string;
+  applicationId: string;
+  chatId: number;
+  stockCode: string;
+  triggeredAt: number;
+  action: 'buy' | 'sell' | 'no_op';
+  result: 'success' | 'failure' | 'skipped';
+  payload: unknown | null;
+  errorMessage: string | null;
+};
+
+export type CreateStrategyInput = {
+  name: string;
+  active?: boolean;
+  definition: StrategyDefinition;
+};
+
+export type UpdateStrategyInput = {
+  version: number;
+  name?: string;
+  active?: boolean;
+  definition?: StrategyDefinition;
 };

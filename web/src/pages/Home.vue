@@ -1,19 +1,40 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+// 홈 — 세션·지수·자산·거래대기 (가벼움). 보유 종목은 종목 탭으로 이관.
+// SWR(stale-while-revalidate): localStorage 캐시 즉시 표시 + 백그라운드 fetch.
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { RouterLink } from 'vue-router';
-import { ArrowUpRight, ArrowDownRight, Search, RefreshCw, Wallet, Clock } from 'lucide-vue-next';
-import { useOrdersStore } from '@/stores/orders';
+import {
+  ArrowUpRight, ArrowDownRight, RefreshCw, Wallet, Clock, ChevronRight,
+} from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import InfoTooltip from '@/components/InfoTooltip.vue';
 import Sparkline from '@/components/Sparkline.vue';
-import { api, type BalanceResponse, type IndexItem } from '@/api/client';
+import LoadingState from '@/components/ui/LoadingState.vue';
+import { api, type BalanceResponse } from '@/api/client';
 import { fmtKrw, fmtPct, fmtSigned, pflsColor } from '@/lib/format';
+import { useOrdersStore } from '@/stores/orders';
+import { useMarketSession } from '@/composables/useMarketSession';
+import { useIndices } from '@/composables/useIndices';
 
 const ordersStore = useOrdersStore();
-const balance = ref<BalanceResponse | null>(null);
-const indices = ref<IndexItem[]>([]);
-const loading = ref(true);
+const { session, nowKst } = useMarketSession();
+const { items: indices } = useIndices();
+
+// ===== 자산 (SWR) =====
+const CACHE_KEY = 'owlim:balance-cache:v1';
+const balance = ref<BalanceResponse | null>(loadCache());
+const loading = ref(false);
 const error = ref<string | null>(null);
+
+function loadCache(): BalanceResponse | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    return raw ? (JSON.parse(raw) as BalanceResponse) : null;
+  } catch { return null; }
+}
+function saveCache(b: BalanceResponse) {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(b)); } catch {}
+}
 
 function friendlyError(raw: string): string {
   if (/EGW00133|토큰.*1분|발급.*잠시/i.test(raw)) return '잠시 후 다시 불러올게요';
@@ -27,76 +48,127 @@ async function load() {
   loading.value = true;
   error.value = null;
   try {
-    balance.value = await api.balance();
+    const b = await api.balance();
+    balance.value = b;
+    saveCache(b);
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   } catch (err) {
-    // balance가 한 번이라도 받아진 상태면 에러 숨김 (이전 값 유지)
     if (!balance.value) error.value = friendlyError((err as Error).message);
-    // 일시 에러는 5초 후 자동 재시도
     if (retryTimer) clearTimeout(retryTimer);
     retryTimer = setTimeout(() => load(), 5_000);
-  } finally {
-    loading.value = false;
-  }
+  } finally { loading.value = false; }
 }
 
-async function loadIndices() {
-  try {
-    const r = await api.indices();
-    indices.value = r.items;
-  } catch { /* silent */ }
-}
-
-function fmtIndex(v: number) {
-  return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
-}
-
-let pollTimer: ReturnType<typeof setInterval> | null = null;
-function startPolling() {
-  stopPolling();
+// 폴링: 장중 30s / 장후 5min / 휴장 정지
+let balTimer: ReturnType<typeof setInterval> | null = null;
+function startBalPolling() {
+  stopBalPolling();
   if (document.hidden) return;
-  pollTimer = setInterval(load, 10_000);
+  const ms =
+    session.value === 'open' ? 30_000 :
+    session.value === 'closed' ? 0 :
+    300_000;
+  if (ms > 0) balTimer = setInterval(load, ms);
 }
-function stopPolling() {
-  if (pollTimer) clearInterval(pollTimer);
+function stopBalPolling() {
+  if (balTimer) clearInterval(balTimer);
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
-  pollTimer = null;
+  balTimer = null;
 }
+watch(session, () => startBalPolling());
 function onVisibility() {
-  if (document.hidden) stopPolling();
-  else { load(); loadIndices(); startPolling(); }
+  if (document.hidden) stopBalPolling();
+  else { load(); startBalPolling(); }
 }
-
-const hasHoldings = computed(() => (balance.value?.holdings?.length ?? 0) > 0);
 
 onMounted(() => {
-  load();
-  loadIndices();
-  startPolling();
+  load(); // 캐시 있어도 백그라운드로 fresh fetch
+  startBalPolling();
   document.addEventListener('visibilitychange', onVisibility);
 });
 onUnmounted(() => {
-  stopPolling();
+  stopBalPolling();
   document.removeEventListener('visibilitychange', onVisibility);
 });
+
+// ===== 세션 =====
+const sessionDot = computed(() => {
+  switch (session.value) {
+    case 'open': return 'bg-emerald-500';
+    case 'before': return 'bg-zinc-400';
+    case 'after': return 'bg-amber-500';
+    case 'closed': return 'bg-red-500';
+  }
+});
+const sessionText = computed(() => {
+  switch (session.value) {
+    case 'open': return '장중';
+    case 'before': return '장 시작 전';
+    case 'after': return '장 마감';
+    case 'closed': return '휴장';
+  }
+});
+const timeText = computed(() => {
+  if (!nowKst.value) return '';
+  const d = new Date(nowKst.value);
+  return d.toLocaleTimeString('ko-KR', {
+    timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+});
+
+// ===== 지수 =====
+function fmtIndex(v: number) {
+  return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+const orderedIndices = computed(() => {
+  const order: Record<string, number> = { kospi: 0, kosdaq: 1, nasdaq: 2, dow: 3 };
+  return [...indices.value].sort((a, b) => (order[a.key] ?? 99) - (order[b.key] ?? 99));
+});
+
+const usSessionLabel = computed(() => {
+  if (typeof window === 'undefined') return '현지';
+  const kstHour = (new Date().getUTCHours() + 9) % 24;
+  const isOpen = kstHour >= 22 || kstHour < 5;
+  return isOpen ? '미장 거래중' : '미장 마감';
+});
+function isUsIndex(key: string) { return key === 'nasdaq' || key === 'dow'; }
+
+const holdingCount = computed(() => balance.value?.holdings.length ?? 0);
 </script>
 
 <template>
   <div class="space-y-4">
+    <!-- 세션 라인 -->
+    <div class="flex items-center gap-2 px-1 text-[11px] text-muted-foreground">
+      <span class="inline-block h-2 w-2 rounded-full" :class="sessionDot" />
+      <span class="font-semibold">{{ sessionText }}</span>
+      <span v-if="timeText" class="text-muted-foreground tabular-nums">{{ timeText }}</span>
+    </div>
+
     <!-- 시장 지수 -->
-    <section v-if="indices.length > 0" class="-mx-4 px-4">
+    <section v-if="orderedIndices.length > 0" class="-mx-4 px-4">
+      <div class="mb-2 px-1">
+        <h2 class="text-sm font-bold tracking-tight">오늘의 시장</h2>
+      </div>
       <div class="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div
-          v-for="idx in indices"
+          v-for="idx in orderedIndices"
           :key="idx.key"
           class="min-w-[9.5rem] shrink-0 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-3 py-2.5"
         >
           <div class="flex items-start justify-between">
-            <div>
-              <p class="text-[10px] font-medium text-muted-foreground">{{ idx.label }}</p>
+            <div class="min-w-0">
+              <p class="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                <span>{{ idx.label }}</span>
+                <span
+                  v-if="isUsIndex(idx.key)"
+                  class="rounded-sm bg-muted px-1 py-px text-[9px]"
+                  :class="usSessionLabel === '미장 거래중' ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'"
+                >{{ usSessionLabel }}</span>
+              </p>
               <p class="mt-0.5 text-sm font-bold tabular-nums tracking-tight">{{ fmtIndex(idx.price) }}</p>
             </div>
-            <p class="flex items-center gap-0.5 text-[11px] font-semibold tabular-nums" :class="pflsColor(idx.change)">
+            <p class="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold tabular-nums" :class="pflsColor(idx.change)">
               <ArrowUpRight v-if="idx.change > 0" class="h-3 w-3" />
               <ArrowDownRight v-else-if="idx.change < 0" class="h-3 w-3" />
               {{ fmtPct(idx.changePct) }}
@@ -113,23 +185,23 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <!-- 거래 대기 알림 -->
+    <!-- 거래 대기 -->
     <RouterLink
       v-if="ordersStore.count > 0"
       to="/orders"
-      class="flex items-center gap-3 rounded-2xl bg-primary/10 px-4 py-3 transition active:scale-[0.99]"
+      class="flex items-center gap-3 rounded-2xl bg-primary/10 ring-1 ring-primary/20 dark:ring-0 px-4 py-3 transition active:scale-[0.99]"
     >
       <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15">
         <Clock class="h-4 w-4 text-primary" />
       </div>
       <div class="min-w-0 flex-1">
         <p class="text-sm font-semibold">거래 대기 {{ ordersStore.count }}건</p>
-        <p class="text-[11px] text-muted-foreground">눌러서 확인하기</p>
+        <p class="text-[11px] text-muted-foreground">눌러서 진행 상황 보기</p>
       </div>
       <ArrowUpRight class="h-4 w-4 -rotate-45 text-muted-foreground" />
     </RouterLink>
 
-    <!-- 자산 헤드라인 -->
+    <!-- 내 자산 -->
     <Card>
       <div class="flex items-start justify-between">
         <p class="text-xs font-medium text-muted-foreground">내 자산</p>
@@ -146,7 +218,9 @@ onUnmounted(() => {
       <p v-if="balance" class="mt-1 text-[2.6rem] font-bold leading-none tabular-nums tracking-tighter">
         {{ fmtKrw(balance.totalEvlu) }}
       </p>
-      <div v-else-if="loading" class="mt-2 h-10 w-48 animate-pulse rounded-md bg-muted" />
+      <div v-else-if="loading" class="mt-3">
+        <LoadingState :compact="true" :messages="['증권사에서 잔고 가져오는 중…', '잠깐만 기다려주세요…', '응답이 늦네요. 다시 시도하고 있어요']" />
+      </div>
       <p v-else class="mt-2 flex items-center gap-1.5 text-sm text-muted-foreground">
         <RefreshCw class="h-3.5 w-3.5 animate-spin" />
         {{ error }}
@@ -174,25 +248,22 @@ onUnmounted(() => {
       </div>
     </Card>
 
-    <!-- 보유 / 종목 페이지로 -->
+    <!-- 종목 탭으로 가는 단축 링크 -->
     <RouterLink
-      to="/stocks"
+      to="/stocks?seg=holding"
       class="flex items-center gap-3 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-4 py-3 transition active:scale-[0.99]"
     >
-      <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
-        <Search class="h-4 w-4 text-muted-foreground" />
-      </div>
       <div class="min-w-0 flex-1">
         <p class="text-sm font-semibold">
-          <template v-if="hasHoldings">갖고 있는 종목 {{ balance!.holdings.length }}개</template>
+          <template v-if="holdingCount > 0">내 종목 {{ holdingCount }}개</template>
           <template v-else>종목 둘러보기</template>
         </p>
         <p class="text-[11px] text-muted-foreground">
-          <template v-if="hasHoldings">눌러서 보유·관심 종목 보기</template>
-          <template v-else>아직 갖고 있는 종목이 없어요</template>
+          <template v-if="holdingCount > 0">보유·관심·순위 보기</template>
+          <template v-else>관심 종목을 추가하거나 순위에서 골라보세요</template>
         </p>
       </div>
-      <ArrowUpRight class="h-4 w-4 -rotate-45 text-muted-foreground" />
+      <ChevronRight class="h-4 w-4 text-muted-foreground" />
     </RouterLink>
   </div>
 </template>

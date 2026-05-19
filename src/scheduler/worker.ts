@@ -26,6 +26,7 @@ import { placeBuyOrder, pollFill } from '../execution/order.js';
 import { notify } from '../notify/telegram.js';
 import { nextMarketOpen } from './calendar.js';
 import { isHoliday, prefetchHolidays } from './holidays.js';
+import { evaluateAndFireStrategies } from '../strategy/runner.js';
 
 // 5초 폴링 — 9:00:05 정각 발주 보장 (최악 5초 지연).
 // 부담은 거의 없음 (DB 쿼리 1건 + 메모리 비교).
@@ -309,12 +310,23 @@ async function tick() {
   }
 }
 
+// tick 마다 reservation 처리 후 추가로 strategy_applications 평가.
+// runner 가 실패해도 reservation 흐름은 영향 없음.
+async function tickStrategies() {
+  try {
+    await evaluateAndFireStrategies();
+  } catch (err) {
+    console.error('[scheduler] strategy runner error', err);
+  }
+}
+
 export function startScheduler() {
   if (_running) return;
   _running = true;
   console.log('[scheduler] starting polling every', INTERVAL_MS / 1000, 's');
   _timer = setInterval(() => {
     tick().catch((err) => console.error('[scheduler] tick failed', err));
+    tickStrategies().catch((err) => console.error('[scheduler] strategy tick failed', err));
   }, INTERVAL_MS);
 }
 

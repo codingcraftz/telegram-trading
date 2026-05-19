@@ -1,6 +1,7 @@
 // 미체결 주문 조회 fast-path + 데이터-only 헬퍼 (orders.ts에서 재사용).
 
 import { callKisApi } from '../mcp/kis.js';
+import { cached, invalidate } from './cache.js';
 import { checkKisOk, findOutput, fmtKrw, num, parseMcpResult } from './extract.js';
 
 function normalize(s: string): string {
@@ -40,21 +41,30 @@ export type PendingOrder = {
 };
 
 // 데이터-only — orders.ts 통합 뷰가 재사용.
+// 30초 캐싱 + warmup worker가 주기 갱신 → 사용자 호출 시점에 항상 캐시 hit.
 export async function fetchPendingOrders(): Promise<{ ok: boolean; error?: string; items: PendingOrder[] }> {
   const today = todayKst();
-  const res = await callKisApi('domestic_stock', 'inquire_daily_ccld', {
-    pd_dv: 'inner',
-    inqr_strt_dt: today,
-    inqr_end_dt: today,
-    sll_buy_dvsn_cd: '00',
-    ccld_dvsn: '02', // 02 = 미체결
-    inqr_dvsn: '00',
-    inqr_dvsn_3: '00',
-  });
+  const res = await cached('pending:raw', 30_000, () =>
+    callKisApi('domestic_stock', 'inquire_daily_ccld', {
+      pd_dv: 'inner',
+      inqr_strt_dt: today,
+      inqr_end_dt: today,
+      sll_buy_dvsn_cd: '00',
+      ccld_dvsn: '02', // 02 = 미체결
+      inqr_dvsn: '00',
+      inqr_dvsn_3: '00',
+    }),
+  );
   const parsed = parseMcpResult(res);
-  if (!parsed.success) return { ok: false, error: parsed.error ?? '알 수 없는 오류', items: [] };
+  if (!parsed.success) {
+    invalidate('pending:raw');
+    return { ok: false, error: parsed.error ?? '알 수 없는 오류', items: [] };
+  }
   const kisOk = checkKisOk(parsed);
-  if (!kisOk.ok) return { ok: false, error: kisOk.message ?? 'KIS 오류', items: [] };
+  if (!kisOk.ok) {
+    invalidate('pending:raw');
+    return { ok: false, error: kisOk.message ?? 'KIS 오류', items: [] };
+  }
 
   const list = findOutput(parsed, 'output1');
   const raw = Array.isArray(list) ? (list as Record<string, unknown>[]) : [];

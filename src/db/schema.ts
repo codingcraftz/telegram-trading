@@ -134,3 +134,74 @@ export type PendingIntent = typeof pendingIntents.$inferSelect;
 export type MarketOpenSettings = typeof marketOpenSettings.$inferSelect;
 export type MarketOpenReservation = typeof marketOpenReservations.$inferSelect;
 export type WatchlistRow = typeof watchlist.$inferSelect;
+
+// ============================================================
+// 전략 시스템 (스텝 5)
+// ============================================================
+
+// 사용자가 정의한 매매 전략. definition은 zod-validated JSON.
+export const strategies = sqliteTable(
+  'strategies',
+  {
+    id: text('id').primaryKey(),
+    chatId: integer('chat_id').notNull(),
+    name: text('name').notNull(),
+    version: integer('version').notNull().default(1), // optimistic lock
+    active: integer('active').notNull().default(1),   // 0/1 (boolean)
+    definition: text('definition').notNull(),         // JSON serialized StrategyDefinition
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => ({
+    chatIdx: index('strategies_chat_idx').on(t.chatId),
+  }),
+);
+
+// 전략을 특정 종목에 적용한 인스턴스. (chat, strategy, stock) 조합 unique.
+export const strategyApplications = sqliteTable(
+  'strategy_applications',
+  {
+    id: text('id').primaryKey(),
+    strategyId: text('strategy_id').notNull(),
+    chatId: integer('chat_id').notNull(),
+    stockCode: text('stock_code').notNull(),
+    status: text('status', {
+      enum: ['active', 'paused', 'completed', 'failed'],
+    }).notNull(),
+    appliedAt: integer('applied_at').notNull(),
+    lastEvaluatedAt: integer('last_evaluated_at'),
+    /** morning_staged 등 multi-step 전략의 runtime 상태 (JSON). null = 미시작. */
+    runtimeJson: text('runtime_json'),
+  },
+  (t) => ({
+    chatIdx: index('strat_app_chat_idx').on(t.chatId),
+    strategyIdx: index('strat_app_strategy_idx').on(t.strategyId),
+    // UNIQUE (chat_id, strategy_id, stock_code) — migrate.ts에서 CREATE UNIQUE INDEX
+  }),
+);
+
+// 전략 평가 실행 이력 (감사 로그)
+export const strategyExecutions = sqliteTable(
+  'strategy_executions',
+  {
+    id: text('id').primaryKey(),
+    strategyId: text('strategy_id').notNull(),
+    applicationId: text('application_id').notNull(),
+    chatId: integer('chat_id').notNull(),
+    stockCode: text('stock_code').notNull(),
+    triggeredAt: integer('triggered_at').notNull(),
+    action: text('action', { enum: ['buy', 'sell', 'no_op'] }).notNull(),
+    result: text('result', { enum: ['success', 'failure', 'skipped'] }).notNull(),
+    payload: text('payload'),
+    errorMessage: text('error_message'),
+  },
+  (t) => ({
+    strategyTimeIdx: index('strat_exec_strategy_time_idx').on(t.strategyId, t.triggeredAt),
+    chatTimeIdx: index('strat_exec_chat_time_idx').on(t.chatId, t.triggeredAt),
+  }),
+);
+
+export type Strategy = typeof strategies.$inferSelect;
+export type NewStrategy = typeof strategies.$inferInsert;
+export type StrategyApplication = typeof strategyApplications.$inferSelect;
+export type StrategyExecution = typeof strategyExecutions.$inferSelect;

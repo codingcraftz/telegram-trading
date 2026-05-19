@@ -17,11 +17,25 @@ import {
   handleTradeConfirm,
   handleTradeSell,
 } from '../api/trade.js';
-import { handleOrders } from '../api/orders.js';
+import { handleOrders, handleOrdersFilled } from '../api/orders.js';
+import { handleOrderable } from '../api/orderable.js';
 import { handleQuote, handleQuotes, handleSearch } from '../api/quote.js';
 import { handleChartApi } from '../api/chart.js';
 import { handleCandles } from '../api/candles.js';
 import { handleIndices } from '../api/indices.js';
+import { handleRanking } from '../api/ranking.js';
+import {
+  handleStrategiesList,
+  handleStrategyApplicationDelete,
+  handleStrategyApply,
+  handleStrategyClone,
+  handleStrategyCreate,
+  handleStrategyDelete,
+  handleStrategyExecutions,
+  handleStrategyGet as handleStrategyGetById,
+  handleStrategyToggle,
+  handleStrategyUpdate,
+} from '../api/strategies.js';
 import { handleAsking } from '../api/asking.js';
 import { handleStreamAsking } from '../api/stream-asking.js';
 import { handleStreamTick } from '../api/stream-tick.js';
@@ -346,13 +360,28 @@ export function startDashboard(port = 8080): void {
   app.get('/api/session', handleSession);
   app.get('/api/keys-status', handleKeysStatus);
   app.get('/api/balance', handleBalance);
+  app.get('/api/orderable', handleOrderable); // 종목+가격 기준 정확한 매수가능
   app.get('/api/orders', handleOrders);
+  app.get('/api/orders/filled', handleOrdersFilled); // 체결 내역 (days 파라미터)
   app.get('/api/quote', handleQuote);
   app.get('/api/quotes', handleQuotes); // batch (실시간 폴링용)
   app.get('/api/search', handleSearch);
   app.get('/api/chart', handleChartApi); // (legacy PNG — 텔레그램 봇용)
   app.get('/api/candles', handleCandles); // 인터랙티브 차트용 JSON
   app.get('/api/indices', handleIndices); // 코스피·코스닥·나스닥·다우
+  app.get('/api/ranking', handleRanking); // 거래대금/거래량/상승률/하락률 순위
+
+  // ===== 전략 시스템 (스텝 5) =====
+  app.get('/api/strategies', handleStrategiesList);
+  app.post('/api/strategies', handleStrategyCreate);
+  app.get('/api/strategies/:id', handleStrategyGetById);
+  app.put('/api/strategies/:id', handleStrategyUpdate);
+  app.delete('/api/strategies/:id', handleStrategyDelete);
+  app.post('/api/strategies/:id/clone', handleStrategyClone);
+  app.post('/api/strategies/:id/apply', handleStrategyApply);
+  app.delete('/api/strategies/:id/applications/:appId', handleStrategyApplicationDelete);
+  app.post('/api/strategies/:id/toggle', handleStrategyToggle);
+  app.get('/api/strategies/:id/executions', handleStrategyExecutions);
   app.get('/api/asking', handleAsking); // 10단계 호가 + 잔량 (REST fallback)
   app.get('/api/stream/asking', handleStreamAsking); // KIS WS → SSE 실시간 호가
   app.get('/api/stream/tick', handleStreamTick); // KIS WS → SSE 실시간 체결가

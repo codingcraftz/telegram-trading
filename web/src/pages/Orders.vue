@@ -1,269 +1,323 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue';
-import { useRouter } from 'vue-router';
-import { RefreshCw, X, Check, ArrowUpRight, ArrowDownRight, Inbox } from 'lucide-vue-next';
-import Card from '@/components/ui/Card.vue';
+// 주문 — [대기 | 체결] 세그먼트.
+// 대기: orders 스토어 (3종 통합)
+// 체결: /api/orders/filled (days 확장)
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { useRoute, useRouter, RouterLink } from 'vue-router';
+import { Inbox, CheckCircle2, RefreshCw } from 'lucide-vue-next';
+import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import Button from '@/components/ui/Button.vue';
-import Modal from '@/components/ui/Modal.vue';
 import EmptyState from '@/components/EmptyState.vue';
-import { api } from '@/api/client';
-import { fmtKrw, fmtKstTime, fmtTtl } from '@/lib/format';
-import { toast } from '@/lib/toast';
+import OrderCard from '@/components/order/OrderCard.vue';
+import OrderEditSheet, { type EditableOrder } from '@/components/order/OrderEditSheet.vue';
+import OrderDetailSheet from '@/components/order/OrderDetailSheet.vue';
+import LoadingState from '@/components/ui/LoadingState.vue';
+import { useInfiniteScroll } from '@/composables/useInfiniteScroll';
+import { api, type FilledOrder } from '@/api/client';
+import { fmtKrw } from '@/lib/format';
 import { useOrdersStore } from '@/stores/orders';
 
+const route = useRoute();
 const router = useRouter();
 const store = useOrdersStore();
-const data = computed(() => store.data);
-const loading = computed(() => store.loading);
 
-type Item =
-  | { kind: 'intent'; id: string; side: 'buy' | 'sell'; name: string; code: string; qty: number; price: string; tip: string; remainingMs: number }
-  | { kind: 'reservation'; id: string; name: string; code: string; qty: string; scheduledFor: number; state: string; remainingMs: number | null }
-  | { kind: 'kis'; orgno: string; odno: string; ordDvsn: string; side: string; name: string; code: string; qty: number; remaining: number; price: number; time: string };
+// ===== 세그먼트 =====
+type Seg = 'pending' | 'filled';
+const seg = ref<Seg>(((route.query.seg as string) === 'filled' ? 'filled' : 'pending'));
 
-const cancelTarget = ref<Item | null>(null);
-const confirmTarget = ref<Item | null>(null);
+// 내부 변경 → URL 갱신 (같은 값이면 noop)
+watch(seg, (v) => {
+  if (route.query.seg === v) return;
+  router.replace({ query: { ...route.query, seg: v } });
+});
 
-async function load() {
-  await store.refresh();
-}
+// 외부 URL 변경(뒤로가기/딥링크) → seg 동기화
+watch(() => route.query.seg, (v) => {
+  const next: Seg = v === 'filled' ? 'filled' : 'pending';
+  if (seg.value !== next) seg.value = next;
+});
 
-const items = computed<Item[]>(() => {
-  if (!data.value) return [];
-  const list: Item[] = [];
-  for (const i of data.value.intents) {
-    list.push({
-      kind: 'intent',
-      id: i.id,
-      side: i.action === 'sell' ? 'sell' : 'buy',
-      name: i.name,
-      code: i.code,
-      qty: i.quantity,
-      price: i.orderType === 'market' ? '시장가' : fmtKrw(i.price ?? 0),
-      tip: '5분 안에 확인 안 하면 자동 취소돼요',
-      remainingMs: i.remainingMs,
-    });
-  }
-  for (const r of data.value.reservations) {
-    list.push({
-      kind: 'reservation',
-      id: r.id,
-      name: r.name,
-      code: r.code,
-      qty: r.qtyMode === 'shares' ? `${r.qtyValue}주` : r.qtyMode === 'amount' ? `${r.qtyValue.toLocaleString()}원어치` : `예수금 ${r.qtyValue}%`,
-      scheduledFor: r.scheduledFor,
-      state: r.state,
-      remainingMs: r.remainingMs,
-    });
-  }
-  if (data.value.kis.ok) {
-    for (const k of data.value.kis.items) {
-      list.push({
-        kind: 'kis',
-        orgno: k.orgno,
-        odno: k.odno,
-        ordDvsn: k.ordDvsn,
-        side: k.side,
-        name: k.name,
-        code: k.code,
-        qty: k.qty,
-        remaining: k.remaining,
-        price: k.price,
-        time: k.time,
+// ===== 대기 =====
+type PendingItem =
+  | { type: 'unfilled'; key: string; createdAt: number; data: EditableOrder & { kind: 'unfilled' } & { orderPrice: number; qty: number; remaining: number } }
+  | { type: 'morning';  key: string; createdAt: number; data: EditableOrder & { kind: 'morning' } & { qtyDesc: string } }
+  | { type: 'strategy'; key: string; createdAt: number; data: EditableOrder & { kind: 'strategy' } };
+
+const pending = computed<PendingItem[]>(() => {
+  const out: PendingItem[] = [];
+  const o = store.data;
+  if (!o) return out;
+  if (o.kis.ok) {
+    for (const k of o.kis.items) {
+      const isBuy = String(k.side).includes('매수') || String(k.side) === '02';
+      out.push({
+        type: 'unfilled',
+        key: `u-${k.odno}`,
+        createdAt: 0,
+        data: {
+          kind: 'unfilled', code: k.code, name: k.name, side: isBuy ? 'buy' : 'sell',
+          orderPrice: k.price, qty: k.qty, remaining: k.remaining,
+          odno: k.odno, orgno: k.orgno, ordDvsn: k.ordDvsn,
+        },
       });
     }
   }
-  return list;
+  for (const r of o.reservations) {
+    const qtyDesc =
+      r.qtyMode === 'shares' ? `${r.qtyValue}주`
+      : r.qtyMode === 'amount' ? `${r.qtyValue.toLocaleString('ko-KR')}원어치`
+      : `예수금 ${r.qtyValue}%`;
+    out.push({
+      type: 'morning',
+      key: `m-${r.id}`,
+      createdAt: r.scheduledFor,
+      data: {
+        kind: 'morning', code: r.code, name: r.name, side: 'buy',
+        reservationId: r.id, qtyDesc,
+      },
+    });
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt);
+  return out;
 });
 
-async function doConfirm() {
-  const t = confirmTarget.value;
-  if (!t) return;
-  const id = t.kind === 'kis' ? '' : t.id;
-  confirmTarget.value = null;
-  if (!id) return;
-  // optimistic: 즉시 토스트 + 백그라운드 발주
-  toast.info('주문 보내는 중…');
+// 대기 무한스크롤
+const {
+  visibleItems: visiblePending,
+  sentinelRef: pendingSentinel,
+  hasMore: pendingHasMore,
+} = useInfiniteScroll(pending, 20);
+
+// ===== 체결 =====
+const filledItems = ref<FilledOrder[]>([]);
+const filledLoading = ref(false);
+const filledDays = ref<number>(7);
+const filledHasMore = ref<boolean>(true);
+
+async function loadFilled(days: number) {
+  filledLoading.value = true;
   try {
-    const r = await api.tradeConfirm(id);
-    if (r.ok) toast.success(r.message || '주문 넣었어요');
-    else toast.error(r.message || '거절됐어요');
-    await load();
-  } catch (err) {
-    toast.error((err as Error).message);
-  }
+    const r = await api.ordersFilled(days);
+    filledItems.value = r.items;
+    filledHasMore.value = days < 90 && r.items.length >= 50;
+  } catch { filledHasMore.value = false; }
+  finally { filledLoading.value = false; }
+}
+function loadMoreFilled() {
+  const next = filledDays.value === 7 ? 30 : 90;
+  if (next === filledDays.value) { filledHasMore.value = false; return; }
+  filledDays.value = next;
+  loadFilled(next);
 }
 
-async function doCancel() {
-  const t = cancelTarget.value;
-  if (!t) return;
-  cancelTarget.value = null;
-  try {
-    if (t.kind === 'intent' || t.kind === 'reservation') {
-      const r = await api.tradeCancel(t.id);
-      toast.info(r.message || '취소했어요');
-    } else {
-      const r = await api.cancelKis({ orgno: t.orgno, odno: t.odno, ordDvsn: t.ordDvsn });
-      if (r.ok) toast.success(r.message || '취소했어요');
-      else toast.error(r.message || '취소 실패');
-    }
-    await load();
-  } catch (err) {
-    toast.error((err as Error).message);
+// 날짜 그룹
+type DateGroup = { label: string; items: FilledOrder[] };
+function dayKeyKst(ts: number): string {
+  const k = new Date(new Date(ts).getTime() + 9 * 3600 * 1000);
+  return `${k.getUTCFullYear()}-${String(k.getUTCMonth() + 1).padStart(2, '0')}-${String(k.getUTCDate()).padStart(2, '0')}`;
+}
+function todayKey(): string { return dayKeyKst(Date.now()); }
+function dateLabel(key: string): string {
+  const td = new Date(todayKey() + 'T00:00:00+09:00').getTime();
+  const it = new Date(key + 'T00:00:00+09:00').getTime();
+  const diff = Math.round((td - it) / (24 * 3600 * 1000));
+  if (diff === 0) return '오늘';
+  if (diff === 1) return '어제';
+  if (diff <= 6) return `${diff}일 전`;
+  return key;
+}
+// 체결 무한스크롤 — flat list에 limit 적용 후 그룹핑
+const {
+  visibleItems: visibleFilled,
+  sentinelRef: filledSentinel,
+  hasMore: filledRowHasMore,
+} = useInfiniteScroll(filledItems, 20);
+
+const filledGroups = computed<DateGroup[]>(() => {
+  const map = new Map<string, FilledOrder[]>();
+  for (const it of visibleFilled.value) {
+    const k = dayKeyKst(it.ts);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k)!.push(it);
   }
+  return Array.from(map.entries()).map(([k, arr]) => ({ label: dateLabel(k), items: arr }));
+});
+
+function fmtTimeKst(ts: number) {
+  return new Date(ts).toLocaleTimeString('ko-KR', {
+    timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false,
+  });
 }
 
-function intentActionLabel(it: Extract<Item, { kind: 'intent' }>) {
-  return it.side === 'buy' ? '지금 사기' : '지금 팔기';
+// 시트
+const detailOpen = ref(false);
+const detailPending = ref<EditableOrder | null>(null);
+const detailFilled = ref<FilledOrder | null>(null);
+const editOpen = ref(false);
+const editMode = ref<'edit' | 'cancel'>('cancel');
+const editOrder = ref<EditableOrder | null>(null);
+
+function openDetailPending(p: PendingItem) { detailFilled.value = null; detailPending.value = p.data; detailOpen.value = true; }
+function openDetailFilled(f: FilledOrder) { detailPending.value = null; detailFilled.value = f; detailOpen.value = true; }
+function closeDetail() { detailOpen.value = false; }
+function openEdit(order: EditableOrder, mode: 'edit' | 'cancel') {
+  editOrder.value = order; editMode.value = mode; editOpen.value = true; detailOpen.value = false;
 }
+function closeEdit() { editOpen.value = false; }
+async function onEditSuccess() { editOpen.value = false; await store.refresh(); }
 
 onMounted(() => {
   store.subscribe(4000);
+  if (seg.value === 'filled') loadFilled(filledDays.value);
 });
-onUnmounted(() => {
-  store.unsubscribe();
-});
+onUnmounted(() => store.unsubscribe());
+
+watch(seg, (v) => { if (v === 'filled' && filledItems.value.length === 0) loadFilled(filledDays.value); });
 </script>
 
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between px-1">
       <h2 class="text-lg font-bold tracking-tight">주문</h2>
-      <button class="rounded-md p-1.5 text-muted-foreground transition hover:bg-accent" :disabled="loading" @click="load">
-        <RefreshCw class="h-4 w-4" :class="loading ? 'animate-spin' : ''" />
+      <button
+        v-if="seg === 'pending'"
+        class="rounded-md p-1.5 text-muted-foreground transition hover:bg-accent"
+        :disabled="store.loading"
+        @click="store.refresh()"
+      >
+        <RefreshCw class="h-4 w-4" :class="store.loading ? 'animate-spin' : ''" />
       </button>
     </div>
 
-    <p class="px-1 text-sm text-muted-foreground">
-      거래 대기 중 <span class="font-bold text-foreground tabular-nums">{{ items.length }}건</span>
-    </p>
+    <SegmentedControl
+      v-model="seg"
+      :options="[
+        { value: 'pending', label: `대기${store.count ? ` ${store.count}` : ''}` },
+        { value: 'filled', label: '체결' },
+      ]"
+    />
 
-    <EmptyState
-      v-if="!loading && items.length === 0"
-      :icon="Inbox"
-      title="대기 중인 주문이 없어요"
-      description="종목 상세에서 사거나 팔면 여기서 진행 상황을 볼 수 있어요."
-    >
-      <template #action>
-        <Button variant="primary" @click="router.push('/stocks')">종목 둘러보기</Button>
-      </template>
-    </EmptyState>
+    <!-- 대기 -->
+    <template v-if="seg === 'pending'">
+      <div v-if="pending.length > 0" class="space-y-2">
+        <OrderCard
+          v-for="p in visiblePending"
+          :key="p.key"
+          :type="p.type"
+          :side="p.data.side"
+          :name="p.data.name"
+          :code="p.data.code"
+          :type-label="p.type === 'unfilled' ? '미체결' : p.type === 'morning' ? '내일 09:00 시가매매' : '전략 발동 대기'"
+          :middle-line="
+            p.type === 'unfilled'
+              ? `${p.data.orderPrice === 0 ? '시장가' : fmtKrw(p.data.orderPrice) + '원'} × ${p.data.remaining}주 잔여`
+              : p.type === 'morning'
+                ? `다음 영업일 09:00 / ${p.data.qtyDesc}`
+                : '조건 대기 중'
+          "
+          :action1-label="p.type === 'unfilled' ? '정정' : '수정'"
+          :action2-label="p.type === 'unfilled' || p.type === 'morning' ? '취소' : '중지'"
+          @open="openDetailPending(p)"
+          @action1="openEdit(p.data, 'edit')"
+          @action2="openEdit(p.data, 'cancel')"
+        />
+        <div v-if="pendingHasMore" ref="pendingSentinel" class="h-2" />
+      </div>
+      <EmptyState
+        v-else-if="!store.loading"
+        :icon="Inbox"
+        title="대기 중인 주문이 없어요"
+        description="종목을 골라 매수해보세요."
+      >
+        <template #action>
+          <RouterLink to="/stocks">
+            <Button variant="primary" size="md">종목 둘러보기</Button>
+          </RouterLink>
+        </template>
+      </EmptyState>
+      <LoadingState v-else :compact="true" />
+    </template>
 
-    <div v-else class="space-y-2">
-      <Card v-for="(it, idx) in items" :key="idx">
-        <!-- 즉시 주문 대기 -->
-        <template v-if="it.kind === 'intent'">
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-1.5">
-                <ArrowUpRight v-if="it.side === 'buy'" class="h-3.5 w-3.5 text-up" />
-                <ArrowDownRight v-else class="h-3.5 w-3.5 text-down" />
-                <p class="truncate text-sm font-bold">{{ it.name }}</p>
-                <span class="text-[10px] text-muted-foreground tabular-nums">{{ it.code }}</span>
+    <!-- 체결 -->
+    <template v-else>
+      <div v-if="filledGroups.length > 0" class="space-y-4">
+        <section v-for="g in filledGroups" :key="g.label" class="space-y-1.5">
+          <p class="px-1 text-xs font-semibold text-muted-foreground">{{ g.label }}</p>
+          <div class="space-y-1">
+            <button
+              v-for="f in g.items"
+              :key="`f-${f.odno}-${f.ts}`"
+              type="button"
+              class="flex w-full cursor-pointer items-center gap-3 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-4 py-3 text-left transition active:scale-[0.99]"
+              @click="openDetailFilled(f)"
+            >
+              <div class="min-w-0 flex-1">
+                <div class="flex items-baseline gap-1.5">
+                  <span class="truncate text-sm font-bold">{{ f.name }}</span>
+                  <span
+                    class="rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none"
+                    :class="f.side === 'buy' ? 'bg-up text-white' : 'bg-down text-white'"
+                  >{{ f.side === 'buy' ? '매수' : '매도' }}</span>
+                </div>
+                <p class="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
+                  {{ fmtTimeKst(f.ts) }} · {{ fmtKrw(f.price) }}원 × {{ f.qty }}주
+                </p>
               </div>
-              <p class="mt-1 text-xs tabular-nums">{{ it.qty }}주 · {{ it.price }}</p>
-              <p class="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{{ it.tip }} · {{ fmtTtl(it.remainingMs) }} 남음</p>
-            </div>
-            <button
-              class="shrink-0 rounded-full p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-              aria-label="취소"
-              @click="cancelTarget = it"
-            >
-              <X class="h-4 w-4" />
-            </button>
-          </div>
-          <Button variant="primary" size="md" class="mt-3 w-full" @click="confirmTarget = it">
-            <Check class="mr-1 h-4 w-4" />{{ intentActionLabel(it) }}
-          </Button>
-        </template>
-
-        <!-- 시가매매 예약 -->
-        <template v-else-if="it.kind === 'reservation'">
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-bold">{{ it.name }} <span class="text-[10px] text-muted-foreground tabular-nums">{{ it.code }}</span></p>
-              <p class="mt-1 text-xs tabular-nums">내일 시가 매수 · {{ it.qty }}</p>
-              <p class="mt-1.5 text-[11px] text-muted-foreground tabular-nums">
-                발주 예정 {{ fmtKstTime(it.scheduledFor) }}
-                <span v-if="it.state === 'awaiting_confirm' && it.remainingMs"> · 확인 대기 {{ fmtTtl(it.remainingMs) }}</span>
-              </p>
-            </div>
-            <button
-              class="shrink-0 rounded-full p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-              aria-label="예약 취소"
-              @click="cancelTarget = it"
-            >
-              <X class="h-4 w-4" />
-            </button>
-          </div>
-          <Button v-if="it.state === 'awaiting_confirm'" variant="primary" size="md" class="mt-3 w-full" @click="confirmTarget = it">
-            <Check class="mr-1 h-4 w-4" />확인
-          </Button>
-        </template>
-
-        <!-- KIS 미체결 -->
-        <template v-else>
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-1.5">
-                <p class="truncate text-sm font-bold">{{ it.name }}</p>
-                <span class="text-[10px] text-muted-foreground tabular-nums">{{ it.code }}</span>
-                <span class="ml-auto rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">증권사 대기</span>
+              <div class="shrink-0 text-right tabular-nums">
+                <p class="text-sm font-bold">{{ fmtKrw(f.amount) }}원</p>
+                <p
+                  v-if="f.side === 'sell' && f.pnl !== undefined && f.pnl !== null"
+                  class="mt-0.5 text-[11px] font-semibold"
+                  :class="f.pnl > 0 ? 'text-up' : f.pnl < 0 ? 'text-down' : 'text-muted-foreground'"
+                >
+                  {{ f.pnl > 0 ? '+' : '' }}{{ fmtKrw(f.pnl) }}원
+                </p>
               </div>
-              <p class="mt-1 text-xs tabular-nums">
-                {{ it.side }} · {{ it.price > 0 ? fmtKrw(it.price) : '시장가' }} · {{ it.qty }}주 (남은 {{ it.remaining }}주)
-              </p>
-            </div>
-            <button
-              class="shrink-0 rounded-full p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-              aria-label="취소"
-              @click="cancelTarget = it"
-            >
-              <X class="h-4 w-4" />
             </button>
           </div>
-        </template>
-      </Card>
-    </div>
+        </section>
 
-    <!-- 확정 (실제 발주) -->
-    <Modal :open="!!confirmTarget" title="주문을 보낼까요?" @close="confirmTarget = null">
-      <div v-if="confirmTarget" class="rounded-xl bg-muted/40 p-3 text-sm">
-        <p class="font-semibold">{{ confirmTarget.name }} <span class="text-[10px] text-muted-foreground tabular-nums">{{ confirmTarget.code }}</span></p>
-        <p v-if="confirmTarget.kind === 'intent'" class="mt-1 text-xs text-muted-foreground tabular-nums">
-          {{ confirmTarget.side === 'buy' ? '사기' : '팔기' }} · {{ confirmTarget.qty }}주 · {{ confirmTarget.price }}
-        </p>
-        <p v-else-if="confirmTarget.kind === 'reservation'" class="mt-1 text-xs text-muted-foreground tabular-nums">
-          내일 시가 매수 예약 · {{ confirmTarget.qty }}
-        </p>
-      </div>
-      <p class="mt-3 text-xs text-muted-foreground">
-        {{ confirmTarget?.kind === 'reservation' ? '예약을 확정하면 내일 시가에 자동으로 주문이 들어가요.' : '주문이 증권사로 곧바로 전송돼요.' }}
-      </p>
-      <div class="mt-5 grid grid-cols-2 gap-2">
-        <Button variant="secondary" @click="confirmTarget = null">아니요</Button>
-        <Button variant="primary" @click="doConfirm">{{ confirmTarget?.kind === 'reservation' ? '예약 확정' : '보내기' }}</Button>
-      </div>
-    </Modal>
+        <!-- 클라 visible limit 확장용 sentinel -->
+        <div v-if="filledRowHasMore" ref="filledSentinel" class="h-2" />
 
-    <Modal :open="!!cancelTarget" title="이 주문을 취소할까요?" @close="cancelTarget = null">
-      <div v-if="cancelTarget" class="rounded-xl bg-muted/40 p-3 text-sm">
-        <p class="font-semibold">{{ cancelTarget.name }} <span class="text-[10px] text-muted-foreground tabular-nums">{{ cancelTarget.code }}</span></p>
-        <p v-if="cancelTarget.kind === 'intent'" class="mt-1 text-xs text-muted-foreground tabular-nums">
-          {{ cancelTarget.qty }}주 · {{ cancelTarget.price }}
-        </p>
-        <p v-else-if="cancelTarget.kind === 'reservation'" class="mt-1 text-xs text-muted-foreground tabular-nums">
-          내일 시가 매수 · {{ cancelTarget.qty }}
-        </p>
-        <p v-else-if="cancelTarget.kind === 'kis'" class="mt-1 text-xs text-muted-foreground tabular-nums">
-          {{ cancelTarget.side }} · {{ cancelTarget.qty }}주 (남은 {{ cancelTarget.remaining }}주)
-        </p>
+        <!-- 클라 limit 끝까지 갔는데 서버 days 확장 가능 시 버튼 -->
+        <div v-if="!filledRowHasMore && filledHasMore" class="pt-2 text-center">
+          <Button
+            variant="secondary"
+            size="md"
+            :disabled="filledLoading"
+            @click="loadMoreFilled"
+          >
+            {{ filledLoading ? '불러오는 중…' : '더 긴 기간 보기' }}
+          </Button>
+        </div>
       </div>
-      <p class="mt-3 text-xs text-muted-foreground">취소하면 되돌릴 수 없어요.</p>
-      <div class="mt-5 grid grid-cols-2 gap-2">
-        <Button variant="secondary" @click="cancelTarget = null">아니요</Button>
-        <Button variant="destructive" @click="doCancel">취소하기</Button>
-      </div>
-    </Modal>
+
+      <EmptyState
+        v-else-if="!filledLoading"
+        :icon="CheckCircle2"
+        title="체결 내역이 없어요"
+        description="첫 거래를 시작해보세요."
+      />
+
+      <LoadingState v-else :compact="true" />
+    </template>
+
+    <OrderDetailSheet
+      :open="detailOpen"
+      :order="detailPending"
+      :filled="detailFilled"
+      @close="closeDetail"
+      @edit="detailPending && openEdit(detailPending, 'edit')"
+      @cancel="detailPending && openEdit(detailPending, 'cancel')"
+    />
+
+    <OrderEditSheet
+      :open="editOpen"
+      :mode="editMode"
+      :order="editOrder"
+      @close="closeEdit"
+      @success="onEditSuccess"
+    />
   </div>
 </template>

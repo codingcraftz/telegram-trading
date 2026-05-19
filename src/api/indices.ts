@@ -1,7 +1,9 @@
 // GET /api/indices — 주요 시장 지수 (코스피/코스닥/나스닥/다우).
 // Yahoo Finance v8 unofficial chart endpoint 사용.
+// 30초 캐시 — warmup worker가 주기 갱신해서 사용자 호출 시점 0ms.
 
 import type { Context } from 'hono';
+import { cached } from '../fastpath/cache.js';
 
 type IndexItem = {
   key: string;
@@ -53,28 +55,35 @@ async function fetchIndex(symbol: string): Promise<{ price: number; prevClose: n
   return { price, prevClose, series: closes };
 }
 
+// 4개 지수 동시 fetch — 모두 묶어 한 캐시 키. 30s TTL.
+export async function fetchIndicesItems(): Promise<IndexItem[]> {
+  return cached('indices:all', 30_000, async () => {
+    const results = await Promise.all(
+      INDICES.map(async (it): Promise<IndexItem | null> => {
+        try {
+          const r = await fetchIndex(it.symbol);
+          if (!r) return null;
+          const change = r.price - r.prevClose;
+          const changePct = r.prevClose !== 0 ? (change / r.prevClose) * 100 : 0;
+          return {
+            key: it.key,
+            label: it.label,
+            price: r.price,
+            change,
+            changePct,
+            prevClose: r.prevClose,
+            series: r.series,
+          };
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return results.filter((x): x is IndexItem => x !== null);
+  });
+}
+
 export async function handleIndices(c: Context) {
-  const results = await Promise.all(
-    INDICES.map(async (it): Promise<IndexItem | null> => {
-      try {
-        const r = await fetchIndex(it.symbol);
-        if (!r) return null;
-        const change = r.price - r.prevClose;
-        const changePct = r.prevClose !== 0 ? (change / r.prevClose) * 100 : 0;
-        return {
-          key: it.key,
-          label: it.label,
-          price: r.price,
-          change,
-          changePct,
-          prevClose: r.prevClose,
-          series: r.series,
-        };
-      } catch {
-        return null;
-      }
-    }),
-  );
-  const items = results.filter((x): x is IndexItem => x !== null);
+  const items = await fetchIndicesItems();
   return c.json({ items });
 }

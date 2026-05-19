@@ -195,6 +195,8 @@ async function executeConfirm(
       }).catch((err) => console.error('[pollFill]', err));
       invalidateCache('holdings');
       invalidateCache('balance:raw');
+      invalidateCache('pending:raw');
+      invalidateCache('filled:'); // 모든 days 키 무효화 (prefix)
       return {
         ok: true,
         message: `📨 매수 주문 접수 #${orderId}`,

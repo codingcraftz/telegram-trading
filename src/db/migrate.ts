@@ -118,7 +118,59 @@ export function ensureSchema() {
       UNIQUE(chat_id, market, symbol_code)
     );
     CREATE INDEX IF NOT EXISTS watchlist_chat_idx ON watchlist(chat_id);
+
+    -- ===== 전략 시스템 (스텝 5) =====
+    CREATE TABLE IF NOT EXISTS strategies (
+      id TEXT PRIMARY KEY,
+      chat_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      active INTEGER NOT NULL DEFAULT 1,
+      definition TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS strategies_chat_idx ON strategies(chat_id);
+
+    CREATE TABLE IF NOT EXISTS strategy_applications (
+      id TEXT PRIMARY KEY,
+      strategy_id TEXT NOT NULL,
+      chat_id INTEGER NOT NULL,
+      stock_code TEXT NOT NULL,
+      status TEXT NOT NULL,
+      applied_at INTEGER NOT NULL,
+      last_evaluated_at INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS strat_app_unique_idx
+      ON strategy_applications(chat_id, strategy_id, stock_code);
+    CREATE INDEX IF NOT EXISTS strat_app_chat_idx ON strategy_applications(chat_id);
+    CREATE INDEX IF NOT EXISTS strat_app_strategy_idx ON strategy_applications(strategy_id);
+
+    CREATE TABLE IF NOT EXISTS strategy_executions (
+      id TEXT PRIMARY KEY,
+      strategy_id TEXT NOT NULL,
+      application_id TEXT NOT NULL,
+      chat_id INTEGER NOT NULL,
+      stock_code TEXT NOT NULL,
+      triggered_at INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      result TEXT NOT NULL,
+      payload TEXT,
+      error_message TEXT
+    );
+    CREATE INDEX IF NOT EXISTS strat_exec_strategy_time_idx
+      ON strategy_executions(strategy_id, triggered_at);
+    CREATE INDEX IF NOT EXISTS strat_exec_chat_time_idx
+      ON strategy_executions(chat_id, triggered_at);
   `);
+
+  // strategy_applications.runtime_json — morning_staged 같은 multi-step 전략의 상태 저장.
+  // {phase, stage1Avg, stage2OrderId, stage2Filled, tp1Done, ...}. JSON 직렬화.
+  try {
+    sqlite.exec(`ALTER TABLE strategy_applications ADD COLUMN runtime_json TEXT`);
+  } catch (e) {
+    // 이미 존재
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
-import { CircleCheck, CircleX, Info, ExternalLink, Smartphone } from 'lucide-vue-next';
+import { RouterLink } from 'vue-router';
+import { CircleCheck, CircleX, Info, ExternalLink, Smartphone, Sparkles, Plus, ChevronRight } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
-import { api, type StrategyResponse } from '@/api/client';
+import { api } from '@/api/client';
 import { usePrefs, type Mode, type Theme } from '@/stores/prefs';
-import { toast } from '@/lib/toast';
 
 const prefs = usePrefs();
 
@@ -20,37 +20,20 @@ const keys = ref<{
   notice: string;
 } | null>(null);
 
-const strat = ref<StrategyResponse | null>(null);
-const stratForm = ref({ tpPct: '', slPct: '' });
-const stratSaving = ref(false);
+const strategyCount = ref<number>(0);
 
 async function loadAll() {
   try {
-    const [v, k, s] = await Promise.all([api.version(), api.keysStatus(), api.strategy()]);
+    const [v, k, list] = await Promise.all([
+      api.version(),
+      api.keysStatus(),
+      api.strategies().catch(() => ({ items: [] })),
+    ]);
     version.value = v;
     keys.value = k;
-    strat.value = s;
-    stratForm.value = {
-      tpPct: s.tpPct?.toString() ?? '',
-      slPct: s.slPct?.toString() ?? '',
-    };
+    strategyCount.value = list.items.length;
   } catch (err) {
     console.warn(err);
-  }
-}
-
-async function saveStrategy() {
-  stratSaving.value = true;
-  try {
-    await api.strategySave({
-      tpPct: stratForm.value.tpPct === '' ? null : Number(stratForm.value.tpPct),
-      slPct: stratForm.value.slPct === '' ? null : Number(stratForm.value.slPct),
-    });
-    toast.success('저장됐어요');
-  } catch (err) {
-    toast.error((err as Error).message);
-  } finally {
-    stratSaving.value = false;
   }
 }
 
@@ -112,6 +95,32 @@ onMounted(loadAll);
       </div>
     </Card>
 
+    <!-- 전략 관리 -->
+    <Card>
+      <template #header>
+        <h3 class="text-sm font-bold tracking-tight">전략 관리</h3>
+      </template>
+      <div class="-mx-1 divide-y divide-border">
+        <RouterLink
+          to="/more/strategy"
+          class="flex items-center gap-3 px-1 py-2.5 transition hover:bg-accent rounded-md"
+        >
+          <Sparkles class="h-4 w-4 text-primary" />
+          <span class="flex-1 text-sm font-medium">내 전략</span>
+          <span class="text-[11px] text-muted-foreground tabular-nums">{{ strategyCount }}개</span>
+          <ChevronRight class="h-4 w-4 text-muted-foreground" />
+        </RouterLink>
+        <RouterLink
+          to="/more/strategy/new"
+          class="flex items-center gap-3 px-1 py-2.5 transition hover:bg-accent rounded-md"
+        >
+          <Plus class="h-4 w-4 text-primary" />
+          <span class="flex-1 text-sm font-medium">새 전략 만들기</span>
+          <ChevronRight class="h-4 w-4 text-muted-foreground" />
+        </RouterLink>
+      </div>
+    </Card>
+
     <!-- 연결 상태 -->
     <Card v-if="keys">
       <template #header>
@@ -137,37 +146,6 @@ onMounted(loadAll);
       </div>
     </Card>
 
-    <!-- 내일 시가에 사기 기본값 -->
-    <Card v-if="strat">
-      <template #header>
-        <h3 class="text-sm font-bold tracking-tight">내일 시가에 사기 기본값</h3>
-      </template>
-      <div class="space-y-4">
-        <label class="block">
-          <span class="text-[11px] font-medium text-muted-foreground">목표가 도달 시 자동 매도 (%)</span>
-          <input
-            v-model="stratForm.tpPct"
-            type="number"
-            step="0.5"
-            placeholder="비워두면 자동 매도 안 함"
-            class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2.5 text-base font-semibold tabular-nums focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </label>
-        <label class="block">
-          <span class="text-[11px] font-medium text-muted-foreground">손해 막기 자동 매도 (%)</span>
-          <input
-            v-model="stratForm.slPct"
-            type="number"
-            step="0.5"
-            placeholder="비워두면 자동 매도 안 함"
-            class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2.5 text-base font-semibold tabular-nums focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </label>
-        <Button variant="primary" size="md" class="w-full" :disabled="stratSaving" @click="saveStrategy">
-          {{ stratSaving ? '저장 중…' : '저장' }}
-        </Button>
-      </div>
-    </Card>
 
     <!-- 한국투자증권 앱 연결 -->
     <Card>

@@ -4,6 +4,7 @@ import { createBot } from './bot/index.js';
 import { reconcileOnBoot } from './monitor/recovery.js';
 import { startMonitor, stopMonitor } from './monitor/worker.js';
 import { startScheduler, stopScheduler } from './scheduler/worker.js';
+import { startWarmup, stopWarmup } from './fastpath/warmup.js';
 import { ensureKrxSymbols } from './fastpath/symbols-fetcher.js';
 import { reloadKrxMaster } from './fastpath/symbol.js';
 import { startDashboard } from './dashboard/server.js';
@@ -50,11 +51,15 @@ async function main() {
   console.log('[boot] starting market-open scheduler');
   startScheduler();
 
+  console.log('[boot] starting warmup (balance cache)');
+  startWarmup();
+
   console.log('[boot] starting telegram bot');
   const bot = createBot();
 
   const shutdown = async (signal: string) => {
     console.log(`[shutdown] ${signal} received`);
+    stopWarmup();
     stopScheduler();
     stopMonitor();
     try {

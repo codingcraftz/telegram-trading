@@ -1,4 +1,5 @@
 // GET /api/orders — 3 소스 통합 (pendingIntents + reservations + KIS 미체결)
+// GET /api/orders/filled — KIS 체결 내역 (inquire_daily_ccld ccld_dvsn=01)
 
 import type { Context } from 'hono';
 import {
@@ -7,6 +8,9 @@ import {
   type OrderSpec,
 } from '../db/repo.js';
 import { fetchPendingOrders } from '../fastpath/pending.js';
+import { callKisApi } from '../mcp/kis.js';
+import { cached, invalidate } from '../fastpath/cache.js';
+import { checkKisOk, findOutput, num, parseMcpResult } from '../fastpath/extract.js';
 import { getDefaultChatId } from './_auth.js';
 
 function parseSpec(json: string): OrderSpec | null {
@@ -80,4 +84,100 @@ export async function handleOrders(c: Context) {
         }
       : { ok: false, error: kis.error, items: [] },
   });
+}
+
+// ====== /api/orders/filled — 체결 내역 ======
+function ymdKst(d: Date): string {
+  const k = new Date(d.getTime() + 9 * 3600 * 1000);
+  return `${k.getUTCFullYear()}${String(k.getUTCMonth() + 1).padStart(2, '0')}${String(k.getUTCDate()).padStart(2, '0')}`;
+}
+
+type FilledOrder = {
+  /** epoch ms (orderDt + ordTime KST → UTC) */
+  ts: number;
+  orderDate: string; // YYYYMMDD
+  orderTime: string; // HHMMSS
+  code: string;
+  name: string;
+  side: 'buy' | 'sell';
+  qty: number;
+  price: number;     // 체결단가
+  amount: number;    // qty * price
+  orgno: string;
+  odno: string;
+};
+
+function parseTs(orderDate: string, orderTime: string): number {
+  // KST naive parse: YYYYMMDD + HHMMSS → Date(ms)
+  if (!/^\d{8}$/.test(orderDate) || !/^\d{6}$/.test(orderTime)) return 0;
+  const y = Number(orderDate.slice(0, 4));
+  const m = Number(orderDate.slice(4, 6)) - 1;
+  const d = Number(orderDate.slice(6, 8));
+  const hh = Number(orderTime.slice(0, 2));
+  const mm = Number(orderTime.slice(2, 4));
+  const ss = Number(orderTime.slice(4, 6));
+  // KST = UTC+9 → KST 표현을 UTC ms로 환산
+  return Date.UTC(y, m, d, hh, mm, ss) - 9 * 3600 * 1000;
+}
+
+export async function handleOrdersFilled(c: Context) {
+  const days = Math.min(90, Math.max(1, Number(c.req.query('days') ?? '7')));
+  const end = new Date();
+  const start = new Date(end.getTime() - (days - 1) * 24 * 3600 * 1000);
+  try {
+    // days별로 캐시 분리. 60초 캐시 + warmup이 7일치 갱신.
+    const res = await cached(`filled:days:${days}`, 60_000, () =>
+      callKisApi('domestic_stock', 'inquire_daily_ccld', {
+        pd_dv: 'inner',
+        inqr_strt_dt: ymdKst(start),
+        inqr_end_dt: ymdKst(end),
+        sll_buy_dvsn_cd: '00',
+        ccld_dvsn: '01', // 01 = 체결
+        inqr_dvsn: '00',
+        inqr_dvsn_3: '00',
+      }),
+    );
+    const parsed = parseMcpResult(res);
+    if (!parsed.success) {
+      // 에러 응답을 캐시에 두지 않음 — 다음 호출에서 재시도
+      invalidate(`filled:days:${days}`);
+      return c.json({ error: parsed.error ?? 'parse', items: [] }, 502);
+    }
+    const kisOk = checkKisOk(parsed);
+    if (!kisOk.ok) {
+      invalidate(`filled:days:${days}`);
+      return c.json({ error: kisOk.message ?? 'KIS', items: [] }, 502);
+    }
+
+    const list = findOutput(parsed, 'output1');
+    const raw = Array.isArray(list) ? (list as Record<string, unknown>[]) : [];
+    const items: FilledOrder[] = raw
+      .filter((it) => (num(it.tot_ccld_qty) ?? 0) > 0)
+      .map((it) => {
+        const orderDate = String(it.ord_dt ?? '');
+        const orderTime = String(it.ord_tmd ?? '');
+        const qty = num(it.tot_ccld_qty) ?? 0;
+        const price = num(it.avg_prvs) ?? num(it.ccld_unpr) ?? num(it.ord_unpr) ?? 0;
+        const sideCd = String(it.sll_buy_dvsn_cd ?? '');
+        const side: 'buy' | 'sell' = sideCd === '02' ? 'buy' : 'sell';
+        return {
+          ts: parseTs(orderDate, orderTime),
+          orderDate,
+          orderTime,
+          code: String(it.pdno ?? ''),
+          name: String(it.prdt_name ?? it.pdno ?? ''),
+          side,
+          qty,
+          price,
+          amount: qty * price,
+          orgno: String(it.ord_gno_brno ?? ''),
+          odno: String(it.odno ?? ''),
+        };
+      })
+      .sort((a, b) => b.ts - a.ts);
+
+    return c.json({ days, items });
+  } catch (err) {
+    return c.json({ error: (err as Error).message, items: [] }, 500);
+  }
 }
