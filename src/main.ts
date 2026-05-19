@@ -54,27 +54,32 @@ async function main() {
   console.log('[boot] starting warmup (balance cache)');
   startWarmup();
 
-  console.log('[boot] starting telegram bot');
-  const bot = createBot();
+  // 텔레그램 봇은 "알림 송신용" 으로만. 토큰 없으면 봇 자체 skip — 대시보드/스케줄러는 정상 동작.
+  // 매수/매도 체결 알림은 notify()가 봇 인스턴스 있을 때만 송신.
+  const bot = cfg.TELEGRAM_BOT_TOKEN ? createBot() : null;
 
   const shutdown = async (signal: string) => {
     console.log(`[shutdown] ${signal} received`);
     stopWarmup();
     stopScheduler();
     stopMonitor();
-    try {
-      await bot.stop();
-    } catch {}
+    if (bot) {
+      try { await bot.stop(); } catch {}
+    }
     process.exit(0);
   };
   process.once('SIGINT', () => shutdown('SIGINT'));
   process.once('SIGTERM', () => shutdown('SIGTERM'));
 
-  try {
-    await bot.start({ onStart: (me) => console.log('[bot] started as @' + me.username) });
-  } catch (err) {
-    console.error('[bot] start failed (대시보드는 동작):', (err as Error).message);
-    // 대시보드 listen 살아있으니 process는 종료 안 됨
+  if (bot) {
+    console.log('[boot] starting telegram notification bot');
+    try {
+      await bot.start({ onStart: (me) => console.log('[bot] notify-only mode as @' + me.username) });
+    } catch (err) {
+      console.error('[bot] start failed (대시보드는 동작):', (err as Error).message);
+    }
+  } else {
+    console.log('[boot] telegram token 미입력 — 알림 비활성');
   }
 }
 

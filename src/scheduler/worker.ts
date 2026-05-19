@@ -23,7 +23,6 @@ import { callKisApi, type Market } from '../mcp/kis.js';
 import { firstOutput, num, parseMcpResult } from '../fastpath/extract.js';
 import { fetchNaverDaily, fetchNaverMinuteBars } from '../charts/naver.js';
 import { placeBuyOrder, pollFill } from '../execution/order.js';
-import { notify } from '../notify/telegram.js';
 import { nextMarketOpen } from './calendar.js';
 import { isHoliday, prefetchHolidays } from './holidays.js';
 import { evaluateAndFireStrategies } from '../strategy/runner.js';
@@ -125,7 +124,6 @@ async function fireReservation(rId: string): Promise<void> {
   const market = (r.market || 'KRX') as Market;
   if (market !== 'KRX') {
     rejectReservation(r.id, '해외 시가매매 미지원 (v1)');
-    await notify(r.chatId, `⚠️ 시가매매 미지원: ${r.symbolName} (해외)`);
     return;
   }
 
@@ -135,14 +133,11 @@ async function fireReservation(rId: string): Promise<void> {
   } catch (err) {
     const msg = (err as Error).message;
     rejectReservation(r.id, `price_fetch:${msg}`);
-    await notify(r.chatId, `❌ 시가매매 발주 실패 — 시세 조회 오류: ${msg}`);
     return;
   }
-  // 시초가 우선, 없으면 현재가 (개장 직후 시초가 미결정 케이스 대비)
   const ref = snapshot.open ?? snapshot.current;
   if (!ref || ref <= 0) {
     rejectReservation(r.id, 'no_price');
-    await notify(r.chatId, `❌ ${r.symbolName} 시초가/현재가 정보 없음 — 발주 취소`);
     return;
   }
 
@@ -164,7 +159,6 @@ async function fireReservation(rId: string): Promise<void> {
     }
     if (!cash || cash <= 0) {
       rejectReservation(r.id, 'no_cash_info');
-      await notify(r.chatId, `❌ ${r.symbolName} — 매수가능금액 0. 발주 취소.`);
       return;
     }
     const budget = (cash * r.qtyValue) / 100;
@@ -173,10 +167,6 @@ async function fireReservation(rId: string): Promise<void> {
 
   if (!qty || qty <= 0) {
     rejectReservation(r.id, 'qty_zero');
-    await notify(
-      r.chatId,
-      `❌ ${r.symbolName} 계산 수량 0주 — 발주 취소 (시초가 ${ref.toLocaleString()}원)`,
-    );
     return;
   }
 
@@ -205,33 +195,24 @@ async function fireReservation(rId: string): Promise<void> {
       const next = nextMarketOpen(new Date());
       const ok = rescheduleReservation(r.id, next.getTime());
       logTrade({ chatId: r.chatId, kind: 'mo_rescheduled', payload: { id: r.id, reason: 'kis_reject_holiday', error: msg, newScheduledFor: next.getTime() } });
-      if (ok > 0) {
-        await notify(
-          r.chatId,
-          `📅 ${r.symbolName} — KIS가 휴장/거래정지로 거부. 다음 영업일로 자동 연기.`,
-        );
-        return;
-      }
+      if (ok > 0) return;
     }
     rejectReservation(r.id, `order_failed:${msg}`);
     logTrade({ chatId: r.chatId, kind: 'mo_order_error', payload: { id: r.id, error: msg } });
-    await notify(r.chatId, `❌ 시가매매 발주 실패 — ${r.symbolName}: ${msg}`);
     return;
   }
   attachPositionToReservation(r.id, positionId);
 
-  await notify(
-    r.chatId,
-    `📌 <b>시가매매 발주</b>\n${r.symbolName} (${r.symbolCode})\n시초가 ${ref.toLocaleString()}원 · 수량 ${qty}주\n주문번호 ${orderId} · 체결 확인 중…`,
-  );
-
   // 체결 확인 + 체결가 기준 TP/SL 채우기 (background)
+  // 알림은 pollFill 내부의 매수 체결 알림이 자동 송신 (사용자 정책: 체결만)
   pollFill({
     chatId: r.chatId,
     positionId,
     market: 'KRX',
     orderId,
     expectedQty: qty,
+    symbolName: r.symbolName,
+    note: '시가매매',
   })
     .then((fill) => {
       if (!fill.avgPrice) return;
@@ -240,13 +221,6 @@ async function fireReservation(rId: string): Promise<void> {
       const slPrice = r.slPct ? Math.round(avg * (1 - r.slPct / 100)) : null;
       if (tpPrice !== null || slPrice !== null) {
         setPositionTpSl(positionId, tpPrice, slPrice);
-        const parts: string[] = [];
-        if (tpPrice !== null) parts.push(`TP ${tpPrice.toLocaleString()}원 (+${r.tpPct}%)`);
-        if (slPrice !== null) parts.push(`SL ${slPrice.toLocaleString()}원 (-${r.slPct}%)`);
-        notify(
-          r.chatId,
-          `🎯 ${r.symbolName} TP/SL 설정: ${parts.join(' / ')} (체결가 ${avg.toLocaleString()}원 기준)`,
-        ).catch(() => {});
       }
     })
     .catch((err) => console.error('[scheduler] pollFill failed', err));
@@ -286,10 +260,6 @@ async function tick() {
     for (const r of due) {
       const ok = rescheduleReservation(r.id, nextOpen.getTime());
       if (ok > 0) {
-        await notify(
-          r.chatId,
-          `📅 휴장일 — ${r.symbolName} 예약을 다음 영업일로 자동 연기했습니다 (${nextOpen.toISOString()}).`,
-        );
         logTrade({
           chatId: r.chatId,
           kind: 'mo_rescheduled',

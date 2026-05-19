@@ -15,7 +15,6 @@
 import { callKisApi } from '../mcp/kis.js';
 import { firstOutput, num, parseMcpResult } from '../fastpath/extract.js';
 import { placeBuyOrder, pollFill } from '../execution/order.js';
-import { notify } from '../notify/telegram.js';
 import { getMarketSession } from '../scheduler/calendar.js';
 import { setPositionTpSl, type OrderSpec } from '../db/repo.js';
 import { getStrategyById } from '../db/repo/strategies.js';
@@ -195,7 +194,6 @@ export async function evaluateAndFireStrategies(): Promise<void> {
           payload: { entry: def.entry.type, reason: evalResult.reason, plan },
         });
         updateApplicationStatus(app.id, app.chatId, 'failed');
-        await notify(app.chatId, `❌ [전략] ${strat.name} 발주 실패 (${app.stockCode}): ${msg}`);
         continue;
       }
 
@@ -209,18 +207,15 @@ export async function evaluateAndFireStrategies(): Promise<void> {
         payload: { entry: def.entry.type, reason: evalResult.reason, plan, orderId, positionId },
       });
 
-      await notify(
-        app.chatId,
-        `📌 <b>[전략 발동] ${strat.name}</b>\n${app.stockCode} ${plan.qty}주 매수 — ${evalResult.reason}\n주문번호 ${orderId}`,
-      );
-
-      // 체결가 기준 TP/SL 가격 채우기 (background)
+      // 체결 알림은 pollFill 내부의 매수 체결 알림이 자동 송신
       pollFill({
         chatId: app.chatId,
         positionId,
         market: 'KRX',
         orderId,
         expectedQty: plan.qty,
+        symbolName: app.stockCode,
+        note: `[전략 ${strat.name}]`,
       })
         .then((fill) => {
           if (!fill.avgPrice) return;
@@ -229,13 +224,6 @@ export async function evaluateAndFireStrategies(): Promise<void> {
           const slPrice = plan.sl ? Math.round(avg * (1 - plan.sl / 100)) : null;
           if (tpPrice !== null || slPrice !== null) {
             setPositionTpSl(positionId, tpPrice, slPrice);
-            const parts: string[] = [];
-            if (tpPrice !== null) parts.push(`TP ${tpPrice.toLocaleString()} (+${plan.tp}%)`);
-            if (slPrice !== null) parts.push(`SL ${slPrice.toLocaleString()} (-${plan.sl}%)`);
-            notify(
-              app.chatId,
-              `🎯 [전략] ${strat.name} TP/SL: ${parts.join(' / ')} (체결가 ${avg.toLocaleString()})`,
-            ).catch(() => {});
           }
         })
         .catch((err) => console.error('[strategy-runner] pollFill failed', err));

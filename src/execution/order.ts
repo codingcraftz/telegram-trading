@@ -154,6 +154,10 @@ export async function pollFill(args: {
   market: Market;
   orderId: string;
   expectedQty: number;
+  /** 알림에 표시할 종목명. 없으면 코드만. */
+  symbolName?: string;
+  /** 알림에 표시할 매매 사유 (예: "시가매매 1차"). 없으면 단순 "매수". */
+  note?: string;
   tpPct?: number | null;
   slPct?: number | null;
   intervalMs?: number;
@@ -203,17 +207,19 @@ export async function pollFill(args: {
       const slPrice = args.slPct ? Math.round(avg * (1 - args.slPct / 100)) : null;
       setPositionTpSl(args.positionId, tpPrice, slPrice);
     }
-    const parts: string[] = [`✅ 체결: ${avg.toLocaleString()}원 × ${filled}주`];
-    if (args.tpPct) parts.push(`🎯 TP +${args.tpPct}% (${Math.round(avg * (1 + args.tpPct / 100)).toLocaleString()}원)`);
-    if (args.slPct) parts.push(`🛑 SL -${args.slPct}% (${Math.round(avg * (1 - args.slPct / 100)).toLocaleString()}원)`);
-    await notify(args.chatId, parts.join('\n'));
+    // 매수 체결 알림 (사용자 요구: 매수/매도 체결만)
+    const header = `✅ <b>매수 체결</b> ${args.symbolName ?? ''}`.trim();
+    const body = `${avg.toLocaleString()}원 × ${filled}주`;
+    const sub = args.note ? `\n${args.note}` : '';
+    await notify(args.chatId, `${header}\n${body}${sub}`);
     return { filled, avgPrice: avg };
   }
 
-  // 타임아웃 또는 체결 정보 부족 — KIS에 직접 재조회해서 안전 처리
+  // 타임아웃 또는 체결 정보 부족 — KIS에 직접 재조회해서 안전 처리.
+  // 알림은 보내지 않음 (사용자 정책: 체결 알림만). 대시보드 활동 로그에서 확인.
   const recheck = await recheckFillFromKis(args.orderId);
   if (recheck) {
-    // 잔여가 있음 — 아직 호가창에 살아있는 주문. **이중 매수 방지를 위해 자동 취소.**
+    // 잔여가 있음 — 아직 호가창에 살아있는 주문. 이중 매수 방지 위해 자동 취소.
     try {
       await cancelKrxOrder({
         orgno: recheck.orgno,
@@ -227,14 +233,8 @@ export async function pollFill(args: {
         payload: { orderId: args.orderId, partialFilled: recheck.filled, remaining: recheck.remaining },
       });
       markPositionFailed(args.positionId);
-      const lines = [
-        `⚠️ 체결 안 됨 → 자동 취소 완료`,
-        `주문번호 ${args.orderId}`,
-      ];
-      if (recheck.filled > 0) lines.push(`부분 체결 ${recheck.filled}주 발생 — 잔량 ${recheck.remaining}주 취소`);
-      await notify(args.chatId, lines.join('\n'));
     } catch (err) {
-      // 취소 실패 — 사용자가 직접 처리 필요. 가장 위험한 케이스.
+      // 취소 실패 — 가장 위험한 케이스. 알림 대신 logTrade에 기록 (대시보드에서 확인).
       logTrade({
         chatId: args.chatId,
         positionId: args.positionId,
@@ -242,15 +242,6 @@ export async function pollFill(args: {
         payload: { orderId: args.orderId, error: (err as Error).message },
       });
       markPositionFailed(args.positionId);
-      await notify(
-        args.chatId,
-        [
-          `🚨 미체결 + 자동 취소 실패`,
-          `주문번호 ${args.orderId}`,
-          `KIS에 주문이 살아있을 수 있어요. 주문/대기 화면에서 직접 확인해주세요.`,
-          `사유: ${(err as Error).message}`,
-        ].join('\n'),
-      );
     }
     return { filled: recheck.filled, avgPrice: null };
   }
@@ -263,7 +254,7 @@ export async function pollFill(args: {
     const avgStr = extract(res, 'avg_prvs', 'avg_price', 'ccld_unpr');
     const finalAvg = avgStr ? Number(avgStr) : null;
     if (finalFilled > 0 && finalAvg) {
-      // 폴링 중에 못 잡았는데 사실 체결됐음
+      // 폴링 중에 못 잡았는데 사실 체결됐음 — 체결 알림은 보냄
       markPositionOpen(args.positionId, finalAvg);
       logTrade({ chatId: args.chatId, positionId: args.positionId, kind: 'filled_late', payload: { filled: finalFilled, avg: finalAvg } });
       if (args.tpPct || args.slPct) {
@@ -271,21 +262,15 @@ export async function pollFill(args: {
         const slPrice = args.slPct ? Math.round(finalAvg * (1 - args.slPct / 100)) : null;
         setPositionTpSl(args.positionId, tpPrice, slPrice);
       }
-      await notify(
-        args.chatId,
-        `✅ 체결 확인 (지연): ${finalAvg.toLocaleString()}원 × ${finalFilled}주`,
-      );
+      const header = `✅ <b>매수 체결</b> ${args.symbolName ?? ''}`.trim();
+      await notify(args.chatId, `${header}\n${finalAvg.toLocaleString()}원 × ${finalFilled}주`);
       return { filled: finalFilled, avgPrice: finalAvg };
     }
   } catch {}
 
-  // 진짜 미체결 + 호가에도 없음 (이미 취소되었거나 KIS 거절)
+  // 진짜 미체결 + 호가에도 없음 (이미 취소되었거나 KIS 거절) — 알림 없음
   markPositionFailed(args.positionId);
   logTrade({ chatId: args.chatId, positionId: args.positionId, kind: 'fill_timeout', payload: { orderId: args.orderId } });
-  await notify(
-    args.chatId,
-    `⚠️ 체결 없음. 주문번호 ${args.orderId}\nKIS 호가창에도 없어 자동 정리됐을 가능성이 높습니다.`,
-  );
   return { filled: 0, avgPrice: null };
 }
 

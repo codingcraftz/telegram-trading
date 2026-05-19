@@ -180,7 +180,6 @@ async function fireStage1(
   // 매수가능금액 → 예산 → 1차 비율 적용 → 수량
   const cash = (await fetchOrderableCash(app.stockCode, price.current)) ?? 0;
   if (cash <= 0) {
-    await notify(app.chatId, `❌ [전략] ${strat.name} ${app.stockCode}: 매수가능금액 0`);
     updateApplicationStatus(app.id, app.chatId, 'failed');
     return;
   }
@@ -189,10 +188,6 @@ async function fireStage1(
   const stage1Budget = (budget * stage1Pct) / 100;
   const qty = Math.floor(stage1Budget / price.current);
   if (qty < 1) {
-    await notify(
-      app.chatId,
-      `❌ [전략] ${strat.name} ${app.stockCode}: 1차 수량 0주 (예산 ${stage1Budget.toLocaleString()}원 / 현재가 ${price.current})`,
-    );
     updateApplicationStatus(app.id, app.chatId, 'failed');
     return;
   }
@@ -231,21 +226,22 @@ async function fireStage1(
       payload: { stage: 1, qty },
     });
     updateApplicationStatus(app.id, app.chatId, 'failed');
-    await notify(app.chatId, `❌ [전략] ${strat.name} 1차 발주 실패: ${msg}`);
     return;
   }
 
-  await notify(
-    app.chatId,
-    `📌 <b>[전략 1차] ${strat.name}</b>\n${app.stockCode} ${qty}주 시가 매수\n주문번호 ${orderId} · 체결 확인 중…`,
-  );
-
-  // 체결 확인 후 runtime 업데이트 — 실제 체결 수량(fill.filled) 으로 기록 (부분체결 대응)
-  pollFill({ chatId: app.chatId, positionId, market: 'KRX', orderId, expectedQty: qty })
+  // 체결 알림은 pollFill 내부의 매수 체결 알림이 자동 송신
+  pollFill({
+    chatId: app.chatId,
+    positionId,
+    market: 'KRX',
+    orderId,
+    expectedQty: qty,
+    symbolName: app.stockCode,
+    note: `[전략 ${strat.name}] 1차`,
+  })
     .then((fill) => {
       if (!fill.avgPrice || fill.filled <= 0) {
         updateApplicationStatus(app.id, app.chatId, 'failed');
-        notify(app.chatId, `⚠️ [전략] ${strat.name} 1차 체결 실패 — 수동 확인 필요`).catch(() => {});
         return;
       }
       const actualQty = fill.filled;
@@ -264,11 +260,6 @@ async function fireStage1(
         result: 'success',
         payload: { stage: 1, requestedQty: qty, actualQty, avgPrice: fill.avgPrice, orderId },
       });
-      const partialNote = actualQty < qty ? ` (요청 ${qty}주 중 ${actualQty}주만 체결)` : '';
-      notify(
-        app.chatId,
-        `✅ [전략] ${strat.name} 1차 체결 — 평균 ${fill.avgPrice.toLocaleString()}원 × ${actualQty}주${partialNote}`,
-      ).catch(() => {});
     })
     .catch((err) => console.error('[staged] pollFill stage1 failed', err));
 }
@@ -318,7 +309,10 @@ async function monitorStage1(
       stockCode: app.stockCode, action: 'sell', result: 'success',
       payload: { reason: 'SL', qty: s1.qty, price: cur, orderId: r.orderId },
     });
-    await notify(app.chatId, `🛑 [전략] ${strat.name} SL 도달 — ${s1.qty}주 전량 매도 (${cur.toLocaleString()}원)`);
+    await notify(
+      app.chatId,
+      `✅ <b>매도 체결</b> ${app.stockCode} 🛑 SL\n${cur.toLocaleString()}원 × ${s1.qty}주\n[전략 ${strat.name}]`,
+    );
     setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
     updateApplicationStatus(app.id, app.chatId, 'completed');
     return;
@@ -340,7 +334,7 @@ async function monitorStage1(
     });
     await notify(
       app.chatId,
-      `💰 [전략] ${strat.name} TP1 도달 — ${sellQty}주 부분매도 (${cur.toLocaleString()}원). 2차 진입 캔슬.`,
+      `✅ <b>매도 체결</b> ${app.stockCode} 💰 TP1\n${cur.toLocaleString()}원 × ${sellQty}주\n[전략 ${strat.name}] 2차 진입 캔슬`,
     );
     const nextRuntime: StagedRuntime = {
       ...runtime,
@@ -384,10 +378,7 @@ async function fireStage2(
   const stage2Pct = entry.stages[1]!.entryPct;
   const budget = (baseBudget * stage2Pct) / 100;
   const qty = Math.floor(budget / currentPrice);
-  if (qty < 1) {
-    await notify(app.chatId, `⚠️ [전략] ${strat.name} 2차 수량 0주 — 발주 스킵`);
-    return;
-  }
+  if (qty < 1) return;
 
   const spec: OrderSpec = {
     action: 'buy', market: 'KRX',
@@ -406,23 +397,25 @@ async function fireStage2(
     positionId = out.positionId;
     orderId = out.orderId;
   } catch (err) {
-    const msg = (err as Error).message;
+    console.warn('[staged] stage2 order error', (err as Error).message);
     setApplicationRuntime(app.id, app.chatId, runtime); // 락 해제 → 다음 tick 재시도
-    await notify(app.chatId, `❌ [전략] ${strat.name} 2차 발주 실패: ${msg}`);
     return;
   }
 
-  await notify(
-    app.chatId,
-    `📌 [전략 2차] ${strat.name} — ${qty}주 시가 매수 (트리거 ${currentPrice.toLocaleString()}원)\n주문번호 ${orderId}`,
-  );
-
-  pollFill({ chatId: app.chatId, positionId, market: 'KRX', orderId, expectedQty: qty })
+  // 체결 알림은 pollFill 내부의 매수 체결 알림이 자동 송신
+  pollFill({
+    chatId: app.chatId,
+    positionId,
+    market: 'KRX',
+    orderId,
+    expectedQty: qty,
+    symbolName: app.stockCode,
+    note: `[전략 ${strat.name}] 2차`,
+  })
     .then((fill) => {
       if (!fill.avgPrice || fill.filled <= 0) {
         // 2차 체결 실패 — stage1_filled 로 되돌리고 trigger 재평가
         setApplicationRuntime(app.id, app.chatId, runtime);
-        notify(app.chatId, `⚠️ [전략] ${strat.name} 2차 체결 실패 — 1차 상태로 복귀`).catch(() => {});
         return;
       }
       const actualQty = fill.filled;
@@ -437,13 +430,6 @@ async function fireStage2(
         stockCode: app.stockCode, action: 'buy', result: 'success',
         payload: { stage: 2, requestedQty: qty, actualQty, avgPrice: fill.avgPrice, orderId },
       });
-      const totalQty = runtime.stage1!.qty + actualQty;
-      const totalAvg = (runtime.stage1!.qty * runtime.stage1!.avgPrice + actualQty * fill.avgPrice) / totalQty;
-      const partialNote = actualQty < qty ? ` (요청 ${qty}주 중 ${actualQty}주만 체결)` : '';
-      notify(
-        app.chatId,
-        `✅ [전략] ${strat.name} 2차 체결 — 평균 ${fill.avgPrice.toLocaleString()}원 × ${actualQty}주${partialNote}. 합산 평단 ${Math.round(totalAvg).toLocaleString()}원 × ${totalQty}주`,
-      ).catch(() => {});
     })
     .catch((err) => console.error('[staged] pollFill stage2 failed', err));
 }
@@ -484,7 +470,10 @@ async function monitorExit(
       stockCode: app.stockCode, action: 'sell', result: 'success',
       payload: { reason: 'SL_exit', qty: remaining, price: cur, orderId: r.orderId, avg },
     });
-    await notify(app.chatId, `🛑 [전략] ${strat.name} SL 도달 — 잔량 ${remaining}주 전량 매도 (평단 ${Math.round(avg).toLocaleString()}원 / 현재가 ${cur.toLocaleString()}원)`);
+    await notify(
+      app.chatId,
+      `✅ <b>매도 체결</b> ${app.stockCode} 🛑 SL\n${cur.toLocaleString()}원 × ${remaining}주\n[전략 ${strat.name}] 평단 ${Math.round(avg).toLocaleString()}원`,
+    );
     setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
     updateApplicationStatus(app.id, app.chatId, 'completed');
     return;
@@ -500,7 +489,10 @@ async function monitorExit(
       stockCode: app.stockCode, action: 'sell', result: 'success',
       payload: { reason: 'TP2', qty: remaining, price: cur, orderId: r.orderId, avg },
     });
-    await notify(app.chatId, `💰 [전략] ${strat.name} TP2 도달 — 잔량 ${remaining}주 매도 (${cur.toLocaleString()}원)`);
+    await notify(
+      app.chatId,
+      `✅ <b>매도 체결</b> ${app.stockCode} 💰 TP2\n${cur.toLocaleString()}원 × ${remaining}주\n[전략 ${strat.name}]`,
+    );
     setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
     updateApplicationStatus(app.id, app.chatId, 'completed');
     return;
@@ -518,7 +510,10 @@ async function monitorExit(
         stockCode: app.stockCode, action: 'sell', result: 'success',
         payload: { reason: 'TP1_post_stage2', qty: sellQty, price: cur, orderId: r.orderId, avg },
       });
-      await notify(app.chatId, `💰 [전략] ${strat.name} TP1 도달 (2차 후) — ${sellQty}주 매도 (${cur.toLocaleString()}원)`);
+      await notify(
+        app.chatId,
+        `✅ <b>매도 체결</b> ${app.stockCode} 💰 TP1\n${cur.toLocaleString()}원 × ${sellQty}주\n[전략 ${strat.name}]`,
+      );
       const next: StagedRuntime = {
         ...runtime,
         phase: 'tp1_done',

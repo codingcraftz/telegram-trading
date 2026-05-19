@@ -20,7 +20,6 @@ import {
 import { handleOrders, handleOrdersFilled } from '../api/orders.js';
 import { handleOrderable } from '../api/orderable.js';
 import { handleQuote, handleQuotes, handleSearch } from '../api/quote.js';
-import { handleChartApi } from '../api/chart.js';
 import { handleCandles } from '../api/candles.js';
 import { handleIndices } from '../api/indices.js';
 import { handleRanking } from '../api/ranking.js';
@@ -152,15 +151,19 @@ const HTML = (s: Settings) => {
 
   <form id="f">
     <div class="card">
-      <h2>🤖 텔레그램</h2>
+      <h2>🔔 텔레그램 알림 <span class="pill">선택</span></h2>
+      <div class="hint" style="margin-bottom:12px;">
+        매수 체결 / 매도 체결 시에만 알림이 발송됩니다. 매매 자체는 텔레그램에서 안 되며 대시보드에서만 가능합니다.
+        비워두면 알림 없이 동작합니다.
+      </div>
       <div class="grid">
-        <label>봇 토큰
+        <label>봇 토큰 (선택)
           <input type="password" name="TELEGRAM_BOT_TOKEN" value="${s.TELEGRAM_BOT_TOKEN ?? ''}" placeholder="1234567890:ABC..." />
-          <div class="hint">@BotFather → /newbot</div>
+          <div class="hint">@BotFather → /newbot 로 발급. 비우면 알림 비활성.</div>
         </label>
-        <label>허용 chat_id (콤마 구분)
+        <label>알림 받을 chat_id (선택)
           <input type="text" name="ALLOWED_CHAT_IDS" value="${s.ALLOWED_CHAT_IDS ?? ''}" placeholder="12345678" />
-          <div class="hint">@userinfobot → /start 로 본인 ID 확인</div>
+          <div class="hint">@userinfobot → /start 로 본인 ID 확인. 콤마로 여러 명 등록 가능.</div>
         </label>
       </div>
     </div>
@@ -366,7 +369,6 @@ export function startDashboard(port = 8080): void {
   app.get('/api/quote', handleQuote);
   app.get('/api/quotes', handleQuotes); // batch (실시간 폴링용)
   app.get('/api/search', handleSearch);
-  app.get('/api/chart', handleChartApi); // (legacy PNG — 텔레그램 봇용)
   app.get('/api/candles', handleCandles); // 인터랙티브 차트용 JSON
   app.get('/api/indices', handleIndices); // 코스피·코스닥·나스닥·다우
   app.get('/api/ranking', handleRanking); // 거래대금/거래량/상승률/하락률 순위

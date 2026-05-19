@@ -94,7 +94,7 @@ export async function closePosition(args: {
       kind: 'close_error',
       payload: { error: (err as Error).message },
     });
-    await notify(pos.chatId, `❌ 청산 실패: ${(err as Error).message}`);
+    // 청산 실패 알림은 보내지 않음 (정책: 체결만)
     return;
   }
 
@@ -149,10 +149,13 @@ async function pollClose(args: {
           kind: 'closed',
           payload: { filled, avg, pnl, reason: args.reason },
         });
+        const pos2 = getPosition(args.positionId);
+        const name = pos2?.symbolName ?? '';
         const tag = args.reason === 'tp' ? '🎯 TP' : args.reason === 'sl' ? '🛑 SL' : '✋ 수동';
+        const pnlStr = `${pnl >= 0 ? '+' : ''}${Math.round(pnl).toLocaleString()}원`;
         await notify(
           args.chatId,
-          `${tag} 청산: ${avg.toLocaleString()} × ${filled}, 실현 ${pnl >= 0 ? '+' : ''}${Math.round(pnl).toLocaleString()}`,
+          `✅ <b>매도 체결</b> ${name} ${tag}\n${avg.toLocaleString()}원 × ${filled}주 · 손익 ${pnlStr}`,
         );
         return;
       }
@@ -160,5 +163,5 @@ async function pollClose(args: {
       console.warn('[pollClose] error', (err as Error).message);
     }
   }
-  await notify(args.chatId, `⚠️ 청산 주문 체결 확인 타임아웃: ${args.orderId}`);
+  // 청산 타임아웃 알림 제거 — 대시보드 활동 로그에서 확인
 }
