@@ -4,6 +4,7 @@ import { RouterLink, useRouter } from 'vue-router';
 import { CircleCheck, CircleX, Info, ExternalLink, Smartphone, Sparkles, Plus, ChevronRight, KeyRound, Bell, Download, X, RefreshCw, Rocket } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
+import BottomSheet from '@/components/ui/BottomSheet.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import { api } from '@/api/client';
 import { usePrefs, type Mode, type Theme } from '@/stores/prefs';
@@ -21,7 +22,7 @@ async function onInstallClick() {
 
 const prefs = usePrefs();
 
-const version = ref<{ sha: string; buildDate: string } | null>(null);
+const version = ref<{ version: string; sha: string; buildDate: string } | null>(null);
 const keys = ref<{
   tradingMode: 'paper' | 'real';
   paperKeys: boolean;
@@ -33,9 +34,10 @@ const keys = ref<{
 
 const strategyCount = ref<number>(0);
 
-// 텔레그램 알림 설정 — POST /api/settings 재사용
+// 텔레그램 알림 설정 — POST /api/settings 재사용. 시트로 분리.
 const telegram = ref({ TELEGRAM_BOT_TOKEN: '', ALLOWED_CHAT_IDS: '' });
 const savingTelegram = ref(false);
+const telegramSheetOpen = ref(false);
 
 async function saveTelegram() {
   savingTelegram.value = true;
@@ -163,20 +165,20 @@ onMounted(() => {
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <p class="text-[11px] text-muted-foreground">현재 버전</p>
-            <p class="mt-0.5 font-mono text-sm font-bold tabular-nums">
-              {{ version?.sha ?? '—' }}
+            <p class="mt-0.5 text-base font-bold tabular-nums">
+              v{{ version?.version ?? '—' }}
             </p>
             <p v-if="buildDate" class="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
-              빌드 {{ buildDate }}
+              {{ buildDate }}
             </p>
           </div>
           <div v-if="updateInfo" class="text-right min-w-0">
             <p class="text-[11px] text-muted-foreground">최신 버전</p>
             <p
-              class="mt-0.5 font-mono text-sm font-bold tabular-nums"
+              class="mt-0.5 text-base font-bold tabular-nums"
               :class="updateInfo.updateAvailable ? 'text-primary' : ''"
             >
-              {{ updateInfo.latest || '—' }}
+              {{ updateInfo.updateAvailable ? '업데이트 있음' : '최신' }}
             </p>
             <p v-if="updateCheckedLabel" class="mt-0.5 text-[10px] text-muted-foreground">
               {{ updateCheckedLabel }}
@@ -216,20 +218,7 @@ onMounted(() => {
     </Card>
 
     <!-- PWA 앱 설치 — canShowInstallButton 일 때만 -->
-    <Card v-if="pwa.canShowInstallButton.value">
-      <template #header>
-        <div class="flex items-center gap-2">
-          <Download class="h-4 w-4 text-primary" />
-          <h3 class="text-sm font-bold tracking-tight">📲 홈 화면에 앱으로 설치</h3>
-        </div>
-      </template>
-      <p class="-mt-1 mb-3 text-[11px] leading-relaxed text-muted-foreground">
-        홈 화면에 추가하면 브라우저 주소창 없이 전체 화면으로 빠르게 열 수 있어요.
-      </p>
-      <Button variant="primary" size="md" class="w-full" @click="onInstallClick">
-        앱 설치하기
-      </Button>
-    </Card>
+    <!-- PWA 설치 카드 — 사용자 요청으로 제거 (iOS 수동 안내 모달은 PWA prompt 처리 위해 유지). -->
 
     <!-- iOS Safari 수동 안내 모달 -->
     <div
@@ -349,43 +338,23 @@ onMounted(() => {
       </button>
     </Card>
 
-    <!-- 텔레그램 알림 -->
+    <!-- 텔레그램 알림 — 메뉴 항목 (단순). 클릭 시 시트로 설명 + 입력. -->
     <Card>
-      <template #header>
-        <div class="flex items-center gap-2">
-          <Bell class="h-4 w-4 text-primary" />
-          <h3 class="text-sm font-bold tracking-tight">텔레그램 알림 <span class="ml-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">선택</span></h3>
+      <button
+        class="-mx-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-accent"
+        @click="telegramSheetOpen = true"
+      >
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
+          <Bell class="h-5 w-5 text-primary" />
         </div>
-      </template>
-      <p class="-mt-1 mb-3 text-[11px] leading-relaxed text-muted-foreground">
-        매수 체결 / 매도 체결 시에만 알림이 발송돼요. 매매 자체는 텔레그램에서 안 되고 이 앱에서만 가능합니다.
-        비워두면 알림 없이 동작.
-      </p>
-      <div class="space-y-2.5">
-        <label class="block">
-          <span class="text-[11px] font-semibold text-muted-foreground">봇 토큰</span>
-          <input
-            v-model="telegram.TELEGRAM_BOT_TOKEN"
-            type="password"
-            placeholder="1234567890:ABC..."
-            class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-          <span class="mt-1 block text-[10px] text-muted-foreground">@BotFather → /newbot 로 발급.</span>
-        </label>
-        <label class="block">
-          <span class="text-[11px] font-semibold text-muted-foreground">알림 받을 chat_id</span>
-          <input
-            v-model="telegram.ALLOWED_CHAT_IDS"
-            type="text"
-            placeholder="12345678"
-            class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-          <span class="mt-1 block text-[10px] text-muted-foreground">@userinfobot → /start 로 본인 ID 확인. 콤마로 여러 명 등록 가능.</span>
-        </label>
-        <Button variant="secondary" size="sm" class="w-full" :disabled="savingTelegram" @click="saveTelegram">
-          {{ savingTelegram ? '저장 중…' : '저장하고 봇 재시작' }}
-        </Button>
-      </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-semibold">텔레그램 알림 설정</p>
+          <p class="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+            매수/매도 체결 시 텔레그램으로 알림 받기 (선택)
+          </p>
+        </div>
+        <ChevronRight class="h-4 w-4 shrink-0 text-muted-foreground" />
+      </button>
     </Card>
 
 
@@ -411,6 +380,68 @@ onMounted(() => {
       </button>
     </Card>
 
-    <!-- 버전 + 업데이트 -->
+    <!-- 텔레그램 알림 시트 -->
+    <BottomSheet :open="telegramSheetOpen" title="텔레그램 알림 설정" @close="telegramSheetOpen = false">
+      <div class="space-y-4">
+        <p class="text-[12px] leading-relaxed text-muted-foreground">
+          매수/매도 <b class="text-foreground">체결</b> 시 텔레그램으로 알림을 보내드려요.
+          매매 자체는 텔레그램이 아니라 이 앱에서만 가능합니다. 비워두면 알림 없이 동작.
+        </p>
+
+        <!-- 단계 안내 -->
+        <ol class="space-y-2 text-[12px] leading-relaxed">
+          <li class="flex gap-2">
+            <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">1</span>
+            <span>
+              텔레그램에서 <b>@BotFather</b> 를 검색해 대화 시작 →
+              <code class="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">/newbot</code> 입력 → 봇 이름 정하면
+              <b>봇 토큰</b>이 발급돼요.
+            </span>
+          </li>
+          <li class="flex gap-2">
+            <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">2</span>
+            <span>
+              <b>@userinfobot</b> 을 검색해 <code class="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">/start</code> →
+              본인 chat ID 가 나와요. 여러 명한테 알림 받으려면 쉼표로 이어 쓰기.
+            </span>
+          </li>
+          <li class="flex gap-2">
+            <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">3</span>
+            <span>위에서 받은 두 값을 아래에 입력하고 <b>저장</b>.</span>
+          </li>
+        </ol>
+
+        <div class="space-y-2.5 border-t border-border/60 pt-4">
+          <label class="block">
+            <span class="text-[11px] font-semibold text-muted-foreground">봇 토큰</span>
+            <input
+              v-model="telegram.TELEGRAM_BOT_TOKEN"
+              type="password"
+              placeholder="8123456789:AAEx_abcDEFghIJKL..."
+              class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </label>
+          <label class="block">
+            <span class="text-[11px] font-semibold text-muted-foreground">알림 받을 chat ID</span>
+            <input
+              v-model="telegram.ALLOWED_CHAT_IDS"
+              type="text"
+              placeholder="987654321"
+              class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+            <span class="mt-1 block text-[10px] text-muted-foreground">여러 명일 땐 쉼표로 — 예: 987654321,123456789</span>
+          </label>
+          <Button
+            variant="primary"
+            size="md"
+            class="w-full"
+            :disabled="savingTelegram"
+            @click="saveTelegram"
+          >
+            {{ savingTelegram ? '저장 중…' : '저장하고 봇 재시작' }}
+          </Button>
+        </div>
+      </div>
+    </BottomSheet>
   </div>
 </template>

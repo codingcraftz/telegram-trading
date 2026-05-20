@@ -62,6 +62,14 @@ const ENV_PATH = process.env.ENV_PATH ?? '/app/data/runtime.env';
 const UPDATE_SENTINEL = '/app/data/.update-now';
 const GIT_SHA = process.env.GIT_SHA ?? 'dev';
 const BUILD_DATE = process.env.BUILD_DATE ?? '';
+// 사용자에게 보여줄 의미 있는 버전 (package.json 의 version 필드). Dockerfile 의
+// runtime stage 가 package.json 을 /app 으로 복사하므로 process.cwd() 기준에서 읽음.
+const APP_VERSION: string = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync('package.json', 'utf-8')) as { version?: string };
+    return pkg.version ?? '0.0.0';
+  } catch { return '0.0.0'; }
+})();
 const REPO_API = 'https://api.github.com/repos/codingcraftz/telegram-trading/commits/main';
 
 type Settings = {
@@ -204,7 +212,7 @@ export function startDashboard(port = 8080): void {
 
   // 현재 봇 버전 (업데이트 폴링용)
   app.get('/api/version', (c) =>
-    c.json({ sha: shortSha(GIT_SHA), buildDate: BUILD_DATE }),
+    c.json({ version: APP_VERSION, sha: shortSha(GIT_SHA), buildDate: BUILD_DATE }),
   );
 
   // ===== 데이터 조회 API (PWA용) =====

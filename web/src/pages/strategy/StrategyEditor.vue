@@ -449,18 +449,13 @@ async function removeApp(appId: string) {
           v-model="name"
           type="text"
           maxlength="80"
-          placeholder="예: 시가매매 100만원"
+          placeholder="예: 단기 스윙 5/10"
           class="w-full rounded-lg bg-muted/40 px-3 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
         />
         <p v-if="errors.name" class="mt-1 text-[10px] text-destructive">{{ errors.name }}</p>
       </label>
-      <label class="mt-3 flex items-center gap-2">
-        <input v-model="active" type="checkbox" class="peer sr-only" />
-        <span class="relative inline-flex h-5 w-9 cursor-pointer items-center rounded-full bg-muted transition peer-checked:bg-primary">
-          <span class="inline-block h-4 w-4 transform rounded-full bg-card shadow transition" :class="active ? 'translate-x-[1.125rem]' : 'translate-x-0.5'" />
-        </span>
-        <span class="text-sm">활성화</span>
-      </label>
+      <!-- 활성화 토글은 editor 에서 제거 — 만들 때 default ON.
+           활성/비활성은 '내 전략' 페이지의 카드 토글에서 관리. -->
     </Card>
 
     <!-- 2. 진입 조건 -->

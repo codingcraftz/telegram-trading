@@ -71,7 +71,7 @@ export const api = {
   asking: (code: string) => request<AskingResponse>(`/api/asking?code=${code}`),
   watchlist: () => request<WatchlistResponse>('/api/watchlist'),
   strategy: () => request<StrategyResponse>('/api/strategy'),
-  version: () => request<{ sha: string; buildDate: string }>('/api/version'),
+  version: () => request<{ version: string; sha: string; buildDate: string }>('/api/version'),
   checkUpdate: () =>
     request<{
       current: string;
