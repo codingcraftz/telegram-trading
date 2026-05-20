@@ -67,7 +67,8 @@ const THEME = {
   volume: { up: 'rgba(226, 55, 68, 0.45)', down: 'rgba(30, 136, 229, 0.45)' },
   lines: { entry: '#f59e0b', sl: '#3b82f6', tp: '#22c55e' },
   // 이동평균선 색상 — KIS 차트 동일 매핑.
-  ma: { 5: '#e23744', 20: '#a855f7', 60: '#1e88e5', 120: '#22c55e', default: '#94a3b8' } as Record<number, string>,
+  ma: { 5: '#e23744', 20: '#a855f7', 60: '#1e88e5', 120: '#22c55e' } as Record<number, string>,
+  maDefault: '#94a3b8',
 };
 
 function smaSeries(candles: TradeCandle[], period: number): LineData[] {
@@ -295,7 +296,7 @@ function rebuildMaSeries(candles: TradeCandle[]) {
   // periods prop 으로 새로 생성
   for (const p of props.movingAverages) {
     if (!Number.isFinite(p) || p <= 1) continue;
-    const color = THEME.ma[p] ?? THEME.ma.default!;
+    const color = THEME.ma[p] ?? THEME.maDefault;
     const s = chart.addSeries(LineSeries, {
       color,
       lineWidth: 1,
