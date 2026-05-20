@@ -3,7 +3,7 @@
 // 진입 즉시 마지막 본 종목 자동 선택. 상단 검색바로 종목 전환.
 // 좌:호가 / 우:매매 폼 (지정가/시장가, 가격±, 수량±, TP/SL, 발주).
 
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, onActivated, watch, nextTick } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
 import { Search, Clock, X, NotebookPen, Plus } from 'lucide-vue-next';
 import OrderBook from '@/components/OrderBook.vue';
@@ -317,17 +317,25 @@ const orderAmount = computed(() => {
   return p > 0 && qty.value > 0 ? p * qty.value : 0;
 });
 
+async function ensureAutoCode() {
+  if (hasCode.value) return;
+  await nextTick();
+  const auto = pickAutoCode();
+  if (auto) pickStock(auto);
+}
+
 onMounted(async () => {
   await loadBalance();
   loadStrategies();
   ordersStore.subscribe(8000);
   watchlist.subscribe();
-  // URL ?code 없으면 마지막 본 종목 / 보유 / 관심 / 디폴트로 자동 진입
-  if (!hasCode.value) {
-    await nextTick();
-    const auto = pickAutoCode();
-    if (auto) pickStock(auto);
-  }
+  await ensureAutoCode();
+});
+
+// KeepAlive 로 캐시된 페이지가 재진입할 때 — onMounted 안 불림. ?code 비어있으면
+// 마지막 본 종목으로 자동 redirect (탭 전환 시 빈 화면 방지).
+onActivated(() => {
+  ensureAutoCode();
 });
 onUnmounted(() => {
   if (quoteTimer) clearInterval(quoteTimer);
