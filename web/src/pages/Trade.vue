@@ -340,7 +340,7 @@ onUnmounted(() => {
   <!-- pt-2: 상단 NavBar 와 헤더 사이 여백. overscroll-behavior: contain 으로
        pull-to-refresh 같은 outer 드래그만 차단 (input 키보드 시 viewport 스크롤은 유지). -->
   <div
-    class="space-y-3 pt-2"
+    class="space-y-3 pt-2 pb-6"
     style="overscroll-behavior: contain;"
   >
     <!-- 상단 탭 — 주문 / 거래 (대기+체결 통합) -->
