@@ -156,63 +156,33 @@ onMounted(() => {
       <h2 class="text-lg font-bold tracking-tight">설정</h2>
     </div>
 
-    <!-- 버전 정보 + 업데이트 — 최상단 -->
-    <Card>
-      <template #header>
-        <h3 class="text-sm font-bold tracking-tight">버전 정보</h3>
-      </template>
-      <div class="space-y-3">
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="text-[11px] text-muted-foreground">현재 버전</p>
-            <p class="mt-0.5 text-base font-bold tabular-nums">
-              v{{ version?.version ?? '—' }}
-            </p>
-            <p v-if="buildDate" class="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
-              {{ buildDate }}
-            </p>
-          </div>
-          <div v-if="updateInfo" class="text-right min-w-0">
-            <p class="text-[11px] text-muted-foreground">최신 버전</p>
-            <p
-              class="mt-0.5 text-base font-bold tabular-nums"
-              :class="updateInfo.updateAvailable ? 'text-primary' : ''"
-            >
-              {{ updateInfo.updateAvailable ? '업데이트 있음' : '최신' }}
-            </p>
-            <p v-if="updateCheckedLabel" class="mt-0.5 text-[10px] text-muted-foreground">
-              {{ updateCheckedLabel }}
-            </p>
-          </div>
+    <!-- 버전 정보 — 한 줄 row (최상단). 새 버전 있으면 우측 업데이트 버튼 활성. -->
+    <Card class="!py-2.5 !px-3">
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0 flex items-baseline gap-2">
+          <span class="text-[10px] text-muted-foreground">버전</span>
+          <span class="text-sm font-bold tabular-nums">v{{ version?.version ?? '—' }}</span>
+          <span v-if="updateInfo?.updateAvailable" class="text-[10px] font-semibold text-primary">
+            · 새 버전 있음
+          </span>
         </div>
-
-        <div
-          v-if="updateInfo?.updateAvailable && updateInfo.latestMessage"
-          class="rounded-lg bg-primary/10 px-3 py-2.5 text-[11px] leading-relaxed"
-        >
-          <p class="font-semibold text-primary">새 업데이트가 있어요</p>
-          <p class="mt-1 break-words text-foreground/80">{{ updateInfo.latestMessage }}</p>
-        </div>
-
-        <div class="grid grid-cols-2 gap-2">
-          <Button
-            variant="secondary"
-            size="md"
+        <div class="flex items-center gap-1.5">
+          <button
+            class="rounded-md p-1.5 text-muted-foreground transition hover:bg-accent disabled:opacity-40"
             :disabled="updateChecking"
+            aria-label="업데이트 확인"
             @click="checkForUpdate(false)"
           >
-            <RefreshCw class="mr-1 h-4 w-4" :class="updateChecking ? 'animate-spin' : ''" />
-            확인
-          </Button>
-          <Button
-            variant="primary"
-            size="md"
-            :disabled="!updateInfo?.updateAvailable || updateRunning"
+            <RefreshCw class="h-3.5 w-3.5" :class="updateChecking ? 'animate-spin' : ''" />
+          </button>
+          <button
+            v-if="updateInfo?.updateAvailable"
+            class="rounded-md bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground transition disabled:opacity-40"
+            :disabled="updateRunning"
             @click="runUpdate"
           >
-            <Rocket class="mr-1 h-4 w-4" />
             {{ updateRunning ? '요청 중…' : '업데이트' }}
-          </Button>
+          </button>
         </div>
       </div>
     </Card>
@@ -244,68 +214,42 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 모드 & 색상 -->
+    <!-- 화면 색 — 밝게/어둡게/자동 -->
     <Card>
       <template #header>
-        <h3 class="text-sm font-bold tracking-tight">기본 설정</h3>
+        <h3 class="text-sm font-bold tracking-tight">화면 색</h3>
       </template>
-      <div class="space-y-4">
-        <div>
-          <p class="mb-2 text-[11px] font-medium text-muted-foreground">사용 모드</p>
-          <SegmentedControl
-            :model-value="prefs.mode"
-            :options="[
-              { value: 'easy' as Mode, label: '쉬운 모드' },
-              { value: 'advanced' as Mode, label: '고급 모드' },
-            ]"
-            @update:model-value="(v) => (prefs.mode = v)"
-          />
-          <p class="mt-1.5 text-[11px] text-muted-foreground">
-            {{ prefs.mode === 'easy' ? '낯선 용어 옆에 작은 도움말이 함께 떠요.' : '도움말을 숨기고 화면을 간결하게 보여드려요.' }}
+      <SegmentedControl
+        :model-value="prefs.theme"
+        :options="[
+          { value: 'light' as Theme, label: '밝게' },
+          { value: 'dark' as Theme, label: '어둡게' },
+          { value: 'system' as Theme, label: '자동' },
+        ]"
+        @update:model-value="(v) => (prefs.theme = v)"
+      />
+    </Card>
+
+    <!-- 내 전략 — 단일 메뉴 항목. 추가/편집/삭제는 내 전략 페이지 안에서. -->
+    <Card>
+      <RouterLink
+        to="/more/strategy"
+        class="-mx-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-accent"
+      >
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
+          <Sparkles class="h-5 w-5 text-primary" />
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-semibold">내 전략</p>
+          <p class="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+            {{ strategyCount > 0 ? `${strategyCount}개 저장됨 — 활성/편집/추가` : '전략 만들기' }}
           </p>
         </div>
-        <div>
-          <p class="mb-2 text-[11px] font-medium text-muted-foreground">화면 색</p>
-          <SegmentedControl
-            :model-value="prefs.theme"
-            :options="[
-              { value: 'light' as Theme, label: '밝게' },
-              { value: 'dark' as Theme, label: '어둡게' },
-              { value: 'system' as Theme, label: '자동' },
-            ]"
-            @update:model-value="(v) => (prefs.theme = v)"
-          />
-        </div>
-      </div>
+        <ChevronRight class="h-4 w-4 shrink-0 text-muted-foreground" />
+      </RouterLink>
     </Card>
 
-    <!-- 전략 관리 -->
-    <Card>
-      <template #header>
-        <h3 class="text-sm font-bold tracking-tight">전략 관리</h3>
-      </template>
-      <div class="-mx-1 divide-y divide-border">
-        <RouterLink
-          to="/more/strategy"
-          class="flex items-center gap-3 px-1 py-2.5 transition hover:bg-accent rounded-md"
-        >
-          <Sparkles class="h-4 w-4 text-primary" />
-          <span class="flex-1 text-sm font-medium">내 전략</span>
-          <span class="text-[11px] text-muted-foreground tabular-nums">{{ strategyCount }}개</span>
-          <ChevronRight class="h-4 w-4 text-muted-foreground" />
-        </RouterLink>
-        <RouterLink
-          to="/more/strategy/new"
-          class="flex items-center gap-3 px-1 py-2.5 transition hover:bg-accent rounded-md"
-        >
-          <Plus class="h-4 w-4 text-primary" />
-          <span class="flex-1 text-sm font-medium">새 전략 만들기</span>
-          <ChevronRight class="h-4 w-4 text-muted-foreground" />
-        </RouterLink>
-      </div>
-    </Card>
-
-    <!-- 연결 상태 -->
+    <!-- 연결 상태 — 모의/실전 키 연결 유무. KIS 키 입력은 별도 카드로 분리. -->
     <Card v-if="keys">
       <template #header>
         <h3 class="text-sm font-bold tracking-tight">연결 상태</h3>
@@ -320,25 +264,29 @@ onMounted(() => {
           </span>
         </li>
         <li class="flex items-center justify-between">
-          <span class="text-muted-foreground">매매</span>
-          <span class="font-semibold">{{ keys.tradingMode === 'real' ? '실전' : '모의 모드' }}</span>
+          <span class="text-muted-foreground">모의투자 키</span>
+          <span class="flex items-center gap-1 font-semibold" :class="keys.paperKeys ? 'text-up' : 'text-muted-foreground'">
+            <CircleCheck v-if="keys.paperKeys" class="h-4 w-4" />
+            <CircleX v-else class="h-4 w-4" />
+            {{ keys.paperKeys ? '연결됨' : '없음' }}
+          </span>
+        </li>
+        <li class="flex items-center justify-between">
+          <span class="text-muted-foreground">실전투자 키</span>
+          <span class="flex items-center gap-1 font-semibold" :class="keys.realKeys ? 'text-up' : 'text-muted-foreground'">
+            <CircleCheck v-if="keys.realKeys" class="h-4 w-4" />
+            <CircleX v-else class="h-4 w-4" />
+            {{ keys.realKeys ? '연결됨' : '없음' }}
+          </span>
+        </li>
+        <li class="flex items-center justify-between">
+          <span class="text-muted-foreground">현재 매매 모드</span>
+          <span class="font-semibold">{{ keys.tradingMode === 'real' ? '실전' : '모의' }}</span>
         </li>
       </ul>
-      <div class="mt-3 flex items-start gap-2 rounded-xl bg-muted/40 px-3 py-2.5 text-[11px] text-muted-foreground">
-        <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        <span>{{ keys.notice }}</span>
-      </div>
-      <button
-        class="-mx-1 mt-3 flex w-full items-center gap-2 rounded-lg bg-muted/40 px-3 py-2.5 text-sm transition hover:bg-muted"
-        @click="gotoOnboarding"
-      >
-        <KeyRound class="h-4 w-4 text-primary" />
-        <span class="flex-1 text-left font-medium">KIS 키 / 모드 다시 입력</span>
-        <ChevronRight class="h-4 w-4 text-muted-foreground" />
-      </button>
     </Card>
 
-    <!-- 텔레그램 알림 — 메뉴 항목 (단순). 클릭 시 시트로 설명 + 입력. -->
+    <!-- 텔레그램 알림 — 메뉴 항목. 클릭 시 시트로 설명 + 입력. -->
     <Card>
       <button
         class="-mx-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-accent"
@@ -351,6 +299,25 @@ onMounted(() => {
           <p class="text-sm font-semibold">텔레그램 알림 설정</p>
           <p class="mt-0.5 text-[11px] leading-snug text-muted-foreground">
             매수/매도 체결 시 텔레그램으로 알림 받기 (선택)
+          </p>
+        </div>
+        <ChevronRight class="h-4 w-4 shrink-0 text-muted-foreground" />
+      </button>
+    </Card>
+
+    <!-- KIS 키 다시 입력 — 별도 메뉴 항목. -->
+    <Card>
+      <button
+        class="-mx-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-accent"
+        @click="gotoOnboarding"
+      >
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
+          <KeyRound class="h-5 w-5 text-primary" />
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-semibold">KIS 키 다시 입력</p>
+          <p class="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+            한국투자증권 API key·계좌·모드 변경
           </p>
         </div>
         <ChevronRight class="h-4 w-4 shrink-0 text-muted-foreground" />
