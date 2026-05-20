@@ -153,7 +153,8 @@ const totalCost = computed(() =>
             <div class="min-w-0">
               <p class="truncate text-sm font-bold tracking-tight">{{ h.name }}</p>
               <p class="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
-                {{ h.code }} · {{ h.qty }}주
+                {{ h.code }} · {{ h.qty }}주 · 총매입
+                <span class="font-semibold text-foreground/80">{{ fmtKrw(Math.round(h.avg * h.qty)) }}</span>
               </p>
             </div>
             <div class="text-right shrink-0">
@@ -171,13 +172,13 @@ const totalCost = computed(() =>
               </p>
             </div>
           </div>
-          <!-- 하단 — 매입금액 / 평가액 좌우 -->
+          <!-- 하단 — 매입단가 / 현재가 (1주당) -->
           <div class="mt-2 flex items-center justify-between border-t border-border/60 pt-2 text-[11px]">
             <span class="text-muted-foreground">
-              매입금액 <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(Math.round(h.avg * h.qty)) }}</span>
+              매입단가 <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(h.avg) }}</span>
             </span>
             <span class="text-muted-foreground">
-              평가액 <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(Math.round(h.cur * h.qty)) }}</span>
+              현재가 <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(h.cur) }}</span>
             </span>
           </div>
         </button>
