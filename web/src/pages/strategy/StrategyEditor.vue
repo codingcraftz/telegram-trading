@@ -785,30 +785,9 @@ async function removeApp(appId: string) {
       </div>
     </Card>
 
-    <!-- 6. 유효 기간 -->
-    <Card>
-      <template #header><h3 class="text-sm font-bold tracking-tight">언제까지 발동할까요?</h3></template>
-      <div class="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          class="rounded-xl border-2 p-3 text-left transition"
-          :class="validityType === 'once' ? 'border-primary bg-primary/5' : 'border-transparent bg-muted/40'"
-          @click="validityType = 'once'"
-        >
-          <p class="text-sm font-semibold">1회성</p>
-          <p class="mt-0.5 text-[11px] leading-snug text-muted-foreground">1번 발동 후<br />자동 종료</p>
-        </button>
-        <button
-          type="button"
-          class="rounded-xl border-2 p-3 text-left transition"
-          :class="validityType === 'forever' ? 'border-primary bg-primary/5' : 'border-transparent bg-muted/40'"
-          @click="validityType = 'forever'"
-        >
-          <p class="text-sm font-semibold">영구</p>
-          <p class="mt-0.5 text-[11px] leading-snug text-muted-foreground">조건 맞을 때마다<br />매번 발동</p>
-        </button>
-      </div>
-    </Card>
+    <!-- 6. 유효 기간 — 사용자 정책: 전략은 한번 만들면 계속 사용. 활성/비활성으로만 노출 제어.
+         validityType 은 항상 'forever'. UI 노출 X (코드 호환 위해 ref 만 유지). -->
+    <!-- (구 1회성/영구 토글 제거됨) -->
 
     <!-- 적용된 종목 (수정 모드만) -->
     <Card v-if="isEdit">
