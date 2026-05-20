@@ -471,46 +471,50 @@ onUnmounted(() => {
 
         <!-- 일반 전략은 매수 폼 아래 별도 섹션으로 분리됨. -->
 
-        <!-- TP / SL — 한 줄 가로 배치 (매수만) -->
-        <div v-if="side === 'buy'" class="flex items-center justify-between gap-3 rounded-md bg-muted/30 px-2.5 py-2 text-xs">
-          <!-- TP -->
-          <div class="flex items-center gap-1.5">
-            <button
-              type="button"
-              class="relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition"
-              :class="tpEnabled ? 'bg-up' : 'bg-muted-foreground/30'"
-              @click="tpEnabled = !tpEnabled"
-            >
-              <span
-                class="inline-block h-3 w-3 transform rounded-full bg-white shadow transition"
-                :style="{ transform: tpEnabled ? 'translateX(14px)' : 'translateX(2px)' }"
-              />
-            </button>
-            <span class="font-bold text-up">TP</span>
+        <!-- TP / SL — 두 줄 (모바일 폭 좁아 한 줄 오버플로우 → 컬럼) -->
+        <div v-if="side === 'buy'" class="space-y-1.5 rounded-md bg-muted/30 px-2.5 py-2 text-xs">
+          <!-- TP row -->
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition"
+                :class="tpEnabled ? 'bg-up' : 'bg-muted-foreground/30'"
+                @click="tpEnabled = !tpEnabled"
+              >
+                <span
+                  class="inline-block h-3 w-3 transform rounded-full bg-white shadow transition"
+                  :style="{ transform: tpEnabled ? 'translateX(14px)' : 'translateX(2px)' }"
+                />
+              </button>
+              <span class="font-bold text-up">TP</span>
+            </div>
             <span class="flex items-center text-muted-foreground">
               +<input v-model.number="tpPct" type="number" min="0.1" max="100" step="0.1"
                 :disabled="!tpEnabled"
-                class="w-9 rounded border border-border bg-card px-1 py-0.5 text-right text-xs tabular-nums disabled:opacity-40" />%
+                class="w-10 rounded border border-border bg-card px-1 py-0.5 text-right text-xs tabular-nums disabled:opacity-40" />%
             </span>
           </div>
-          <!-- SL -->
-          <div class="flex items-center gap-1.5">
-            <button
-              type="button"
-              class="relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition"
-              :class="slEnabled ? 'bg-down' : 'bg-muted-foreground/30'"
-              @click="slEnabled = !slEnabled"
-            >
-              <span
-                class="inline-block h-3 w-3 transform rounded-full bg-white shadow transition"
-                :style="{ transform: slEnabled ? 'translateX(14px)' : 'translateX(2px)' }"
-              />
-            </button>
-            <span class="font-bold text-down">SL</span>
+          <!-- SL row -->
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition"
+                :class="slEnabled ? 'bg-down' : 'bg-muted-foreground/30'"
+                @click="slEnabled = !slEnabled"
+              >
+                <span
+                  class="inline-block h-3 w-3 transform rounded-full bg-white shadow transition"
+                  :style="{ transform: slEnabled ? 'translateX(14px)' : 'translateX(2px)' }"
+                />
+              </button>
+              <span class="font-bold text-down">SL</span>
+            </div>
             <span class="flex items-center text-muted-foreground">
               -<input v-model.number="slPct" type="number" min="0.1" max="100" step="0.1"
                 :disabled="!slEnabled"
-                class="w-9 rounded border border-border bg-card px-1 py-0.5 text-right text-xs tabular-nums disabled:opacity-40" />%
+                class="w-10 rounded border border-border bg-card px-1 py-0.5 text-right text-xs tabular-nums disabled:opacity-40" />%
             </span>
           </div>
         </div>
