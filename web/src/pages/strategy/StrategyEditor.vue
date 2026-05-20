@@ -33,35 +33,47 @@ const active = ref(true);
 const version = ref<number>(1); // 수정 시 server에서 가져옴
 const applications = ref<StrategyApplicationRow[]>([]);
 
-// 진입
+// 진입 — 새 정책: 전략은 항상 morning_staged 기반 (분할 진입/익절/손절 통합 모델).
+// 자금 규모는 매수 시점에 사용자가 직접 입력 → backend 호환 위해 cash_ratio=1.0 (전체) hardcoded.
 type EntryType = 'morning' | 'limit_price' | 'morning_staged';
-const entryType = ref<EntryType>('morning');
+const entryType = ref<EntryType>('morning_staged');
 const targetPrice = ref<number>(50_000);
 const direction = ref<'above' | 'below'>('above');
 
-// ===== morning_staged 전용 =====
-// 자금
+// 자금 (UI 미노출 — default 전체 자금. 실제 발주 시점에 trade 폼에서 별도 지정.)
 type StagedBudgetMode = 'fixed_amount' | 'cash_ratio';
-const stagedBudgetMode = ref<StagedBudgetMode>('fixed_amount');
+const stagedBudgetMode = ref<StagedBudgetMode>('cash_ratio');
 const stagedBudgetAmount = ref<number>(1_000_000);
-const stagedBudgetRatio = ref<number>(50); // %
-// 1차 비율 (2차는 100 - 1차)
-const stage1Pct = ref<number>(30); // %
-// 2차 활성화
-const stage2Enabled = ref<boolean>(true);
-// 2차 트리거 — 1차 체결가 대비 하락 %
+const stagedBudgetRatio = ref<number>(100); // %
+// 1차 비율 (2차 OFF 면 100, ON 시 사용자 입력 default 50, 2차는 100-1차)
+const stage1Pct = ref<number>(100);
+// 2차 (물타기) — default OFF
+const stage2Enabled = ref<boolean>(false);
 const stage2DropPct = ref<number>(5);
-// TP1
+// 익절 1차 — default ON. 2차 OFF 면 sellPct 100% 강제.
 const tp1Enabled = ref<boolean>(true);
-const tp1AtPct = ref<number>(10);
-const tp1SellPct = ref<number>(50);
-// TP2 (잔량 익절)
+const tp1AtPct = ref<number>(5);
+const tp1SellPct = ref<number>(100);
+// 익절 2차 — default OFF. ON 이면 잔량(100 - tp1SellPct) 익절.
 const tp2Enabled = ref<boolean>(false);
-const tp2AtPct = ref<number>(20);
-// SL (평균단가 기준)
-const stagedSlEnabled = ref<boolean>(true);
-const stagedSlPct = ref<number>(10);
+const tp2AtPct = ref<number>(10);
+// 손절 — default OFF
+const stagedSlEnabled = ref<boolean>(false);
+const stagedSlPct = ref<number>(5);
 const stage2Pct = computed(() => Math.max(0, 100 - stage1Pct.value));
+
+// 2차 토글 변경 시 1차 비율/tp1SellPct 자동 조정 (사용자 정책).
+watch(stage2Enabled, (on) => {
+  if (on) {
+    if (stage1Pct.value === 100) stage1Pct.value = 50; // default 50:50
+  } else {
+    stage1Pct.value = 100; // 2차 OFF → 1차 100%
+  }
+});
+watch(tp2Enabled, (on) => {
+  if (!on) tp1SellPct.value = 100; // 2차 OFF → 1차 100% 익절
+  else if (tp1SellPct.value === 100) tp1SellPct.value = 50; // default
+});
 
 // 매수
 type OrderMethod = 'market' | 'limit';
@@ -454,7 +466,10 @@ async function removeApp(appId: string) {
     </Card>
 
     <!-- 2. 진입 조건 -->
-    <Card>
+    <!-- 사용자 정책: entry type 선택 UI 제거 (전략은 항상 분할 진입 모델).
+         자금 규모 카드도 제거 — 자금은 매수 시점에 trade 폼에서 직접 입력.
+         v-if=false 로 유지해서 코드 호환만 보장. -->
+    <Card v-if="false">
       <template #header><h3 class="text-sm font-bold tracking-tight">언제 매수할까요?</h3></template>
       <div class="grid grid-cols-3 gap-1.5">
         <button
@@ -521,8 +536,8 @@ async function removeApp(appId: string) {
 
     <!-- ====== morning_staged 전용 섹션 ====== -->
     <template v-if="entryType === 'morning_staged'">
-      <!-- 자금 -->
-      <Card>
+      <!-- 자금 — 사용자 정책: 매수 시점에 입력 → editor 에서 hide. cash_ratio=100% hardcoded. -->
+      <Card v-if="false">
         <template #header><h3 class="text-sm font-bold tracking-tight">자금 규모</h3></template>
         <div class="inline-flex w-full rounded-xl bg-muted p-1">
           <button
@@ -558,84 +573,85 @@ async function removeApp(appId: string) {
       <Card>
         <template #header><h3 class="text-sm font-bold tracking-tight">분할 진입</h3></template>
         <div class="space-y-3">
-          <!-- 1차 -->
-          <div>
-            <p class="mb-1 text-[11px] font-semibold text-muted-foreground">
-              1차 (09:00 시가) — <span class="text-foreground tabular-nums">{{ stage1Pct }}%</span>
-            </p>
-            <input v-model.number="stage1Pct" type="range" min="10" max="100" step="5" class="w-full accent-primary" />
-          </div>
-
-          <!-- 2차 토글 -->
-          <label class="flex items-center gap-2 border-t border-border/60 pt-3">
+          <!-- 2차 토글 (물타기) -->
+          <label class="flex items-center gap-2.5">
             <input v-model="stage2Enabled" type="checkbox" class="peer sr-only" />
-            <span class="relative inline-flex h-5 w-9 cursor-pointer items-center rounded-full bg-muted transition peer-checked:bg-primary">
-              <span class="inline-block h-4 w-4 transform rounded-full bg-card shadow transition" :class="stage2Enabled ? 'translate-x-[1.125rem]' : 'translate-x-0.5'" />
+            <span class="relative inline-flex h-6 w-11 cursor-pointer items-center rounded-full bg-muted transition peer-checked:bg-primary">
+              <span class="inline-block h-5 w-5 transform rounded-full bg-card shadow transition" :class="stage2Enabled ? 'translate-x-[1.375rem]' : 'translate-x-0.5'" />
             </span>
-            <span class="text-sm font-medium">2차 진입 (물타기)</span>
-            <span v-if="stage2Enabled" class="ml-auto text-[11px] text-muted-foreground tabular-nums">{{ stage2Pct }}%</span>
+            <span class="text-sm font-semibold">2차 진입 (물타기)</span>
           </label>
 
-          <div v-if="stage2Enabled" class="space-y-2 pl-2">
+          <!-- 2차 OFF — 1차 100% 자동 안내 -->
+          <div v-if="!stage2Enabled" class="rounded-lg bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+            1차에서 <span class="font-semibold text-foreground">전체 자금</span> 시가 매수.
+          </div>
+
+          <!-- 2차 ON — 1차/2차 비율 + 트리거 -->
+          <div v-else class="space-y-2.5 rounded-lg bg-muted/30 px-3 py-3">
+            <div>
+              <p class="mb-1 text-[11px] font-semibold">
+                1차 <span class="text-primary tabular-nums">{{ stage1Pct }}%</span>
+                <span class="mx-1 text-muted-foreground">·</span>
+                2차 <span class="text-primary tabular-nums">{{ stage2Pct }}%</span>
+              </p>
+              <input v-model.number="stage1Pct" type="range" min="10" max="90" step="5" class="w-full accent-primary" />
+            </div>
             <label class="block">
-              <span class="mb-1 block text-[10px] text-muted-foreground">1차 체결가 대비 -{{ stage2DropPct }}% 도달 시</span>
+              <span class="mb-1 block text-[11px] text-muted-foreground">
+                2차 발동 — 1차 체결가 대비 <span class="font-semibold text-foreground tabular-nums">-{{ stage2DropPct }}%</span>
+              </span>
               <input v-model.number="stage2DropPct" type="range" min="1" max="30" step="0.5" class="w-full accent-primary" />
             </label>
           </div>
         </div>
       </Card>
 
-      <!-- 분할 익절 -->
+      <!-- 익절 -->
       <Card>
-        <template #header><h3 class="text-sm font-bold tracking-tight">분할 익절</h3></template>
+        <template #header><h3 class="text-sm font-bold tracking-tight">익절</h3></template>
         <div class="space-y-3">
-          <!-- TP1 -->
-          <div>
-            <label class="flex items-center gap-2">
-              <input v-model="tp1Enabled" type="checkbox" class="peer sr-only" />
-              <span class="relative inline-flex h-5 w-9 cursor-pointer items-center rounded-full bg-muted transition peer-checked:bg-primary">
-                <span class="inline-block h-4 w-4 transform rounded-full bg-card shadow transition" :class="tp1Enabled ? 'translate-x-[1.125rem]' : 'translate-x-0.5'" />
-              </span>
-              <span class="text-sm font-medium">1차 익절</span>
-            </label>
-            <div v-if="tp1Enabled" class="mt-2 grid grid-cols-2 gap-2 pl-2">
-              <label class="block">
-                <span class="text-[10px] text-muted-foreground">평단 대비 +%</span>
-                <input v-model.number="tp1AtPct" type="number" step="0.5" min="0.5" max="100"
-                  class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2 text-base font-semibold tabular-nums text-up focus:outline-none focus:ring-1 focus:ring-primary" />
-              </label>
-              <label class="block">
-                <span class="text-[10px] text-muted-foreground">매도 비율 (%)</span>
-                <input v-model.number="tp1SellPct" type="number" step="5" min="1" max="100"
-                  class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2 text-base font-semibold tabular-nums focus:outline-none focus:ring-1 focus:ring-primary" />
-              </label>
-            </div>
-            <p v-if="tp1Enabled && !tp2Enabled" class="mt-2 pl-2 text-[10px] text-muted-foreground">
-              TP1 도달 시 보유 100% 매도 (sellPct 무시) — TP2 활성화 시 sellPct만 매도
-            </p>
-          </div>
-
-          <!-- TP2 -->
-          <div class="border-t border-border/60 pt-3">
-            <label class="flex items-center gap-2">
-              <input v-model="tp2Enabled" type="checkbox" class="peer sr-only" />
-              <span class="relative inline-flex h-5 w-9 cursor-pointer items-center rounded-full bg-muted transition peer-checked:bg-primary">
-                <span class="inline-block h-4 w-4 transform rounded-full bg-card shadow transition" :class="tp2Enabled ? 'translate-x-[1.125rem]' : 'translate-x-0.5'" />
-              </span>
-              <span class="text-sm font-medium">2차 익절 (잔량 전량)</span>
-            </label>
-            <div v-if="tp2Enabled" class="mt-2 pl-2">
-              <label class="block">
-                <span class="text-[10px] text-muted-foreground">평단 대비 +%</span>
-                <input v-model.number="tp2AtPct" type="number" step="0.5" min="0.5" max="200"
-                  class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2 text-base font-semibold tabular-nums text-up focus:outline-none focus:ring-1 focus:ring-primary" />
-              </label>
-            </div>
-          </div>
-
-          <p class="rounded-lg bg-amber-500/10 px-3 py-2 text-[10px] leading-relaxed text-amber-900 dark:text-amber-200">
-            💡 1차 익절(TP1) 도달 시 2차 물타기 예약은 자동 캔슬돼요.
+          <!-- 1차 익절 — default ON. 평단 +% 입력 -->
+          <label class="flex items-center gap-2.5">
+            <input v-model="tp1Enabled" type="checkbox" class="peer sr-only" />
+            <span class="relative inline-flex h-6 w-11 cursor-pointer items-center rounded-full bg-muted transition peer-checked:bg-up">
+              <span class="inline-block h-5 w-5 transform rounded-full bg-card shadow transition" :class="tp1Enabled ? 'translate-x-[1.375rem]' : 'translate-x-0.5'" />
+            </span>
+            <span class="text-sm font-semibold">1차 익절</span>
+            <span class="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+              평단 +<input v-model.number="tp1AtPct" type="number" step="0.5" min="0.5" max="100"
+                :disabled="!tp1Enabled"
+                class="w-14 rounded border border-border bg-card px-1.5 py-1 text-right text-xs font-semibold tabular-nums text-up disabled:opacity-40" />%
+            </span>
+          </label>
+          <!-- 2차 OFF 면 1차가 100% (자동) — 안내 -->
+          <p v-if="tp1Enabled && !tp2Enabled" class="ml-8 text-[10px] text-muted-foreground">
+            보유 전부 매도 (2차 익절 켜면 분할).
           </p>
+
+          <!-- 2차 익절 토글 — default OFF. ON 시 1차 비율 + 2차 평단 +% -->
+          <label class="flex items-center gap-2.5 border-t border-border/60 pt-3">
+            <input v-model="tp2Enabled" type="checkbox" class="peer sr-only" />
+            <span class="relative inline-flex h-6 w-11 cursor-pointer items-center rounded-full bg-muted transition peer-checked:bg-up">
+              <span class="inline-block h-5 w-5 transform rounded-full bg-card shadow transition" :class="tp2Enabled ? 'translate-x-[1.375rem]' : 'translate-x-0.5'" />
+            </span>
+            <span class="text-sm font-semibold">2차 익절</span>
+            <span class="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+              평단 +<input v-model.number="tp2AtPct" type="number" step="0.5" min="0.5" max="200"
+                :disabled="!tp2Enabled"
+                class="w-14 rounded border border-border bg-card px-1.5 py-1 text-right text-xs font-semibold tabular-nums text-up disabled:opacity-40" />%
+            </span>
+          </label>
+
+          <!-- 2차 ON 시 — 1차/2차 매도 비율 분할 slider -->
+          <div v-if="tp2Enabled" class="rounded-lg bg-muted/30 px-3 py-2.5">
+            <p class="mb-1 text-[11px] font-semibold">
+              1차 <span class="text-up tabular-nums">{{ tp1SellPct }}%</span>
+              <span class="mx-1 text-muted-foreground">·</span>
+              2차 <span class="text-up tabular-nums">{{ Math.max(0, 100 - tp1SellPct) }}%</span>
+            </p>
+            <input v-model.number="tp1SellPct" type="range" min="10" max="90" step="5" class="w-full accent-primary" />
+          </div>
         </div>
       </Card>
 
