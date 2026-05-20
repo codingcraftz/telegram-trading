@@ -30,7 +30,8 @@ function clearStock() {
 }
 
 // ============== 종목 선택 진입 화면 ==============
-const RECENT_KEY = 'owlim:recent-search';
+// 키 분리 — Stocks 의 'owlim:recent-search' 는 검색어 string array. 여기는 종목 객체.
+const RECENT_KEY = 'owlim:recent-stocks';
 const recent = ref<{ code: string; name: string }[]>(loadRecent());
 function loadRecent(): { code: string; name: string }[] {
   try {

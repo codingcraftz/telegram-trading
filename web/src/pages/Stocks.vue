@@ -51,7 +51,18 @@ function loadRecent(): string[] {
     const raw = localStorage.getItem(RECENT_KEY);
     if (!raw) return [];
     const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr.slice(0, 5) : [];
+    if (!Array.isArray(arr)) return [];
+    // 이전 버전이 객체 {code, name} 를 같은 key 에 섞어놓은 경우 가드.
+    // 문자열만 통과시키고 객체는 name 만 추출. 기타 타입 무시.
+    const out: string[] = [];
+    for (const x of arr) {
+      if (typeof x === 'string' && x.trim()) out.push(x);
+      else if (x && typeof x === 'object' && typeof (x as { name?: unknown }).name === 'string') {
+        out.push((x as { name: string }).name);
+      }
+      if (out.length >= 5) break;
+    }
+    return out;
   } catch { return []; }
 }
 function saveRecent(item: string) {
@@ -117,12 +128,11 @@ watch(() => route.query.q, (newQ) => {
 });
 
 // ===== 세그먼트 =====
-// 관심 페이지로 단순화 — 보유/순위 세그먼트 제거. seg='watch' 고정.
-// 매수/매도는 /trade 페이지로 분리되어 QuickTradeSheet 사용 안 함.
-type Seg = 'holding' | 'watch' | 'rank';
+// 보유는 잔고 탭으로, 매매는 주문 탭으로 분리됨 → [관심 | 순위 | 테마주] 3개만.
+type Seg = 'holding' | 'watch' | 'rank' | 'theme';
 function parseSeg(v: unknown): Seg {
-  // URL ?seg= 무시. 항상 관심.
-  void v;
+  if (v === 'rank') return 'rank';
+  if (v === 'theme') return 'theme';
   return 'watch';
 }
 const seg = ref<Seg>(parseSeg(route.query.seg));
@@ -169,11 +179,11 @@ const {
   hasMore: holdingHasMore,
 } = useInfiniteScroll(holdings, 20);
 
-// ===== Segmented 옵션 =====
+// ===== Segmented 옵션 — 관심 / 순위 / 테마주 =====
 const segOptions = computed(() => [
-  { value: 'holding' as const, label: `보유${holdings.value.length ? ` ${holdings.value.length}` : ''}` },
   { value: 'watch' as const, label: `관심${watchlist.count ? ` ${watchlist.count}` : ''}` },
   { value: 'rank' as const, label: '순위' },
+  { value: 'theme' as const, label: '테마주' },
 ]);
 
 // ===== 순위 =====
@@ -201,10 +211,10 @@ watch(rankCategory, (v) => {
 });
 watch(seg, (v) => { if (v === 'rank' && rankItems.value.length === 0) loadRanking(); });
 
+// 사용자 요청: 거래대금 / 상승률 / 거래량 — 하락률 제거.
 const rankCategories: { value: RankingCategory; label: string }[] = [
   { value: 'volume', label: '거래대금' },
   { value: 'change_up', label: '상승률' },
-  { value: 'change_down', label: '하락률' },
   { value: 'qty', label: '거래량' },
 ];
 
@@ -430,7 +440,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <SegmentedControl v-if="false" v-model="seg" :options="segOptions" />
+      <SegmentedControl v-model="seg" :options="segOptions" />
 
       <!-- 보유 -->
       <section v-if="seg === 'holding'" class="space-y-2">
@@ -605,7 +615,7 @@ onUnmounted(() => {
       </section>
 
       <!-- 순위 -->
-      <section v-else class="space-y-2">
+      <section v-else-if="seg === 'rank'" class="space-y-2">
         <div class="flex gap-1.5 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <button
             v-for="c in rankCategories" :key="c.value"
@@ -677,6 +687,18 @@ onUnmounted(() => {
 
         <div v-else class="space-y-1.5">
           <div v-for="n in 5" :key="n" class="h-[110px] animate-pulse rounded-2xl bg-card" />
+        </div>
+      </section>
+
+      <!-- 테마주 — Phase B 에서 네이버 finance scraping 기반 구현 예정 -->
+      <section v-else-if="seg === 'theme'" class="space-y-2">
+        <div class="rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-5 py-10 text-center">
+          <p class="text-3xl mb-2">🔥</p>
+          <p class="text-sm font-semibold">오늘의 핫한 테마주</p>
+          <p class="mt-1 text-[11px] text-muted-foreground">
+            네이버 finance 테마 랭킹 연동 준비 중이에요.<br>
+            상위 테마와 소속 종목을 한눈에 볼 수 있도록 준비할게요.
+          </p>
         </div>
       </section>
 
