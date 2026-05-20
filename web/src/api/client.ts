@@ -68,6 +68,15 @@ export const api = {
   watchlist: () => request<WatchlistResponse>('/api/watchlist'),
   strategy: () => request<StrategyResponse>('/api/strategy'),
   version: () => request<{ sha: string; buildDate: string }>('/api/version'),
+  checkUpdate: () =>
+    request<{
+      current: string;
+      latest: string;
+      latestMessage: string;
+      updateAvailable: boolean;
+    }>('/api/check-update'),
+  triggerUpdate: () =>
+    request<{ ok: boolean; message: string }>('/api/update', { method: 'POST' }),
   keysStatus: () =>
     request<{
       tradingMode: 'paper' | 'real';

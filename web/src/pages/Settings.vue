@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
-import { CircleCheck, CircleX, Info, ExternalLink, Smartphone, Sparkles, Plus, ChevronRight, KeyRound, Bell, Download, X } from 'lucide-vue-next';
+import { CircleCheck, CircleX, Info, ExternalLink, Smartphone, Sparkles, Plus, ChevronRight, KeyRound, Bell, Download, X, RefreshCw, Rocket } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
@@ -78,6 +78,57 @@ async function loadAll() {
 
 const buildDate = computed(() => version.value?.buildDate ? version.value.buildDate.slice(0, 10) : '');
 
+// ===== 업데이트 =====
+const updateInfo = ref<{
+  current: string;
+  latest: string;
+  latestMessage: string;
+  updateAvailable: boolean;
+} | null>(null);
+const updateChecking = ref(false);
+const updateRunning = ref(false);
+const updateCheckedAt = ref<number | null>(null);
+
+async function checkForUpdate(silent = false) {
+  updateChecking.value = true;
+  try {
+    const r = await api.checkUpdate();
+    updateInfo.value = r;
+    updateCheckedAt.value = Date.now();
+    if (!silent) {
+      if (r.updateAvailable) toast.success(`새 버전 ${r.latest} 가 있어요`);
+      else toast.info('최신 버전이에요');
+    }
+  } catch (err) {
+    if (!silent) toast.error((err as Error).message);
+  } finally { updateChecking.value = false; }
+}
+
+async function runUpdate() {
+  if (updateRunning.value) return;
+  if (!window.confirm('업데이트를 시작할까요?\n1~2분 정도 다운로드 후 자동으로 새로 시작돼요.')) return;
+  updateRunning.value = true;
+  try {
+    const r = await api.triggerUpdate();
+    if (r.ok) {
+      toast.success(r.message || '업데이트 요청됨. 1~2분 후 갱신 완료.');
+    } else {
+      toast.error(r.message || '업데이트 실패');
+    }
+  } catch (err) {
+    toast.error((err as Error).message);
+  } finally { updateRunning.value = false; }
+}
+
+const updateCheckedLabel = computed(() => {
+  if (!updateCheckedAt.value) return '';
+  const diff = Math.max(0, Date.now() - updateCheckedAt.value);
+  const m = Math.floor(diff / 60_000);
+  if (m === 0) return '방금 확인';
+  if (m < 60) return `${m}분 전 확인`;
+  return new Date(updateCheckedAt.value).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+});
+
 // 한국투자증권 앱 — 입출금 같은 KIS API 미지원 기능은 본 앱에서.
 const KIS_APP = {
   ios: 'https://apps.apple.com/kr/app/id1621986905',
@@ -90,7 +141,11 @@ function openKisApp() {
   window.open(url, '_blank', 'noopener');
 }
 
-onMounted(loadAll);
+onMounted(() => {
+  loadAll();
+  // 진입 시 백그라운드로 업데이트 확인 (silent — 토스트 없음, 결과만 카드에 표시)
+  checkForUpdate(true);
+});
 </script>
 
 <template>
@@ -295,9 +350,71 @@ onMounted(loadAll);
       </button>
     </Card>
 
-    <p class="px-1 text-[11px] text-muted-foreground tabular-nums">
-      <span v-if="version" class="font-mono">버전 {{ version.sha }}</span>
-      <span v-if="buildDate" class="ml-1.5">· {{ buildDate }}</span>
-    </p>
+    <!-- 버전 + 업데이트 -->
+    <Card>
+      <template #header>
+        <h3 class="text-sm font-bold tracking-tight">버전 정보</h3>
+      </template>
+      <div class="space-y-3">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-[11px] text-muted-foreground">현재 버전</p>
+            <p class="mt-0.5 font-mono text-sm font-bold tabular-nums">
+              {{ version?.sha ?? '—' }}
+            </p>
+            <p v-if="buildDate" class="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
+              빌드 {{ buildDate }}
+            </p>
+          </div>
+          <div v-if="updateInfo" class="text-right min-w-0">
+            <p class="text-[11px] text-muted-foreground">최신 버전</p>
+            <p
+              class="mt-0.5 font-mono text-sm font-bold tabular-nums"
+              :class="updateInfo.updateAvailable ? 'text-primary' : ''"
+            >
+              {{ updateInfo.latest || '—' }}
+            </p>
+            <p v-if="updateCheckedLabel" class="mt-0.5 text-[10px] text-muted-foreground">
+              {{ updateCheckedLabel }}
+            </p>
+          </div>
+        </div>
+
+        <!-- 새 버전 안내 + 변경사항 -->
+        <div
+          v-if="updateInfo?.updateAvailable && updateInfo.latestMessage"
+          class="rounded-lg bg-primary/10 px-3 py-2.5 text-[11px] leading-relaxed"
+        >
+          <p class="font-semibold text-primary">새 업데이트가 있어요</p>
+          <p class="mt-1 break-words text-foreground/80">{{ updateInfo.latestMessage }}</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <Button
+            variant="secondary"
+            size="md"
+            :disabled="updateChecking"
+            @click="checkForUpdate(false)"
+          >
+            <RefreshCw class="mr-1 h-4 w-4" :class="updateChecking ? 'animate-spin' : ''" />
+            확인
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
+            :disabled="!updateInfo?.updateAvailable || updateRunning"
+            @click="runUpdate"
+          >
+            <Rocket class="mr-1 h-4 w-4" />
+            {{ updateRunning ? '요청 중…' : '업데이트' }}
+          </Button>
+        </div>
+
+        <p class="text-[10px] leading-relaxed text-muted-foreground">
+          ※ 자동으로도 5분마다 새 이미지를 확인해서 갱신합니다.
+          즉시 업데이트가 필요하면 위 버튼을 누르세요 — 1~2분 후 적용됩니다.
+        </p>
+      </div>
+    </Card>
   </div>
 </template>
