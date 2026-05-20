@@ -146,8 +146,17 @@ function closeUpdateOverlay() {
   updateError.value = '';
 }
 
+// PWA service worker / 브라우저 캐시 가 옛 자산 들고 있으면 location.reload() 만으로
+// 새 버전 안 받을 수 있음. URL 에 timestamp query 붙여 navigation cache 무력화.
+function forceReload() {
+  const url = new URL(location.href);
+  url.searchParams.set('_v', String(Date.now()));
+  location.replace(url.toString());
+}
+
 async function runUpdate() {
   if (updatePhase.value !== 'idle') return;
+  if (!window.confirm('업데이트를 진행하시겠습니까?\n1~3분 정도 소요됩니다.')) return;
   updateError.value = '';
   updatePhase.value = 'requesting';
   try {
@@ -157,30 +166,31 @@ async function runUpdate() {
       updatePhase.value = 'failed';
       return;
     }
-    // 요청 성공 — 봇 컨테이너가 곧 재시작. 현재 sha 기억 후 변경 감지까지 폴링.
+    // 요청 성공 — 봇 컨테이너가 곧 재시작. polling 첫 응답을 기준 sha 로 잡고 변경 감지.
     updatePhase.value = 'building';
-    const startSha = version.value?.sha ?? null;
+    let observedSha: string | null = null;
     updatePollTimer = setInterval(async () => {
       try {
         const v = await api.version();
-        if (startSha && v.sha !== startSha) {
+        if (observedSha === null) {
+          observedSha = v.sha; // 폴링 첫 응답 (이미 새 sha 일 수도 있음 — 그래도 OK, 비교만 다음부터)
+          return;
+        }
+        if (v.sha !== observedSha) {
           stopUpdateTimers();
           updatePhase.value = 'done';
-          // 3초 후 자동 reload — 사용자가 안내 메시지 읽을 시간.
-          setTimeout(() => {
-            try { location.reload(); } catch {}
-          }, 3000);
+          setTimeout(() => forceReload(), 3000);
         }
       } catch { /* 컨테이너 재시작 중엔 일시 unreachable — 다음 폴링에서 다시 */ }
     }, 3000);
-    // 5분 timeout — 그동안 변경 감지 못 하면 failed (사용자가 직접 확인 권유).
+    // 10분 timeout — watchtower 가 5분 주기로 새 이미지 받는 경우까지 커버.
     updateTimeoutTimer = setTimeout(() => {
       if (updatePhase.value === 'building') {
         stopUpdateTimers();
         updateError.value = '업데이트 확인 시간이 초과됐어요. 잠시 후 앱을 끄고 다시 열어보세요.';
         updatePhase.value = 'failed';
       }
-    }, 5 * 60 * 1000);
+    }, 10 * 60 * 1000);
   } catch (err) {
     updateError.value = (err as Error).message;
     updatePhase.value = 'failed';
