@@ -11,6 +11,7 @@
 
 import { callKisApi } from '../mcp/kis.js';
 import { firstOutput, num, parseMcpResult, checkKisOk } from '../fastpath/extract.js';
+import { invalidate as invalidateCache } from '../fastpath/cache.js';
 import { placeBuyOrder, pollFill } from '../execution/order.js';
 import { placeOrder } from '../mcp/kis.js';
 import { notify } from '../notify/telegram.js';
@@ -274,6 +275,12 @@ async function placeMarketSell(code: string, qty: number): Promise<{ ok: true; o
     if (!kisOk.ok) return { ok: false, error: kisOk.message ?? 'KIS 거절' };
     const out = firstOutput(parsed);
     const orderId = String(out?.ODNO ?? out?.odno ?? `unknown-${Date.now()}`);
+    // 매도 발주 시점 캐시 무효화 — 클라이언트 다음 폴링이 fresh 받음.
+    // (시장가는 즉시 체결 가정 — pending/filled/balance 모두 영향)
+    invalidateCache('pending:raw');
+    invalidateCache('filled:');
+    invalidateCache('balance:raw');
+    invalidateCache('holdings');
     return { ok: true, orderId };
   } catch (err) {
     return { ok: false, error: (err as Error).message };

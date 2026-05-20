@@ -9,6 +9,7 @@ import {
 import { notify } from '../notify/telegram.js';
 import { getConfig } from '../config.js';
 import { placeOrder, checkFill, type Market } from '../mcp/kis.js';
+import { invalidate as invalidateCache } from '../fastpath/cache.js';
 
 function maybeParseJson(v: unknown): unknown {
   if (typeof v !== 'string') return v;
@@ -149,6 +150,11 @@ async function pollClose(args: {
           kind: 'closed',
           payload: { filled, avg, pnl, reason: args.reason },
         });
+        // 매도 체결 시점 캐시 무효화 — 클라이언트 다음 폴링이 fresh 받음.
+        invalidateCache('pending:raw');
+        invalidateCache('filled:');
+        invalidateCache('balance:raw');
+        invalidateCache('holdings');
         const pos2 = getPosition(args.positionId);
         const name = pos2?.symbolName ?? '';
         const tag = args.reason === 'tp' ? '🎯 TP' : args.reason === 'sl' ? '🛑 SL' : '✋ 수동';

@@ -10,8 +10,18 @@ import {
 import { notify } from '../notify/telegram.js';
 import { placeOrder, checkFill, cancelKrxOrder, type Market } from '../mcp/kis.js';
 import { checkKisOk, parseMcpResult } from '../fastpath/extract.js';
+import { invalidate as invalidateCache } from '../fastpath/cache.js';
 import { fetchPendingOrders } from '../fastpath/pending.js';
 import { getMarketSession } from '../scheduler/calendar.js';
+
+// 체결/취소 등 KIS 상태가 변하는 시점에 pending/filled/balance 캐시를 모두 무효화.
+// 호출 직후 클라이언트 폴링(4초 주기)이 fresh 데이터를 받게 한다.
+function invalidateOrderCaches() {
+  invalidateCache('pending:raw');
+  invalidateCache('filled:'); // prefix → filled:days:7, filled:days:30 등 전부
+  invalidateCache('balance:raw');
+  invalidateCache('holdings');
+}
 
 type AnyRecord = Record<string, unknown>;
 
@@ -207,6 +217,8 @@ export async function pollFill(args: {
       const slPrice = args.slPct ? Math.round(avg * (1 - args.slPct / 100)) : null;
       setPositionTpSl(args.positionId, tpPrice, slPrice);
     }
+    // 체결 시점에 캐시 무효화 — 클라이언트 다음 폴링이 fresh data 받음.
+    invalidateOrderCaches();
     // 매수 체결 알림 (사용자 요구: 매수/매도 체결만)
     const header = `✅ <b>매수 체결</b> ${args.symbolName ?? ''}`.trim();
     const body = `${avg.toLocaleString()}원 × ${filled}주`;
@@ -243,6 +255,8 @@ export async function pollFill(args: {
       });
       markPositionFailed(args.positionId);
     }
+    // 미체결 → 자동 취소 / 취소 실패 — 어느 경우든 KIS 상태 변경. 캐시 무효화.
+    invalidateOrderCaches();
     return { filled: recheck.filled, avgPrice: null };
   }
 
@@ -262,6 +276,7 @@ export async function pollFill(args: {
         const slPrice = args.slPct ? Math.round(finalAvg * (1 - args.slPct / 100)) : null;
         setPositionTpSl(args.positionId, tpPrice, slPrice);
       }
+      invalidateOrderCaches();
       const header = `✅ <b>매수 체결</b> ${args.symbolName ?? ''}`.trim();
       await notify(args.chatId, `${header}\n${finalAvg.toLocaleString()}원 × ${finalFilled}주`);
       return { filled: finalFilled, avgPrice: finalAvg };
