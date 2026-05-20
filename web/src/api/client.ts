@@ -81,6 +81,10 @@ export const api = {
     }>('/api/check-update'),
   triggerUpdate: () =>
     request<{ ok: boolean; message: string }>('/api/update', { method: 'POST' }),
+  setTradingMode: (mode: 'paper' | 'real') =>
+    request<{ ok: boolean; mode: 'paper' | 'real' }>('/api/mode', {
+      method: 'POST', body: JSON.stringify({ mode }),
+    }),
   keysStatus: () =>
     request<{
       tradingMode: 'paper' | 'real';

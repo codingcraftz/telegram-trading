@@ -555,16 +555,18 @@ onUnmounted(() => {
         <div>
           <label class="mb-1 block text-[11px] font-semibold text-muted-foreground">자금 (원)</label>
           <PriceStepper v-model="strategyBudget" :step="100_000" :min="1000" suffix="원" />
+          <!-- 매수가능금액 (예수금) 비율 빠른 버튼 -->
           <div class="mt-1.5 grid grid-cols-4 gap-1">
             <button
-              v-for="amt in [500_000, 1_000_000, 3_000_000, 5_000_000]" :key="amt"
+              v-for="p in [25, 50, 75, 100]" :key="p"
               type="button"
-              class="rounded bg-muted/50 py-1.5 text-[10px] font-semibold transition hover:bg-muted"
-              @click="strategyBudget = amt"
-            >{{ (amt / 10_000).toLocaleString() }}만</button>
+              :disabled="!balance || balance.cash <= 0"
+              class="rounded bg-muted/50 py-1.5 text-[10px] font-semibold transition hover:bg-muted disabled:opacity-40"
+              @click="strategyBudget = Math.max(1000, Math.floor((balance!.cash * p) / 100))"
+            >{{ p === 100 ? '전부' : `${p}%` }}</button>
           </div>
           <p v-if="balance" class="mt-1.5 text-[10px] text-muted-foreground tabular-nums">
-            예수금 {{ fmtKrw(balance.cash) }}원
+            매수가능 {{ fmtKrw(balance.cash) }}원
           </p>
         </div>
         <button

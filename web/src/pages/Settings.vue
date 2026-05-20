@@ -63,6 +63,25 @@ function gotoOnboarding() {
   router.push('/onboarding');
 }
 
+// 매매 모드 전환 — 즉시 적용.
+const modeSwitching = ref(false);
+async function switchTradingMode(next: 'paper' | 'real') {
+  if (!keys.value || modeSwitching.value || keys.value.tradingMode === next) return;
+  if (next === 'real' && !keys.value.realKeys) {
+    toast.error('실전 키/계좌가 연결돼 있어야 실전 모드로 전환 가능합니다.');
+    return;
+  }
+  modeSwitching.value = true;
+  try {
+    await api.setTradingMode(next);
+    // 새 모드 상태 반영 위해 keys 다시 fetch
+    keys.value = await api.keysStatus();
+    toast.success(`${next === 'real' ? '실전' : '모의'} 모드로 전환됐어요`);
+  } catch (err) {
+    toast.error((err as Error).message);
+  } finally { modeSwitching.value = false; }
+}
+
 async function loadAll() {
   try {
     const [v, k, list] = await Promise.all([
@@ -324,11 +343,26 @@ onUnmounted(() => {
             {{ keys.realKeys ? '연결됨' : '없음' }}
           </span>
         </li>
-        <li class="flex items-center justify-between">
-          <span class="text-muted-foreground">현재 매매 모드</span>
-          <span class="font-semibold">{{ keys.tradingMode === 'real' ? '실전' : '모의' }}</span>
-        </li>
       </ul>
+
+      <!-- 매매 모드 전환 — 봇 재시작 없이 즉시 적용 -->
+      <div class="mt-3 border-t border-border/60 pt-3">
+        <div class="mb-2 flex items-center justify-between">
+          <span class="text-[11px] font-medium text-muted-foreground">매매 모드</span>
+          <span v-if="modeSwitching" class="text-[10px] text-muted-foreground">전환 중…</span>
+        </div>
+        <SegmentedControl
+          :model-value="keys.tradingMode"
+          :options="[
+            { value: 'paper' as const, label: '모의' },
+            { value: 'real' as const, label: '실전' },
+          ]"
+          @update:model-value="(v) => switchTradingMode(v)"
+        />
+        <p class="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+          전환 즉시 다음 주문부터 적용됩니다. 진행 중인 주문은 영향 없음.
+        </p>
+      </div>
     </Card>
 
     <!-- 텔레그램 알림 — 메뉴 항목. 클릭 시 시트로 설명 + 입력. -->

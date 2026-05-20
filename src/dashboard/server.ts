@@ -259,6 +259,22 @@ export function startDashboard(port = 8080): void {
   app.post('/api/watchlist/remove/:id', handleWatchlistRemove);
   app.post('/api/strategy', handleStrategyPost);
 
+  // 매매 모드 전환 — 봇 재시작 없이 즉시 적용. runtime.setMode + .env 영속.
+  app.post('/api/mode', async (c) => {
+    let body: { mode?: string } = {};
+    try { body = await c.req.json(); } catch { return c.json({ error: 'invalid json' }, 400); }
+    if (body.mode !== 'paper' && body.mode !== 'real') {
+      return c.json({ error: 'mode must be paper or real' }, 400);
+    }
+    // 동적 import — 부팅 순서 의존 회피.
+    const { setMode } = await import('../runtime.js');
+    setMode(body.mode);
+    // .env 영속 (봇 재시작 시 동일 값 유지)
+    const cur = readSettings();
+    writeSettings({ ...cur, MODE: body.mode });
+    return c.json({ ok: true, mode: body.mode });
+  });
+
   app.post('/api/settings', async (c) => {
     const body = (await c.req.json()) as Settings;
     if (body.MODE && body.MODE !== 'paper' && body.MODE !== 'real') {
