@@ -45,6 +45,7 @@ import {
 } from '../api/watchlist.js';
 import { handleStrategyGet, handleStrategyPost } from '../api/strategy.js';
 import { handleKeysStatus, handleSession } from '../api/session.js';
+import { handleThemes, handleThemeDetail } from '../api/themes.js';
 import {
   authEnabled,
   isBlocked,
@@ -219,6 +220,8 @@ export function startDashboard(port = 8080): void {
   app.get('/api/candles', handleCandles); // 인터랙티브 차트용 JSON
   app.get('/api/indices', handleIndices); // 코스피·코스닥·나스닥·다우
   app.get('/api/ranking', handleRanking); // 거래대금/거래량/상승률/하락률 순위
+  app.get('/api/themes', handleThemes); // 네이버 테마 랭킹
+  app.get('/api/themes/:no', handleThemeDetail); // 테마 소속 종목 list
 
   // ===== 전략 시스템 (스텝 5) =====
   app.get('/api/strategies', handleStrategiesList);

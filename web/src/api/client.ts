@@ -59,6 +59,11 @@ export const api = {
     request<RankingResponse>(`/api/ranking?category=${category}`),
   ordersFilled: (days = 7) =>
     request<FilledOrdersResponse>(`/api/orders/filled?days=${days}`),
+
+  // 네이버 테마주
+  themes: (limit = 30) => request<{ items: ThemeItem[] }>(`/api/themes?limit=${limit}`),
+  themeDetail: (no: number) => request<{ no: number; items: ThemeStock[] }>(`/api/themes/${no}`),
+
   asking: (code: string) => request<AskingResponse>(`/api/asking?code=${code}`),
   watchlist: () => request<WatchlistResponse>('/api/watchlist'),
   strategy: () => request<StrategyResponse>('/api/strategy'),
@@ -364,6 +369,23 @@ export type FilledOrdersResponse = {
   days: number;
   items: FilledOrder[];
   error?: string;
+};
+
+export type ThemeItem = {
+  no: number;
+  name: string;
+  changePct: number;
+  upCount: number;
+  flatCount: number;
+  downCount: number;
+  leadingStocks: string[];
+};
+export type ThemeStock = {
+  code: string;
+  name: string;
+  price: number;
+  change: number;
+  changePct: number;
 };
 
 export type TradeConfirmResponse = {

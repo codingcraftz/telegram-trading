@@ -14,6 +14,7 @@ import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import StockSearchBar from '@/components/stock/StockSearchBar.vue';
 import QuickTradeSheet from '@/components/stock/QuickTradeSheet.vue';
 import LoadingState from '@/components/ui/LoadingState.vue';
+import BottomSheet from '@/components/ui/BottomSheet.vue';
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll';
 import {
   api,
@@ -23,6 +24,8 @@ import {
   type RankingItem,
   type BalanceResponse,
   type Holding,
+  type ThemeItem,
+  type ThemeStock,
 } from '@/api/client';
 import { fmtKrw, fmtPct, fmtSigned, pflsColor } from '@/lib/format';
 import { useWatchlistStore } from '@/stores/watchlist';
@@ -209,7 +212,41 @@ watch(rankCategory, (v) => {
   router.replace({ query: { ...route.query, rank: v } });
   if (seg.value === 'rank') loadRanking();
 });
-watch(seg, (v) => { if (v === 'rank' && rankItems.value.length === 0) loadRanking(); });
+watch(seg, (v) => {
+  if (v === 'rank' && rankItems.value.length === 0) loadRanking();
+  if (v === 'theme' && themes.value.length === 0) loadThemes();
+});
+
+// ===== 테마주 (네이버 finance) =====
+const themes = ref<ThemeItem[]>([]);
+const themesLoading = ref(false);
+const selectedTheme = ref<ThemeItem | null>(null);
+const themeStocks = ref<ThemeStock[]>([]);
+const themeStocksLoading = ref(false);
+
+async function loadThemes() {
+  themesLoading.value = true;
+  try {
+    const r = await api.themes(30);
+    themes.value = r.items;
+  } catch (err) { toast.error((err as Error).message); }
+  finally { themesLoading.value = false; }
+}
+
+async function openTheme(t: ThemeItem) {
+  selectedTheme.value = t;
+  themeStocks.value = [];
+  themeStocksLoading.value = true;
+  try {
+    const r = await api.themeDetail(t.no);
+    themeStocks.value = r.items;
+  } catch (err) { toast.error((err as Error).message); }
+  finally { themeStocksLoading.value = false; }
+}
+function closeTheme() {
+  selectedTheme.value = null;
+  themeStocks.value = [];
+}
 
 // 사용자 요청: 거래대금 / 상승률 / 거래량 — 하락률 제거.
 const rankCategories: { value: RankingCategory; label: string }[] = [
@@ -690,16 +727,60 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <!-- 테마주 — Phase B 에서 네이버 finance scraping 기반 구현 예정 -->
+      <!-- 테마주 — 네이버 finance 테마 랭킹 -->
       <section v-else-if="seg === 'theme'" class="space-y-2">
-        <div class="rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-5 py-10 text-center">
-          <p class="text-3xl mb-2">🔥</p>
-          <p class="text-sm font-semibold">오늘의 핫한 테마주</p>
-          <p class="mt-1 text-[11px] text-muted-foreground">
-            네이버 finance 테마 랭킹 연동 준비 중이에요.<br>
-            상위 테마와 소속 종목을 한눈에 볼 수 있도록 준비할게요.
-          </p>
+        <div class="flex items-center justify-between px-1">
+          <p class="text-[11px] text-muted-foreground">전일 대비 등락률 상위 (1시간 캐싱)</p>
+          <button
+            class="rounded-md p-1.5 text-muted-foreground transition hover:bg-accent"
+            :disabled="themesLoading"
+            @click="loadThemes"
+          >
+            <RefreshCw class="h-3.5 w-3.5" :class="themesLoading ? 'animate-spin' : ''" />
+          </button>
         </div>
+
+        <div v-if="themes.length > 0" class="space-y-1.5">
+          <button
+            v-for="(t, i) in themes" :key="t.no"
+            type="button"
+            class="w-full rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-4 py-3 text-left transition active:scale-[0.99]"
+            @click="openTheme(t)"
+          >
+            <div class="flex items-center gap-3">
+              <span class="w-6 shrink-0 text-center text-[11px] font-bold tabular-nums"
+                :class="i < 3 ? 'text-primary' : 'text-muted-foreground'"
+              >{{ i + 1 }}</span>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-bold tracking-tight">{{ t.name }}</p>
+                <p class="mt-0.5 truncate text-[10px] text-muted-foreground">
+                  주도주: {{ t.leadingStocks.join(' · ') || '—' }}
+                </p>
+              </div>
+              <div class="shrink-0 text-right tabular-nums">
+                <p class="text-sm font-bold" :class="pflsColor(t.changePct)">
+                  {{ fmtPct(t.changePct) }}
+                </p>
+                <p class="mt-0.5 text-[10px] text-muted-foreground">
+                  <span class="text-up">▲{{ t.upCount }}</span>
+                  <span class="mx-0.5">·</span>
+                  <span class="text-down">▼{{ t.downCount }}</span>
+                </p>
+              </div>
+            </div>
+          </button>
+        </div>
+
+        <div v-else-if="themesLoading" class="space-y-1.5">
+          <div v-for="n in 5" :key="n" class="h-[68px] animate-pulse rounded-2xl bg-card" />
+        </div>
+
+        <EmptyState
+          v-else
+          :icon="Inbox"
+          title="테마 데이터를 불러오지 못했어요"
+          description="새로고침을 눌러 다시 시도해 보세요."
+        />
       </section>
 
       <Modal :open="removeOpen" title="관심 종목에서 뺄까요?" @close="removeOpen = false">
@@ -724,5 +805,51 @@ onUnmounted(() => {
       :available-cash="balance?.cash ?? 0"
       @close="closeQuick"
     />
+
+    <!-- 테마 상세 — 소속 종목 list -->
+    <BottomSheet
+      :open="!!selectedTheme"
+      :title="selectedTheme?.name ?? ''"
+      @close="closeTheme"
+    >
+      <div v-if="selectedTheme" class="space-y-3">
+        <div class="flex items-center gap-2 text-[11px]">
+          <span :class="pflsColor(selectedTheme.changePct)" class="font-bold tabular-nums">
+            {{ fmtPct(selectedTheme.changePct) }}
+          </span>
+          <span class="text-muted-foreground">
+            상승 <span class="text-up font-semibold">{{ selectedTheme.upCount }}</span> ·
+            보합 <span class="font-semibold">{{ selectedTheme.flatCount }}</span> ·
+            하락 <span class="text-down font-semibold">{{ selectedTheme.downCount }}</span>
+          </span>
+        </div>
+
+        <div v-if="themeStocks.length > 0" class="space-y-1.5 max-h-[60vh] overflow-y-auto pr-1">
+          <button
+            v-for="s in themeStocks" :key="s.code"
+            type="button"
+            class="flex w-full items-center gap-3 rounded-xl bg-card ring-1 ring-border/60 dark:ring-0 px-3 py-2.5 text-left transition active:scale-[0.99]"
+            @click="closeTheme(); router.push(`/stocks/${s.code}`)"
+          >
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-bold">{{ s.name }}</p>
+              <p class="mt-0.5 text-[10px] text-muted-foreground tabular-nums">{{ s.code }}</p>
+            </div>
+            <div class="shrink-0 text-right tabular-nums">
+              <p class="text-sm font-bold">{{ fmtKrw(s.price) }}</p>
+              <p class="text-[11px] font-semibold" :class="pflsColor(s.changePct)">
+                {{ fmtPct(s.changePct) }}
+              </p>
+            </div>
+          </button>
+        </div>
+        <div v-else-if="themeStocksLoading" class="space-y-1.5">
+          <div v-for="n in 4" :key="n" class="h-[60px] animate-pulse rounded-xl bg-card" />
+        </div>
+        <p v-else class="py-6 text-center text-xs text-muted-foreground">
+          종목 정보를 불러오지 못했어요.
+        </p>
+      </div>
+    </BottomSheet>
   </div>
 </template>
