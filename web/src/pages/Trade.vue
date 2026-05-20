@@ -5,10 +5,11 @@
 
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
-import { Search, Clock, X } from 'lucide-vue-next';
+import { Search, Clock, X, Sparkles, Plus } from 'lucide-vue-next';
 import OrderBook from '@/components/OrderBook.vue';
 import PriceStepper from '@/components/PriceStepper.vue';
-import { api, type SearchItem, type QuoteResponse, type BalanceResponse } from '@/api/client';
+import BottomSheet from '@/components/ui/BottomSheet.vue';
+import { api, type SearchItem, type QuoteResponse, type BalanceResponse, type StrategyItem } from '@/api/client';
 import { fmtKrw, fmtPct, pflsColor } from '@/lib/format';
 import { useOrdersStore } from '@/stores/orders';
 import { useWatchlistStore } from '@/stores/watchlist';
@@ -19,7 +20,9 @@ const router = useRouter();
 const ordersStore = useOrdersStore();
 const watchlist = useWatchlistStore();
 
-const LAST_KEY = 'owlim:last-trade-code';
+// 차트/주문/잔고에서 마지막 본 종목 공유 — StockDetail.vue 와 같은 key.
+const LAST_KEY = 'owlim:last-code';
+const LEGACY_KEYS = ['owlim:last-trade-code', 'owlim:last-chart-code'];
 const DEFAULT_CODE = '005930'; // 삼성전자 — 아무것도 없을 때 fallback
 
 const code = computed(() => (route.query.code as string) ?? '');
@@ -37,8 +40,10 @@ async function loadBalance() {
 
 function pickAutoCode(): string {
   try {
-    const last = localStorage.getItem(LAST_KEY);
-    if (last && /^\d{6}$/.test(last)) return last;
+    const candidates = [localStorage.getItem(LAST_KEY), ...LEGACY_KEYS.map((k) => localStorage.getItem(k))];
+    for (const c of candidates) {
+      if (c && /^\d{6}$/.test(c)) return c;
+    }
   } catch {}
   const firstHold = balance.value?.holdings[0]?.code;
   if (firstHold && /^\d{6}$/.test(firstHold)) return firstHold;
@@ -47,9 +52,9 @@ function pickAutoCode(): string {
   return DEFAULT_CODE;
 }
 
-// ============== 검색 ==============
+// ============== 검색 (시트로 분리) ==============
+const searchOpen = ref(false);
 const searchQ = ref('');
-const searchFocused = ref(false);
 const searchResults = ref<SearchItem[]>([]);
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 watch(searchQ, (v) => {
@@ -59,21 +64,22 @@ watch(searchQ, (v) => {
   searchTimer = setTimeout(async () => {
     try {
       const r = await api.search(trimmed);
-      searchResults.value = r.items.slice(0, 6);
+      searchResults.value = r.items.slice(0, 12);
     } catch { searchResults.value = []; }
   }, 200);
 });
 
-function chooseSearchResult(s: SearchItem) {
-  pickStock(s.code);
+function openSearch() {
+  searchOpen.value = true;
   searchQ.value = '';
   searchResults.value = [];
-  searchFocused.value = false;
 }
-
-// blur 시 결과 클릭 처리할 시간 확보 후 닫기
-function onSearchBlur() {
-  setTimeout(() => { searchFocused.value = false; }, 150);
+function closeSearch() {
+  searchOpen.value = false;
+}
+function chooseSearchResult(s: SearchItem) {
+  pickStock(s.code);
+  closeSearch();
 }
 
 // ============== 종목 quote ==============
@@ -155,6 +161,31 @@ function setPct(p: number) {
   qty.value = Math.max(1, Math.floor((m * p) / 100));
 }
 
+// ============== 전략 ==============
+const strategies = ref<StrategyItem[]>([]);
+const strategiesLoaded = ref(false);
+async function loadStrategies() {
+  try {
+    const r = await api.strategies();
+    strategies.value = r.items.filter((s) => s.active);
+  } catch { strategies.value = []; }
+  finally { strategiesLoaded.value = true; }
+}
+const strategyApplying = ref(false);
+async function applyStrategy(s: StrategyItem) {
+  if (strategyApplying.value || !hasCode.value) return;
+  if (!window.confirm(`'${s.name}' 전략을 ${quote.value?.name ?? code.value} 종목에 적용할까요?`)) return;
+  strategyApplying.value = true;
+  try {
+    await api.applyStrategy(s.id, { stockCode: code.value });
+    toast.success(`'${s.name}' 전략이 적용되었습니다`);
+  } catch (err) {
+    const msg = (err as Error).message;
+    if (/already_applied/i.test(msg)) toast.info('이미 적용된 전략이에요');
+    else toast.error(msg);
+  } finally { strategyApplying.value = false; }
+}
+
 async function submit() {
   if (!canSubmit.value) return;
   submitting.value = true;
@@ -195,8 +226,15 @@ async function submit() {
   } finally { submitting.value = false; }
 }
 
+// 주문금액 (수량 × 가격)
+const orderAmount = computed(() => {
+  const p = priceMode.value === 'limit' ? limitPrice.value : (quote.value?.price ?? 0);
+  return p > 0 && qty.value > 0 ? p * qty.value : 0;
+});
+
 onMounted(async () => {
   await loadBalance();
+  loadStrategies();
   ordersStore.subscribe(8000);
   watchlist.subscribe();
   // URL ?code 없으면 마지막 본 종목 / 보유 / 관심 / 디폴트로 자동 진입
@@ -214,72 +252,47 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-2">
-    <!-- 상단 검색바 + 종목 헤더 -->
-    <div class="space-y-1.5">
-      <div class="relative">
-        <Search class="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          v-model="searchQ"
-          type="text"
-          placeholder="종목명 또는 6자리 코드"
-          class="w-full rounded-xl bg-muted py-2 pl-9 pr-9 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-          @focus="searchFocused = true"
-          @blur="onSearchBlur"
-        />
-        <button
-          v-if="searchQ"
-          class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-accent"
-          @click="searchQ = ''"
-        >
-          <X class="h-3.5 w-3.5" />
-        </button>
-
-        <!-- 검색 결과 드롭다운 -->
-        <div
-          v-if="searchFocused && searchResults.length > 0"
-          class="absolute inset-x-0 top-full z-10 mt-1 max-h-72 overflow-y-auto rounded-xl border border-border bg-card shadow-lg"
-        >
+  <div class="space-y-3">
+    <!-- 종목 헤더 + 돋보기 (검색은 시트로) -->
+    <div v-if="quote" class="flex items-center gap-2 px-1">
+      <div class="min-w-0">
+        <div class="flex items-center gap-1.5">
+          <p class="truncate text-base font-bold tracking-tight">{{ quote.name }}</p>
           <button
-            v-for="r in searchResults" :key="r.code"
-            class="flex w-full items-center justify-between px-3 py-2 text-left text-sm transition hover:bg-accent"
-            @mousedown.prevent="chooseSearchResult(r)"
+            class="rounded p-1 text-muted-foreground transition hover:bg-accent"
+            aria-label="종목 검색"
+            @click="openSearch"
           >
-            <span class="font-semibold">{{ r.name }}</span>
-            <span class="text-[11px] text-muted-foreground tabular-nums">{{ r.code }}</span>
+            <Search class="h-4 w-4" />
           </button>
         </div>
-      </div>
-
-      <!-- 종목 헤더 -->
-      <div v-if="quote" class="flex items-baseline gap-2 px-1">
-        <p class="text-base font-bold tracking-tight">{{ quote.name }}</p>
         <p class="text-[10px] text-muted-foreground tabular-nums">{{ code }}</p>
-        <div class="ml-auto text-right">
-          <p class="text-base font-bold tabular-nums leading-tight" :class="pflsColor(quote.change)">
-            {{ fmtKrw(quote.price) }}
-          </p>
-          <p class="text-[10px] font-semibold tabular-nums leading-tight" :class="pflsColor(quote.change)">
-            {{ quote.signLabel }} {{ Math.abs(quote.change).toLocaleString() }} ({{ fmtPct(quote.changeRate) }})
-          </p>
-        </div>
+      </div>
+      <div class="ml-auto text-right">
+        <p class="text-base font-bold tabular-nums leading-tight" :class="pflsColor(quote.change)">
+          {{ fmtKrw(quote.price) }}
+        </p>
+        <p class="text-[10px] font-semibold tabular-nums leading-tight" :class="pflsColor(quote.change)">
+          {{ quote.signLabel }} {{ Math.abs(quote.change).toLocaleString() }} ({{ fmtPct(quote.changeRate) }})
+        </p>
       </div>
     </div>
 
     <!-- 2-col: 좌 호가 / 우 매매 폼 -->
-    <div v-if="hasCode" class="grid grid-cols-[5fr_6fr] gap-2">
-      <!-- 좌: 호가 -->
+    <div v-if="hasCode" class="grid grid-cols-[5fr_6fr] gap-3">
+      <!-- 좌: 호가 (잔량 합계 숨김) -->
       <div class="rounded-xl bg-card ring-1 ring-border/60 dark:ring-0 p-2">
         <OrderBook
           :code="code"
           :levels="5"
           :interval-ms="1500"
+          :hide-totals="true"
           @pick-price="onPickPrice"
         />
       </div>
 
       <!-- 우: 매수/매도 폼 -->
-      <div class="rounded-xl bg-card ring-1 ring-border/60 dark:ring-0 p-2.5 space-y-2.5">
+      <div class="rounded-xl bg-card ring-1 ring-border/60 dark:ring-0 p-3 space-y-3">
         <!-- 매수/매도 토글 -->
         <div class="inline-flex w-full rounded-lg bg-muted p-0.5">
           <button
@@ -315,7 +328,6 @@ onUnmounted(() => {
         <!-- 가격 ± -->
         <div v-if="priceMode === 'limit'">
           <PriceStepper v-model="limitPrice" :step="priceStep" :min="0" suffix="원" compact />
-          <p class="mt-1 text-center text-[9px] text-muted-foreground">호가 누르면 자동 입력</p>
         </div>
         <div v-else class="rounded-md bg-muted/30 px-2 py-2 text-center text-[10px] text-muted-foreground">
           {{ quote ? fmtKrw(quote.price) + '원' : '...' }} 즉시 체결
@@ -324,36 +336,64 @@ onUnmounted(() => {
         <!-- 수량 ± -->
         <div>
           <div class="flex items-center justify-between">
-            <span class="text-[9px] text-muted-foreground">수량</span>
-            <span class="text-[9px] text-muted-foreground tabular-nums">최대 {{ maxQty }}주</span>
+            <span class="text-[10px] text-muted-foreground">수량</span>
+            <span class="text-[10px] text-muted-foreground tabular-nums">최대 {{ maxQty }}주</span>
           </div>
           <PriceStepper v-model="qty" :step="1" :min="0" :max="maxQty" suffix="주" compact />
-          <div class="mt-1 grid grid-cols-4 gap-1">
+          <div class="mt-1.5 grid grid-cols-4 gap-1">
             <button
               v-for="p in [25, 50, 75, 100]" :key="p"
               type="button"
-              class="rounded bg-muted/50 py-1 text-[9px] font-semibold transition hover:bg-muted"
+              class="rounded bg-muted/50 py-1 text-[10px] font-semibold transition hover:bg-muted"
               @click="setPct(p)"
             >{{ p === 100 ? '전부' : `${p}%` }}</button>
           </div>
         </div>
 
-        <!-- TP/SL (매수만) -->
-        <div v-if="side === 'buy'" class="space-y-1 rounded-md bg-muted/30 p-2 text-[10px]">
-          <label class="flex items-center gap-1.5">
-            <input v-model="tpEnabled" type="checkbox" class="rounded">
-            <span class="flex-1">익절</span>
-            <span class="flex items-center gap-0.5">
+        <!-- 주문금액 -->
+        <div class="flex items-center justify-between rounded-md bg-muted/40 px-2.5 py-2 text-[11px]">
+          <span class="text-muted-foreground">주문금액</span>
+          <span class="font-bold tabular-nums">{{ orderAmount > 0 ? fmtKrw(orderAmount) + '원' : '—' }}</span>
+        </div>
+
+        <!-- TP/SL — 토글 스위치 (매수만) -->
+        <div v-if="side === 'buy'" class="space-y-2 rounded-md bg-muted/30 p-2.5">
+          <label class="flex items-center gap-2 text-xs">
+            <button
+              type="button"
+              class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition"
+              :class="tpEnabled ? 'bg-up' : 'bg-muted-foreground/30'"
+              @click="tpEnabled = !tpEnabled"
+            >
+              <span
+                class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition"
+                :style="{ transform: tpEnabled ? 'translateX(18px)' : 'translateX(2px)' }"
+              />
+            </button>
+            <span class="flex-1 font-semibold">익절</span>
+            <span class="flex items-center gap-1 text-muted-foreground">
               +<input v-model.number="tpPct" type="number" min="0.1" max="100" step="0.1"
-                class="w-12 rounded border border-border bg-card px-1 py-0.5 text-right tabular-nums" />%
+                :disabled="!tpEnabled"
+                class="w-14 rounded border border-border bg-card px-1.5 py-1 text-right text-xs tabular-nums disabled:opacity-40" />%
             </span>
           </label>
-          <label class="flex items-center gap-1.5">
-            <input v-model="slEnabled" type="checkbox" class="rounded">
-            <span class="flex-1">손절</span>
-            <span class="flex items-center gap-0.5">
+          <label class="flex items-center gap-2 text-xs">
+            <button
+              type="button"
+              class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition"
+              :class="slEnabled ? 'bg-down' : 'bg-muted-foreground/30'"
+              @click="slEnabled = !slEnabled"
+            >
+              <span
+                class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition"
+                :style="{ transform: slEnabled ? 'translateX(18px)' : 'translateX(2px)' }"
+              />
+            </button>
+            <span class="flex-1 font-semibold">손절</span>
+            <span class="flex items-center gap-1 text-muted-foreground">
               -<input v-model.number="slPct" type="number" min="0.1" max="100" step="0.1"
-                class="w-12 rounded border border-border bg-card px-1 py-0.5 text-right tabular-nums" />%
+                :disabled="!slEnabled"
+                class="w-14 rounded border border-border bg-card px-1.5 py-1 text-right text-xs tabular-nums disabled:opacity-40" />%
             </span>
           </label>
         </div>
@@ -373,6 +413,42 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- 전략 주문 — 저장된 active 전략 또는 빈 상태 안내 -->
+    <section v-if="hasCode && strategiesLoaded" class="space-y-2">
+      <div class="flex items-center gap-1.5 px-1">
+        <Sparkles class="h-3.5 w-3.5 text-primary" />
+        <h3 class="text-xs font-bold tracking-tight">전략 주문</h3>
+      </div>
+      <div v-if="strategies.length > 0" class="space-y-1.5">
+        <button
+          v-for="s in strategies" :key="s.id"
+          type="button"
+          :disabled="strategyApplying"
+          class="flex w-full items-center justify-between gap-2 rounded-xl bg-card ring-1 ring-border/60 dark:ring-0 px-3 py-2.5 text-left transition active:scale-[0.99] disabled:opacity-50"
+          @click="applyStrategy(s)"
+        >
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-semibold">{{ s.name }}</p>
+            <p class="mt-0.5 text-[10px] text-muted-foreground">
+              {{ s.definition.entry.type === 'morning' ? '시가매매' :
+                 s.definition.entry.type === 'limit_price' ? '지정가 도달' :
+                 s.definition.entry.type === 'morning_staged' ? '분할 매수' : '전략' }}
+            </p>
+          </div>
+          <span class="shrink-0 text-[11px] font-semibold text-primary">적용 ›</span>
+        </button>
+      </div>
+      <RouterLink
+        v-else
+        to="/more/strategy/new"
+        class="flex items-center gap-2 rounded-xl border border-dashed border-border bg-card/50 px-3 py-3 text-xs transition hover:bg-card"
+      >
+        <Plus class="h-3.5 w-3.5 text-muted-foreground" />
+        <span class="flex-1 text-muted-foreground">저장된 전략이 없습니다.</span>
+        <span class="font-semibold">전략 추가 ›</span>
+      </RouterLink>
+    </section>
+
     <!-- 대기 주문 진입 링크 -->
     <RouterLink
       v-if="ordersStore.count > 0"
@@ -383,5 +459,41 @@ onUnmounted(() => {
       <span class="flex-1 font-semibold">대기 주문 {{ ordersStore.count }}건</span>
       <span class="text-muted-foreground">›</span>
     </RouterLink>
+
+    <!-- 종목 검색 시트 -->
+    <BottomSheet :open="searchOpen" title="종목 검색" @close="closeSearch">
+      <div class="space-y-3">
+        <div class="relative">
+          <Search class="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            v-model="searchQ"
+            type="text"
+            placeholder="종목명 또는 6자리 코드"
+            autofocus
+            class="w-full rounded-xl bg-muted py-2.5 pl-9 pr-9 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+          <button
+            v-if="searchQ"
+            class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-accent"
+            @click="searchQ = ''"
+          >
+            <X class="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <div v-if="searchResults.length > 0" class="max-h-[55vh] space-y-1 overflow-y-auto">
+          <button
+            v-for="r in searchResults" :key="r.code"
+            class="flex w-full items-center justify-between rounded-xl bg-card ring-1 ring-border/60 dark:ring-0 px-3 py-2.5 text-left transition active:scale-[0.99]"
+            @click="chooseSearchResult(r)"
+          >
+            <span class="text-sm font-semibold">{{ r.name }}</span>
+            <span class="text-[11px] text-muted-foreground tabular-nums">{{ r.code }}</span>
+          </button>
+        </div>
+        <p v-else-if="searchQ.trim()" class="py-6 text-center text-xs text-muted-foreground">
+          검색 결과가 없어요
+        </p>
+      </div>
+    </BottomSheet>
   </div>
 </template>

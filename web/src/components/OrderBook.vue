@@ -14,8 +14,10 @@ const props = withDefaults(
     compact?: boolean;
     /** false면 SSE 안 쓰고 REST 폴링만 */
     useStream?: boolean;
+    /** true면 매도/매수 총잔량 합계 행 숨김 */
+    hideTotals?: boolean;
   }>(),
-  { intervalMs: 1500, levels: 10, compact: false, useStream: true },
+  { intervalMs: 1500, levels: 10, compact: false, useStream: true, hideTotals: false },
 );
 
 const emit = defineEmits<{ pickPrice: [price: number] }>();
@@ -193,7 +195,7 @@ watch(() => props.intervalMs, () => { if (!streamLive.value) startPolling(); });
       </div>
     </template>
 
-    <div v-if="data && !compact" class="mt-1.5 grid grid-cols-2 gap-2 border-t border-border pt-1.5 text-[10px] text-muted-foreground">
+    <div v-if="data && !compact && !hideTotals" class="mt-1.5 grid grid-cols-2 gap-2 border-t border-border pt-1.5 text-[10px] text-muted-foreground">
       <div class="flex items-center justify-between">
         <span>매도 잔량</span>
         <span class="font-semibold text-down">{{ fmtNum(data.totalAskQty) }}</span>

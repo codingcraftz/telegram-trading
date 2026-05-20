@@ -59,6 +59,9 @@ async function toggleWatch() {
 // 차트 탭 빠른 진입용 — 마지막 본 종목 저장
 watch(code, (c) => {
   if (c && /^\d{6}$/.test(c)) {
+    // 차트/주문/잔고에서 마지막 본 종목 — 단일 키로 통합 (Trade.vue 와 공유).
+    try { localStorage.setItem('owlim:last-code', c); } catch {}
+    // 호환: 옛 키도 같이 갱신
     try { localStorage.setItem('owlim:last-chart-code', c); } catch {}
   }
   loadBalance();

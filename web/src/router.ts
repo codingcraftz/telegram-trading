@@ -12,7 +12,8 @@ const routes: RouteRecordRaw[] = [
     name: 'chart',
     redirect: () => {
       try {
-        const last = localStorage.getItem('owlim:last-chart-code');
+        const last = localStorage.getItem('owlim:last-code')
+          ?? localStorage.getItem('owlim:last-chart-code');
         if (last && /^\d{6}$/.test(last)) return `/stocks/${last}`;
       } catch {}
       return '/stocks';
