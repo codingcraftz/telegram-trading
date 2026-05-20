@@ -66,7 +66,7 @@ function clear() {
 
     <div
       v-if="results.length > 0"
-      class="absolute inset-x-0 top-full z-10 mt-1 max-h-64 overflow-auto rounded-lg border border-border bg-card shadow-lg"
+      class="absolute inset-x-0 top-full z-50 mt-1 max-h-64 overflow-auto rounded-lg border border-border bg-card shadow-lg"
     >
       <button
         v-for="r in results"

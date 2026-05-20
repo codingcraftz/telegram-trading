@@ -41,7 +41,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <header class="sticky top-0 z-20 bg-background/90 backdrop-blur-lg">
+  <header class="sticky top-0 z-40 bg-background/90 backdrop-blur-lg">
     <div class="flex items-center gap-2 px-4 pt-3 pb-2">
       <div class="min-w-0 flex-1">
         <SymbolSearch placeholder="종목명·종목코드로 빠르게 찾기" @pick="onPick" />
