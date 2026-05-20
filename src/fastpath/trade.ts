@@ -21,6 +21,8 @@ import { formatKst, getMarketSession, nextMarketOpen, sessionLabel } from '../sc
 import type { OrderType } from '../mcp/kis.js';
 import { getConfig } from '../config.js';
 import { cached } from './cache.js';
+import { getMode } from '../runtime.js';
+import { fetchTopAskPrice } from './price.js';
 
 // ============================================================
 // 메인 메뉴
@@ -504,6 +506,18 @@ export async function buildBuyNowConfirmAndRegister(args: {
   if (args.limitPrice && args.limitPrice > 0 && session === 'regular') {
     orderType = 'limit';
     price = args.limitPrice;
+  }
+
+  // paper(모의) + 정규장 + 시장가 → 매도1호가 지정가로 자동 변환.
+  // KIS paper 시뮬레이터는 종목별로 시장가 체결을 잡지 못하는 한계가 있어 (대형주만 시뮬됨,
+  // 중소형 KOSDAQ 은 미체결 상태로 남음), 호가 1단 가격으로 지정가 발주해서 즉시 체결 유도.
+  // 호가 fetch 실패 시 시장가 fallback (현 동작 유지).
+  if (orderType === 'market' && session === 'regular' && getMode() === 'paper') {
+    const ask1 = await fetchTopAskPrice(args.code);
+    if (ask1 && ask1 > 0) {
+      orderType = 'limit';
+      price = ask1;
+    }
   }
 
   const spec: OrderSpec = {

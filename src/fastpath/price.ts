@@ -15,6 +15,31 @@ export function tryMatchPrice(text: string): { sym: string } | null {
   return { sym: m.groups.sym.trim() };
 }
 
+// 매도1호가(최우선 매도호가) 조회 — paper 모드 시장가 매수의 호가 기반 지정가 변환에 사용.
+// KIS paper 시뮬레이터가 종목별로 시장가 체결을 잡지 못하는 문제 우회.
+// 캐시: 1초 — 호가는 빠르게 변동하므로 짧게.
+export async function fetchTopAskPrice(code: string): Promise<number | null> {
+  try {
+    const res = await cached(`asking:${code}`, 1_000, () =>
+      callKisApi('domestic_stock', 'inquire_asking_price_exp_ccn', {
+        fid_cond_mrkt_div_code: 'J',
+        fid_input_iscd: code,
+      }),
+    );
+    const parsed = parseMcpResult(res);
+    if (!parsed.success) return null;
+    // inquire_asking_price_exp_ccn 응답은 output1 에 호가 데이터가 들어옴
+    const out = (parsed.raw as { output1?: Record<string, unknown> } | undefined)?.output1
+      ?? firstOutput(parsed);
+    if (!out || typeof out !== 'object') return null;
+    const d = out as Record<string, unknown>;
+    const ask1 = num(d.askp1);
+    return ask1 && ask1 > 0 ? ask1 : null;
+  } catch {
+    return null;
+  }
+}
+
 // 현재가만 빠르게 추출 — 관심종목/차트/시세조회 inline 표시용. 캐시 공유.
 export async function fetchQuickQuote(
   code: string,
