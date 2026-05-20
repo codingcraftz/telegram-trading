@@ -7,16 +7,17 @@ export type Theme = 'light' | 'dark' | 'system';
 const STORAGE_KEY = 'owlim:prefs';
 
 function load(): { mode: Mode; theme: Theme } {
+  // 기본 다크. 사용자가 라이트/자동 으로 바꾸면 localStorage 에 저장되어 다음 진입에 유지.
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { mode: 'easy', theme: 'system' };
+    if (!raw) return { mode: 'easy', theme: 'dark' };
     const parsed = JSON.parse(raw);
     return {
       mode: parsed.mode === 'advanced' ? 'advanced' : 'easy',
-      theme: parsed.theme === 'light' || parsed.theme === 'dark' ? parsed.theme : 'system',
+      theme: parsed.theme === 'light' || parsed.theme === 'system' ? parsed.theme : 'dark',
     };
   } catch {
-    return { mode: 'easy', theme: 'system' };
+    return { mode: 'easy', theme: 'dark' };
   }
 }
 
