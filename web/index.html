@@ -16,6 +16,20 @@
   </head>
   <body class="bg-background text-foreground">
     <div id="app"></div>
+    <script>
+      // beforeinstallprompt 캡처 — Vue mount 전에 이벤트 받아둠 (놓치면 prompt 호출 불가).
+      // usePwaInstall composable 이 window.__pwaPrompt 를 읽어 "📲 앱 설치" 버튼 활성화.
+      window.__pwaPrompt = null;
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        window.__pwaPrompt = e;
+        window.dispatchEvent(new CustomEvent('owlim:pwa-installable'));
+      });
+      window.addEventListener('appinstalled', () => {
+        window.__pwaPrompt = null;
+        window.dispatchEvent(new CustomEvent('owlim:pwa-installed'));
+      });
+    </script>
     <script type="module" src="/src/main.ts"></script>
     <script>
       // Service Worker 등록 (PWA 활성화)

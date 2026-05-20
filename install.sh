@@ -112,9 +112,12 @@ if [ -z "$PUBLIC_IP" ]; then
 fi
 DASHBOARD_DOMAIN="${PUBLIC_IP//./-}.sslip.io"
 
-# 대시보드 비밀번호 + bcrypt hash (caddy 이미지로 생성 — pull 포함 2분 timeout)
-DASHBOARD_PASSWORD=$(openssl rand -base64 18 | tr -d '=+/' | cut -c1-20)
-say "caddy 이미지로 bcrypt hash 생성 중"
+# 대시보드 ID / 비밀번호.
+# owlim 등록 페이지가 cloud-init env 로 DASHBOARD_USER + DASHBOARD_PASSWORD 를 미리 주입한다.
+# 둘 다 없으면 (수동 설치 등) 'admin' + 난수 fallback — 기존 동작 유지.
+DASHBOARD_USER="${DASHBOARD_USER:-admin}"
+DASHBOARD_PASSWORD="${DASHBOARD_PASSWORD:-$(openssl rand -base64 18 | tr -d '=+/' | cut -c1-20)}"
+say "caddy 이미지로 bcrypt hash 생성 중 (user=$DASHBOARD_USER)"
 DASHBOARD_PASSWORD_HASH=$(timeout 120 docker run --rm caddy:2-alpine caddy hash-password --plaintext "$DASHBOARD_PASSWORD" 2>/dev/null) || {
   warn "caddy hash-password 실패 — 평문 fallback"
   DASHBOARD_PASSWORD_HASH=""
@@ -127,6 +130,7 @@ DASHBOARD_PASSWORD_HASH_ENV="${DASHBOARD_PASSWORD_HASH//\$/\$\$}"
 # CADDY_EMAIL은 빈값이면 Caddy 'email' 지시문이 syntax error → 도메인 기반 dummy 자동 채움.
 cat > $INSTALL_DIR/.env <<EOF
 DASHBOARD_DOMAIN=$DASHBOARD_DOMAIN
+DASHBOARD_USER=$DASHBOARD_USER
 DASHBOARD_PASSWORD_HASH=$DASHBOARD_PASSWORD_HASH_ENV
 CADDY_EMAIL=admin@$DASHBOARD_DOMAIN
 
@@ -179,7 +183,7 @@ sleep 15
 # ---------- 6) 완료 callback (어떤 일이 있어도 보냄) ----------
 DASHBOARD_URL="https://$DASHBOARD_DOMAIN"
 DIAG=$(collect_diagnostics)
-report 6 "준비 완료" ",\"ip\":\"$PUBLIC_IP\",\"dashboard_url\":\"$DASHBOARD_URL\",\"password\":\"$DASHBOARD_PASSWORD\",\"diagnostics\":$DIAG"
+report 6 "준비 완료" ",\"ip\":\"$PUBLIC_IP\",\"dashboard_url\":\"$DASHBOARD_URL\",\"username\":\"$DASHBOARD_USER\",\"password\":\"$DASHBOARD_PASSWORD\",\"diagnostics\":$DIAG"
 
 # 정상 종료 — trap이 종료 시 false alarm 안 보내도록
 trap - ERR EXIT

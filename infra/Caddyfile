@@ -8,9 +8,10 @@
 }
 
 {$DASHBOARD_DOMAIN} {
-  # 비밀번호로 보호 (Caddy basic_auth)
+  # 비밀번호로 보호 (Caddy basic_auth).
+  # username 은 docker-compose env (${DASHBOARD_USER:-admin}) 로 주입, 기본값 admin.
   basic_auth /* {
-    admin {$DASHBOARD_PASSWORD_HASH}
+    {$DASHBOARD_USER} {$DASHBOARD_PASSWORD_HASH}
   }
   reverse_proxy bot:8080
 }

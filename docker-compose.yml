@@ -54,6 +54,7 @@ services:
       - "443:443"
     environment:
       DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN}
+      DASHBOARD_USER: ${DASHBOARD_USER:-admin}
       DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH}
       CADDY_EMAIL: ${CADDY_EMAIL:-}
     volumes:
