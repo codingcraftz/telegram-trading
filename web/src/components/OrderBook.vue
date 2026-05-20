@@ -133,8 +133,54 @@ watch(() => props.intervalMs, () => { if (!streamLive.value) startPolling(); });
 
 <template>
   <div class="text-xs tabular-nums">
+    <!-- 데이터 로딩 전 skeleton — 실제 호가 row 와 동일한 높이로 layout shift 방지 -->
+    <template v-if="!data">
+      <template v-if="compact">
+        <div class="space-y-px">
+          <div
+            v-for="n in levels" :key="`sk-a-${n}`"
+            class="flex h-[22px] w-full animate-pulse items-center justify-between rounded bg-muted/30 px-1.5"
+          >
+            <span class="h-2.5 w-12 rounded bg-muted/60" />
+            <span class="h-2.5 w-8 rounded bg-muted/40" />
+          </div>
+        </div>
+        <div class="my-1 h-px bg-border" />
+        <div class="space-y-px">
+          <div
+            v-for="n in levels" :key="`sk-b-${n}`"
+            class="flex h-[22px] w-full animate-pulse items-center justify-between rounded bg-muted/30 px-1.5"
+          >
+            <span class="h-2.5 w-12 rounded bg-muted/60" />
+            <span class="h-2.5 w-8 rounded bg-muted/40" />
+          </div>
+        </div>
+      </template>
+      <template v-else>
+        <div class="space-y-0.5">
+          <div
+            v-for="n in levels" :key="`sk-a-${n}`"
+            class="flex h-[26px] w-full animate-pulse items-center justify-between rounded-md bg-muted/30 px-2"
+          >
+            <span class="h-2.5 w-16 rounded bg-muted/60" />
+            <span class="h-2.5 w-10 rounded bg-muted/40" />
+          </div>
+        </div>
+        <div class="my-1 h-px bg-border" />
+        <div class="space-y-0.5">
+          <div
+            v-for="n in levels" :key="`sk-b-${n}`"
+            class="flex h-[26px] w-full animate-pulse items-center justify-between rounded-md bg-muted/30 px-2"
+          >
+            <span class="h-2.5 w-16 rounded bg-muted/60" />
+            <span class="h-2.5 w-10 rounded bg-muted/40" />
+          </div>
+        </div>
+      </template>
+    </template>
+
     <!-- compact: 좁은 컬럼용. 한 셀에 가격 좌 / 잔량 우, 잔량 막대 배경 -->
-    <template v-if="compact">
+    <template v-else-if="compact">
       <div class="space-y-px">
         <button
           v-for="(row, idx) in askRows"

@@ -365,42 +365,48 @@ onUnmounted(() => {
 
     <!-- 주문 탭 — 매수/매도 폼 -->
     <template v-else>
-    <!-- 종목 헤더 skeleton — quote 로딩 전 동일 사이즈 placeholder -->
-    <div v-if="!quote" class="flex items-center gap-2 px-1 animate-pulse">
-      <div class="min-w-0 flex-1">
-        <div class="h-5 w-32 rounded bg-muted/60" />
-        <div class="mt-1 h-3 w-16 rounded bg-muted/40" />
-      </div>
-      <div class="text-right">
-        <div class="h-5 w-24 rounded bg-muted/60" />
-        <div class="mt-1 h-3 w-20 rounded bg-muted/40" />
-      </div>
-    </div>
-
-    <!-- 종목 헤더 + 돋보기 + 대기 N 배지 (대기/전략 통합 진입) -->
-    <div v-else class="flex items-center gap-2 px-1">
-      <div class="min-w-0">
-        <div class="flex items-center gap-1.5">
-          <p class="truncate text-base font-bold tracking-tight">{{ quote.name }}</p>
-          <button
-            class="rounded p-1 text-muted-foreground transition hover:bg-accent"
-            aria-label="종목 검색"
-            @click="openSearch"
-          >
-            <Search class="h-4 w-4" />
-          </button>
+    <!-- 종목 헤더 — skeleton ↔ 실데이터 fade transition -->
+    <Transition
+      mode="out-in"
+      enter-active-class="transition duration-200 ease-out"
+      enter-from-class="opacity-0"
+      leave-active-class="transition duration-100 ease-in"
+      leave-to-class="opacity-0"
+    >
+      <div v-if="!quote" key="header-sk" class="flex items-center gap-2 px-1 animate-pulse">
+        <div class="min-w-0 flex-1">
+          <div class="h-5 w-32 rounded bg-muted/60" />
+          <div class="mt-1 h-3 w-16 rounded bg-muted/40" />
         </div>
-        <p class="text-[10px] text-muted-foreground tabular-nums">{{ code }}</p>
+        <div class="text-right">
+          <div class="h-5 w-24 rounded bg-muted/60" />
+          <div class="mt-1 h-3 w-20 rounded bg-muted/40" />
+        </div>
       </div>
-      <div class="ml-auto text-right">
-        <p class="text-base font-bold tabular-nums leading-tight" :class="pflsColor(quote.change)">
-          {{ fmtKrw(quote.price) }}
-        </p>
-        <p class="text-[10px] font-semibold tabular-nums leading-tight" :class="pflsColor(quote.change)">
-          {{ quote.signLabel }} {{ Math.abs(quote.change).toLocaleString() }} ({{ fmtPct(quote.changeRate) }})
-        </p>
+      <div v-else key="header-data" class="flex items-center gap-2 px-1">
+        <div class="min-w-0">
+          <div class="flex items-center gap-1.5">
+            <p class="truncate text-base font-bold tracking-tight">{{ quote.name }}</p>
+            <button
+              class="rounded p-1 text-muted-foreground transition hover:bg-accent"
+              aria-label="종목 검색"
+              @click="openSearch"
+            >
+              <Search class="h-4 w-4" />
+            </button>
+          </div>
+          <p class="text-[10px] text-muted-foreground tabular-nums">{{ code }}</p>
+        </div>
+        <div class="ml-auto text-right">
+          <p class="text-base font-bold tabular-nums leading-tight" :class="pflsColor(quote.change)">
+            {{ fmtKrw(quote.price) }}
+          </p>
+          <p class="text-[10px] font-semibold tabular-nums leading-tight" :class="pflsColor(quote.change)">
+            {{ quote.signLabel }} {{ Math.abs(quote.change).toLocaleString() }} ({{ fmtPct(quote.changeRate) }})
+          </p>
+        </div>
       </div>
-    </div>
+    </Transition>
 
     <!-- 2-col: 좌 호가 / 우 매매 폼 -->
     <div v-if="hasCode" class="grid grid-cols-[5fr_6fr] gap-3">
@@ -544,6 +550,16 @@ onUnmounted(() => {
         </button>
       </div>
     </div>
+
+    <!-- 전략 로딩 전 skeleton — 섹션 등장 직전 layout 안정화 -->
+    <section v-if="hasCode && !strategiesLoaded" class="space-y-2">
+      <div class="px-1">
+        <div class="h-3.5 w-20 animate-pulse rounded bg-muted/60" />
+      </div>
+      <div class="space-y-1.5">
+        <div v-for="n in 2" :key="n" class="h-[58px] animate-pulse rounded-xl bg-card" />
+      </div>
+    </section>
 
     <!-- 시가매매 전략 — 다음 영업일 09:00 자동 매수 + 감시 -->
     <section v-if="hasCode && strategiesLoaded && morningStrategies.length > 0" class="space-y-2">
