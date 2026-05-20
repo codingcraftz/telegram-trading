@@ -135,7 +135,14 @@ export const api = {
     request<{ ok: boolean }>(`/api/strategies/${id}`, { method: 'DELETE' }),
   cloneStrategy: (id: string) =>
     request<StrategyItem>(`/api/strategies/${id}/clone`, { method: 'POST' }),
-  applyStrategy: (id: string, body: { stockCode: string; budgetAmount?: number }) =>
+  applyStrategy: (
+    id: string,
+    body: {
+      stockCode: string;
+      budgetAmount?: number;
+      stage1Snapshot?: { qty: number; avgPrice: number };
+    },
+  ) =>
     request<StrategyApplicationRow>(`/api/strategies/${id}/apply`, {
       method: 'POST', body: JSON.stringify(body),
     }),
@@ -428,6 +435,8 @@ export type StrategyEntry =
   | { type: 'limit_price'; targetPrice: number; direction: 'above' | 'below' }
   | {
       type: 'morning_staged';
+      /** 'morning' (default): 다음 영업일 09:00 시가매매. 'immediate': trade 폼에서 매수 시점에 적용. */
+      triggerMode?: 'morning' | 'immediate';
       budget: StagedMorningBudget;
       stages: StagedMorningStage[];
       takeProfit?: StagedMorningTp;

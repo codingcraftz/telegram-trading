@@ -146,7 +146,11 @@ export async function processStagedApplication(app: StrategyApplication): Promis
 
   switch (runtime.phase) {
     case 'pending':
-      // 1차 진입 — 시가 윈도우 안에서만
+      // immediate 모드는 외부(trade 폼)에서 매수 후 createApplication 시 즉시
+      // 'stage1_filled' 로 시작 — pending 상태로 떠있다는 건 외부 처리 누락이라
+      // 안전하게 무시하고 다음 tick 대기.
+      if (entry.triggerMode === 'immediate') return;
+      // morning 모드 — 다음 영업일 시가 윈도우에서 1차 진입
       if (session !== 'regular' || !inMorningWindow(now)) return;
       await fireStage1(app, strat, entry, def, now);
       return;

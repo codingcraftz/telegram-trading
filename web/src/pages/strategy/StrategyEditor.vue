@@ -45,6 +45,8 @@ type StagedBudgetMode = 'fixed_amount' | 'cash_ratio';
 const stagedBudgetMode = ref<StagedBudgetMode>('cash_ratio');
 const stagedBudgetAmount = ref<number>(1_000_000);
 const stagedBudgetRatio = ref<number>(100); // %
+// 시가매매 — default ON (다음 영업일 09:00 자동 매수). OFF 면 trade 폼에서 매수 시점에 적용.
+const triggerMorning = ref<boolean>(true);
 // 1차 비율 (2차 OFF 면 100, ON 시 사용자 입력 default 50, 2차는 100-1차)
 const stage1Pct = ref<number>(100);
 // 2차 (물타기) — default OFF
@@ -129,6 +131,7 @@ const definition = computed<StrategyDefinition>(() => {
     if (tp2Enabled.value) tp.tp2 = { enabled: true, atPct: tp2AtPct.value };
     entry = {
       type: 'morning_staged',
+      triggerMode: triggerMorning.value ? 'morning' : 'immediate',
       budget,
       stages,
       takeProfit: tp.tp1 || tp.tp2 ? tp : undefined,
@@ -219,6 +222,7 @@ function applyDefinition(d: StrategyDefinition) {
     targetPrice.value = d.entry.targetPrice;
     direction.value = d.entry.direction;
   } else if (d.entry.type === 'morning_staged') {
+    triggerMorning.value = (d.entry.triggerMode ?? 'morning') === 'morning';
     const b = d.entry.budget;
     stagedBudgetMode.value = b.mode;
     if (b.mode === 'fixed_amount') stagedBudgetAmount.value = b.value;
@@ -561,6 +565,27 @@ async function removeApp(appId: string) {
           <span class="mb-1 block text-[11px] font-semibold text-muted-foreground">예수금의 {{ stagedBudgetRatio }}%</span>
           <input v-model.number="stagedBudgetRatio" type="range" min="1" max="100" step="1" class="w-full accent-primary" />
         </label>
+      </Card>
+
+      <!-- 시가매매 토글 — default ON. OFF 면 trade 폼에서 매수 시점에 적용. -->
+      <Card>
+        <template #header><h3 class="text-sm font-bold tracking-tight">시가매매</h3></template>
+        <label class="flex items-center gap-2.5">
+          <input v-model="triggerMorning" type="checkbox" class="peer sr-only" />
+          <span class="relative inline-flex h-6 w-11 cursor-pointer items-center rounded-full bg-muted transition peer-checked:bg-primary">
+            <span class="inline-block h-5 w-5 transform rounded-full bg-card shadow transition" :class="triggerMorning ? 'translate-x-[1.375rem]' : 'translate-x-0.5'" />
+          </span>
+          <span class="text-sm font-semibold">다음 영업일 09:00 자동 매수</span>
+        </label>
+        <p class="mt-2 rounded-lg bg-muted/30 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+          <template v-if="triggerMorning">
+            전략 적용 → 다음 영업일 시가에 1차 매수. 이후 분할 진입/익절/손절 자동 감시.
+          </template>
+          <template v-else>
+            시가매매 없이 <b class="text-foreground">주문 화면</b>에서 매수 시점에 적용. 그 매수가
+            1차로 인식되어 익절/손절/물타기 자동 감시 시작.
+          </template>
+        </p>
       </Card>
 
       <!-- 분할 진입 -->

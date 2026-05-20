@@ -53,9 +53,23 @@ export function createApplication(args: {
   chatId: number;
   stockCode: string;
   budgetAmount?: number | null;
+  /** immediate 전략 — 외부에서 매수 발주 직후 호출. runtime 을 stage1_filled 로 초기화. */
+  stage1Snapshot?: { qty: number; avgPrice: number } | null;
 }): StrategyApplication {
   const id = newId();
   const now = Date.now();
+  const runtimeJson = args.stage1Snapshot
+    ? JSON.stringify({
+        phase: 'stage1_filled',
+        stage1: {
+          qty: args.stage1Snapshot.qty,
+          avgPrice: args.stage1Snapshot.avgPrice,
+          orderId: 'external',
+          positionId: 'external',
+          filledAt: now,
+        },
+      })
+    : null;
   getDb()
     .insert(strategyApplications)
     .values({
@@ -67,6 +81,7 @@ export function createApplication(args: {
       appliedAt: now,
       lastEvaluatedAt: null,
       budgetAmount: args.budgetAmount ?? null,
+      runtimeJson,
     })
     .run();
   return getApplicationById(id, args.chatId)!;

@@ -55,7 +55,12 @@ export const EntrySchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('morning_staged'),
-    /** 자금 단위 — 전체 자금 중 얼마를 이 전략이 쓸지 */
+    /** 진입 트리거 모드.
+     *  'morning' (default): 다음 영업일 09:00 시가에 1차 매수 (현재 동작).
+     *  'immediate': 시가매매 안 함. trade 폼에서 사용자가 직접 매수 시점에 적용 →
+     *               그 매수가 1차로 인식되어 TP/SL/물타기 감시 시작. */
+    triggerMode: z.enum(['morning', 'immediate']).optional().default('morning'),
+    /** 자금 단위 — 전체 자금 중 얼마를 이 전략이 쓸지. immediate 모드면 무시 (외부 매수가 1차). */
     budget: z.discriminatedUnion('mode', [
       z.object({ mode: z.literal('fixed_amount'), value: z.number().positive() }),
       z.object({ mode: z.literal('cash_ratio'), value: z.number().min(0.01).max(1.0) }),
@@ -133,6 +138,14 @@ export const ApplyStrategyInputSchema = z.object({
   stockCode: z.string().regex(/^\d{6}$/, '6자리 종목코드만 가능'),
   /** apply 시점에 사용자가 지정하는 자금 (원). 없으면 strategy.budget 사용. */
   budgetAmount: z.number().int().positive().optional(),
+  /** immediate 모드 전략 — 외부에서 이미 발주한 1차 매수 정보. 있으면 runtime 을
+   *  'stage1_filled' 로 즉시 초기화. */
+  stage1Snapshot: z
+    .object({
+      qty: z.number().int().positive(),
+      avgPrice: z.number().int().positive(),
+    })
+    .optional(),
 });
 export type ApplyStrategyInput = z.infer<typeof ApplyStrategyInputSchema>;
 

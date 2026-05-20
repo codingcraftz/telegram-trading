@@ -171,6 +171,25 @@ async function loadStrategies() {
   } catch { strategies.value = []; }
   finally { strategiesLoaded.value = true; }
 }
+
+// 매수 폼 안 "전략 적용" 옵션 — immediate 모드 전략만 노출.
+// 매수 발주 직후 그 체결로 application 생성 → 봇이 TP/SL/물타기 감시.
+const immediateStrategies = computed(() =>
+  strategies.value.filter((s) =>
+    s.definition.entry.type === 'morning_staged' &&
+    (s.definition.entry.triggerMode ?? 'morning') === 'immediate',
+  ),
+);
+const morningStrategies = computed(() =>
+  strategies.value.filter((s) => {
+    if (s.definition.entry.type !== 'morning_staged') return true;
+    return (s.definition.entry.triggerMode ?? 'morning') === 'morning';
+  }),
+);
+const selectedImmediateStrategyId = ref<string>('');
+const selectedImmediateStrategy = computed(() =>
+  immediateStrategies.value.find((s) => s.id === selectedImmediateStrategyId.value) ?? null,
+);
 // 전략 적용 시 자금 입력 시트
 const strategyApplying = ref(false);
 const strategySheetOpen = ref(false);
@@ -225,6 +244,24 @@ async function submit() {
       });
       if (r.result?.ok ?? true) {
         toast.success('매수 주문이 접수되었습니다');
+        // immediate 모드 전략이 선택돼 있으면 매수 직후 application 도 함께 생성.
+        // 평단 = limit 면 limitPrice, 시장가면 현재가 (체결가 근사). 봇이 그 시점부터 감시.
+        const strat = selectedImmediateStrategy.value;
+        if (strat && quote.value) {
+          const avgPrice = priceMode.value === 'limit' ? limitPrice.value : quote.value.price;
+          try {
+            await api.applyStrategy(strat.id, {
+              stockCode: code.value,
+              stage1Snapshot: { qty: qty.value, avgPrice: Math.round(avgPrice) },
+            });
+            toast.success(`'${strat.name}' 전략 감시 시작`);
+            selectedImmediateStrategyId.value = '';
+          } catch (err) {
+            const msg = (err as Error).message;
+            if (/already_applied/i.test(msg)) toast.info('이미 적용된 전략');
+            else toast.error('전략 적용 실패: ' + msg);
+          }
+        }
         qty.value = 0;
       } else {
         toast.error(r.result?.message || '매수 거절');
@@ -384,6 +421,21 @@ onUnmounted(() => {
           <span class="font-bold tabular-nums">{{ orderAmount > 0 ? fmtKrw(orderAmount) + '원' : '—' }}</span>
         </div>
 
+        <!-- 전략 적용 (immediate 모드, 매수만) — 매수와 동시에 TP/SL/물타기 감시 시작 -->
+        <div v-if="side === 'buy' && immediateStrategies.length > 0" class="rounded-md bg-primary/10 ring-1 ring-primary/30 dark:ring-0 p-2.5 space-y-1.5">
+          <label class="block text-[11px] font-semibold text-primary">전략 적용 (선택)</label>
+          <select
+            v-model="selectedImmediateStrategyId"
+            class="w-full rounded-md border border-border bg-card px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="">— 전략 사용 안 함</option>
+            <option v-for="s in immediateStrategies" :key="s.id" :value="s.id">{{ s.name }}</option>
+          </select>
+          <p v-if="selectedImmediateStrategy" class="text-[10px] leading-snug text-muted-foreground">
+            매수 직후 자동으로 TP/SL/물타기 감시 시작.
+          </p>
+        </div>
+
         <!-- TP/SL — 토글 스위치 (매수만) -->
         <div v-if="side === 'buy'" class="space-y-2 rounded-md bg-muted/30 p-2.5">
           <label class="flex items-center gap-2 text-xs">
@@ -441,15 +493,15 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 전략 주문 — 저장된 active 전략 또는 빈 상태 안내 -->
+    <!-- 전략 주문 — 시가매매(morning) 전략만 노출. immediate 전략은 매수 폼 안 dropdown 으로. -->
     <section v-if="hasCode && strategiesLoaded" class="space-y-2">
       <div class="flex items-center gap-1.5 px-1">
         <Sparkles class="h-3.5 w-3.5 text-primary" />
-        <h3 class="text-xs font-bold tracking-tight">전략 주문</h3>
+        <h3 class="text-xs font-bold tracking-tight">시가매매 전략</h3>
       </div>
-      <div v-if="strategies.length > 0" class="space-y-1.5">
+      <div v-if="morningStrategies.length > 0" class="space-y-1.5">
         <button
-          v-for="s in strategies" :key="s.id"
+          v-for="s in morningStrategies" :key="s.id"
           type="button"
           :disabled="strategyApplying"
           class="flex w-full items-center justify-between gap-2 rounded-xl bg-card ring-1 ring-border/60 dark:ring-0 px-3 py-2.5 text-left transition active:scale-[0.99] disabled:opacity-50"
@@ -472,7 +524,9 @@ onUnmounted(() => {
         class="flex items-center gap-2 rounded-xl border border-dashed border-border bg-card/50 px-3 py-3 text-xs transition hover:bg-card"
       >
         <Plus class="h-3.5 w-3.5 text-muted-foreground" />
-        <span class="flex-1 text-muted-foreground">저장된 전략이 없습니다.</span>
+        <span class="flex-1 text-muted-foreground">
+          {{ strategies.length === 0 ? '저장된 전략이 없습니다.' : '시가매매 전략이 없습니다.' }}
+        </span>
         <span class="font-semibold">전략 추가 ›</span>
       </RouterLink>
     </section>
