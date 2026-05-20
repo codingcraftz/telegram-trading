@@ -3,7 +3,7 @@
 // 텔레그램·UI 옵션은 Settings 페이지에서. router 가드가 /api/keys-status 로 키 미입력 감지 시 redirect.
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { TestTube2, Flame, Info, ChevronLeft, CircleCheck, CircleX } from 'lucide-vue-next';
+import { TestTube2, Flame, ChevronLeft, CircleCheck, CircleX } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import { toast } from '@/lib/toast';
@@ -133,11 +133,9 @@ async function pollRestart() {
         <ChevronLeft class="h-5 w-5" />
       </button>
       <div class="flex-1">
-        <h1 class="text-xl font-bold tracking-tight">
-          {{ hasExistingKeys ? 'KIS 키 / 계좌' : '처음 설정' }}
-        </h1>
+        <h1 class="text-xl font-bold tracking-tight">KIS 키 / 계좌</h1>
         <p v-if="!hasExistingKeys" class="mt-1 text-[12px] text-muted-foreground">
-          한국투자증권(KIS) API 키를 입력하면 매매가 활성화돼요. <b>모의</b> 또는 <b>실전</b> 중 하나만 입력해도 시작 가능합니다.
+          모의 또는 실전 중 하나만 입력해도 시작 가능합니다.
         </p>
       </div>
     </div>
@@ -158,10 +156,9 @@ async function pollRestart() {
           </span>
         </div>
       </template>
-      <p class="-mt-1 mb-3 text-[11px] leading-relaxed text-muted-foreground">
-        실제 현금 거래 X. KIS 모의 계좌(시드 1억 자동 지급)로 안전하게 테스트.
+      <p class="-mt-1 mb-3 text-[11px] text-muted-foreground">
         <a href="https://apiportal.koreainvestment.com" target="_blank" rel="noreferrer" class="text-primary underline">KIS 개발자센터</a>
-        에서 발급.
+        에서 발급
       </p>
       <div class="space-y-2.5">
         <label class="block">
@@ -187,10 +184,9 @@ async function pollRestart() {
           <input
             v-model="form.KIS_PAPER_STOCK"
             type="text"
-            placeholder="50012345-01"
+            placeholder="계좌번호 (예: 00000000-01)"
             class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2 font-mono text-[13px] focus:outline-none focus:ring-1 focus:ring-primary"
           />
-          <p class="mt-1 text-[10px] text-muted-foreground">전체(<code>50012345-01</code>) 또는 앞 8자리 둘 다 OK.</p>
         </label>
       </div>
     </Card>
@@ -211,9 +207,8 @@ async function pollRestart() {
           </span>
         </div>
       </template>
-      <p class="-mt-1 mb-3 text-[11px] leading-relaxed text-muted-foreground">
-        ⚠️ 실제 자금 거래. <b>거래 모드</b>를 [실전]으로 바꿔야 활성화됩니다.
-        출금 권한 없는 키만 사용하세요.
+      <p class="-mt-1 mb-3 text-[11px] text-muted-foreground">
+        ⚠️ 실제 자금 — 출금 권한 없는 키만 사용하세요.
       </p>
       <div class="space-y-2.5">
         <label class="block">
@@ -239,10 +234,9 @@ async function pollRestart() {
           <input
             v-model="form.KIS_ACCT_STOCK"
             type="text"
-            placeholder="12345678-01"
+            placeholder="계좌번호 (예: 00000000-01)"
             class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2 font-mono text-[13px] focus:outline-none focus:ring-1 focus:ring-primary"
           />
-          <p class="mt-1 text-[10px] text-muted-foreground">선물옵션(<code>-22</code>)처럼 상품 코드가 다르면 전체 입력 필수.</p>
         </label>
       </div>
     </Card>
@@ -250,12 +244,7 @@ async function pollRestart() {
     <!-- 거래 모드 카드 — 이 페이지에선 제거. 매매 모드 전환은 설정 → 연결 상태에서. -->
 
 
-    <div class="flex items-start gap-2 rounded-xl bg-muted/40 px-3 py-2.5 text-[11px] text-muted-foreground">
-      <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span>
-        텔레그램 알림(체결 알림용) 같은 추가 설정은 매매 시작 후 <b class="text-foreground">설정</b> 페이지에서 자유롭게 입력하세요.
-      </span>
-    </div>
+    <!-- 텔레그램 알림 등 추가 설정은 설정 페이지에서 처리 — 이 페이지엔 안내 생략. -->
 
     <div v-if="restarting" class="rounded-xl bg-primary/10 px-3 py-3 text-center text-sm">
       <p class="font-semibold">⏳ 봇 재시작 중…</p>
