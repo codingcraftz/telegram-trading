@@ -2,7 +2,9 @@
 <html lang="ko" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- maximum-scale=1, user-scalable=no — input focus 시 iOS Safari 의 자동 zoom 차단.
+         (textarea/input 의 font-size 가 16px 미만이면 zoom 발생) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#0f172a" />
     <title>OWLIM STOCK</title>
     <link rel="manifest" href="/manifest.webmanifest" />
