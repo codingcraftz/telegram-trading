@@ -6,22 +6,17 @@ import { Info } from 'lucide-vue-next';
 
 import StockDetailHeader from '@/components/stock/StockDetailHeader.vue';
 import ChartPanel from '@/components/stock/ChartPanel.vue';
-import StockInfoPanel from '@/components/stock/StockInfoPanel.vue';
 
 import { api, type Holding, type TickSnapshot } from '@/api/client';
 import { fmtPct, fmtSigned, pflsColor } from '@/lib/format';
 import { useWatchlistStore } from '@/stores/watchlist';
-import { usePrefs } from '@/stores/prefs';
 import { useStockQuote } from '@/composables/useStockQuote';
 import { useTickStream } from '@/composables/useTickStream';
 
 const route = useRoute();
 const router = useRouter();
 const watchlist = useWatchlistStore();
-const prefs = usePrefs();
-
 const code = computed(() => (route.params.code as string) ?? '');
-const isAdvanced = computed(() => prefs.mode === 'advanced');
 
 const { quote, isLive: tickStreamLive, loading: quoteLoading, refresh: refreshQuote } = useStockQuote(code);
 
@@ -114,9 +109,8 @@ onUnmounted(() => watchlist.unsubscribe());
       </span>
     </div>
 
-    <ChartPanel v-if="code" ref="chartPanelRef" :code="code" :height="320" />
-
-    <StockInfoPanel v-if="isAdvanced && quote" :quote="quote" />
+    <!-- 차트 + 거래량 (별도 패널, 시간축 동기화). 화면이 viewport 안에 fit 되도록 height 절제. -->
+    <ChartPanel v-if="code" ref="chartPanelRef" :code="code" :height="240" />
   </div>
 
   <!-- 하단 sticky 매수/매도 액션바 — BottomNav(56px) 바로 위에 고정.

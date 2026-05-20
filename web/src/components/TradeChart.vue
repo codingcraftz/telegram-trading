@@ -38,8 +38,22 @@ const props = withDefaults(
     visibleBars?: number | null;
     /** 이동평균선 기간 list — 예: [5, 20, 60, 120]. KIS 차트와 동일 색상 매핑. */
     movingAverages?: number[];
+    /** true 면 거래량을 별도 chart 인스턴스로 분리해서 차트 아래에 표시. 시간축 sync. */
+    splitVolume?: boolean;
+    /** 분리 모드에서 거래량 패널 높이 (px) */
+    volumeHeight?: number;
   }>(),
-  { height: 360, showVolume: true, entry: null, stopLoss: null, takeProfit: null, visibleBars: null, movingAverages: () => [] },
+  {
+    height: 360,
+    showVolume: true,
+    entry: null,
+    stopLoss: null,
+    takeProfit: null,
+    visibleBars: null,
+    movingAverages: () => [],
+    splitVolume: false,
+    volumeHeight: 80,
+  },
 );
 
 function readCssColor(name: string, fallback: string) {
@@ -74,12 +88,15 @@ function smaSeries(candles: TradeCandle[], period: number): LineData[] {
 }
 
 const containerRef = ref<HTMLDivElement | null>(null);
+const volumeContainerRef = ref<HTMLDivElement | null>(null);
 let chart: IChartApi | null = null;
+let volChart: IChartApi | null = null;
 let candleSeries: ISeriesApi<'Candlestick'> | null = null;
 let volumeSeries: ISeriesApi<'Histogram'> | null = null;
 let maSeries: { period: number; series: ISeriesApi<'Line'> }[] = [];
 let priceLines: IPriceLine[] = [];
 let ro: ResizeObserver | null = null;
+let syncingRange = false;
 
 function themedOptions() {
   const isDark = document.documentElement.classList.contains('dark');
@@ -94,6 +111,7 @@ function buildChart() {
   const el = containerRef.value;
   if (!el) return;
   const t = themedOptions();
+  const isSplit = props.splitVolume && props.showVolume;
   chart = createChart(el, {
     width: el.clientWidth,
     height: props.height,
@@ -111,7 +129,8 @@ function buildChart() {
     rightPriceScale: {
       borderColor: t.border,
       borderVisible: false,
-      scaleMargins: { top: 0.08, bottom: 0.26 },
+      // split 모드면 volume 이 별도 chart 라 가격 차트가 거의 전 영역 사용.
+      scaleMargins: isSplit ? { top: 0.05, bottom: 0.05 } : { top: 0.08, bottom: 0.26 },
       entireTextOnly: true,
     },
     timeScale: {
@@ -123,6 +142,8 @@ function buildChart() {
       barSpacing: 8,
       fixLeftEdge: false,
       fixRightEdge: false,
+      // split 모드의 가격 차트엔 timeAxis 숨김 (거래량 차트가 표시)
+      visible: !isSplit,
     },
     crosshair: {
       mode: 1,
@@ -144,21 +165,82 @@ function buildChart() {
     lastValueVisible: true,
   });
 
-  volumeSeries = chart.addSeries(HistogramSeries, {
-    priceFormat: { type: 'volume' },
-    priceScaleId: 'volume',
-    visible: props.showVolume,
-    priceLineVisible: false,
-    lastValueVisible: false,
-  });
-  chart.priceScale('volume').applyOptions({
-    scaleMargins: props.showVolume ? { top: 0.82, bottom: 0 } : { top: 1, bottom: 0 },
-  });
+  if (isSplit) {
+    // ───── 거래량 별도 chart 인스턴스 + 시간축 동기화 ─────
+    const vol = volumeContainerRef.value;
+    if (vol) {
+      volChart = createChart(vol, {
+        width: vol.clientWidth,
+        height: props.volumeHeight,
+        layout: {
+          background: { color: t.bg },
+          textColor: t.text,
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          fontSize: 11,
+          attributionLogo: false,
+        },
+        grid: {
+          vertLines: { color: t.grid, style: LineStyle.Dotted },
+          horzLines: { visible: false },
+        },
+        rightPriceScale: {
+          borderColor: t.border,
+          borderVisible: false,
+          scaleMargins: { top: 0.1, bottom: 0.05 },
+          entireTextOnly: true,
+        },
+        timeScale: {
+          borderColor: t.border,
+          borderVisible: false,
+          timeVisible: false,
+          secondsVisible: false,
+          rightOffset: 4,
+          barSpacing: 8,
+        },
+        crosshair: { mode: 1 },
+        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+        handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
+      });
+      volumeSeries = volChart.addSeries(HistogramSeries, {
+        priceFormat: { type: 'volume' },
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+
+      // 시간축 양방향 sync — 무한 루프 방지 flag
+      chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+        if (syncingRange || !r || !volChart) return;
+        syncingRange = true;
+        try { volChart.timeScale().setVisibleLogicalRange(r); } finally { syncingRange = false; }
+      });
+      volChart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+        if (syncingRange || !r || !chart) return;
+        syncingRange = true;
+        try { chart.timeScale().setVisibleLogicalRange(r); } finally { syncingRange = false; }
+      });
+    }
+  } else {
+    // 통합 모드 — 가격 차트 안에 volume histogram (별도 priceScale)
+    volumeSeries = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'volume',
+      visible: props.showVolume,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    chart.priceScale('volume').applyOptions({
+      scaleMargins: props.showVolume ? { top: 0.82, bottom: 0 } : { top: 1, bottom: 0 },
+    });
+  }
 
   ro = new ResizeObserver((entries) => {
-    for (const e of entries) chart?.applyOptions({ width: e.contentRect.width });
+    for (const e of entries) {
+      if (e.target === el) chart?.applyOptions({ width: e.contentRect.width });
+      else if (e.target === volumeContainerRef.value) volChart?.applyOptions({ width: e.contentRect.width });
+    }
   });
   ro.observe(el);
+  if (volumeContainerRef.value) ro.observe(volumeContainerRef.value);
 }
 
 function setData() {
@@ -256,7 +338,9 @@ onMounted(() => {
 onUnmounted(() => {
   ro?.disconnect();
   chart?.remove();
+  volChart?.remove();
   chart = null;
+  volChart = null;
   candleSeries = null;
   volumeSeries = null;
   maSeries = [];
@@ -276,5 +360,13 @@ watch(() => props.showVolume, (sv) => {
 </script>
 
 <template>
-  <div ref="containerRef" class="w-full select-none overflow-hidden rounded-lg" :style="{ height: `${height}px` }" />
+  <div>
+    <div ref="containerRef" class="w-full select-none overflow-hidden rounded-t-lg" :style="{ height: `${height}px` }" />
+    <div
+      v-if="splitVolume && showVolume"
+      ref="volumeContainerRef"
+      class="w-full select-none overflow-hidden border-t border-border/60 rounded-b-lg"
+      :style="{ height: `${volumeHeight}px` }"
+    />
+  </div>
 </template>
