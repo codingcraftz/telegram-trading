@@ -131,6 +131,8 @@ export type UpdateStrategyInput = z.infer<typeof UpdateStrategyInputSchema>;
 
 export const ApplyStrategyInputSchema = z.object({
   stockCode: z.string().regex(/^\d{6}$/, '6자리 종목코드만 가능'),
+  /** apply 시점에 사용자가 지정하는 자금 (원). 없으면 strategy.budget 사용. */
+  budgetAmount: z.number().int().positive().optional(),
 });
 export type ApplyStrategyInput = z.infer<typeof ApplyStrategyInputSchema>;
 

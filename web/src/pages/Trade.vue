@@ -171,14 +171,37 @@ async function loadStrategies() {
   } catch { strategies.value = []; }
   finally { strategiesLoaded.value = true; }
 }
+// 전략 적용 시 자금 입력 시트
 const strategyApplying = ref(false);
-async function applyStrategy(s: StrategyItem) {
-  if (strategyApplying.value || !hasCode.value) return;
-  if (!window.confirm(`'${s.name}' 전략을 ${quote.value?.name ?? code.value} 종목에 적용할까요?`)) return;
+const strategySheetOpen = ref(false);
+const strategySheetTarget = ref<StrategyItem | null>(null);
+const strategyBudget = ref<number>(1_000_000); // default 100만원
+
+function openApplyStrategy(s: StrategyItem) {
+  if (!hasCode.value) return;
+  strategySheetTarget.value = s;
+  strategyBudget.value = Math.min(balance.value?.cash ?? 1_000_000, 1_000_000);
+  strategySheetOpen.value = true;
+}
+function closeApplyStrategy() {
+  strategySheetOpen.value = false;
+  strategySheetTarget.value = null;
+}
+async function confirmApplyStrategy() {
+  const s = strategySheetTarget.value;
+  if (!s || strategyApplying.value || !hasCode.value) return;
+  if (strategyBudget.value < 1000) {
+    toast.error('자금은 1,000원 이상');
+    return;
+  }
   strategyApplying.value = true;
   try {
-    await api.applyStrategy(s.id, { stockCode: code.value });
+    await api.applyStrategy(s.id, {
+      stockCode: code.value,
+      budgetAmount: Math.floor(strategyBudget.value),
+    });
     toast.success(`'${s.name}' 전략이 적용되었습니다`);
+    closeApplyStrategy();
   } catch (err) {
     const msg = (err as Error).message;
     if (/already_applied/i.test(msg)) toast.info('이미 적용된 전략이에요');
@@ -430,7 +453,7 @@ onUnmounted(() => {
           type="button"
           :disabled="strategyApplying"
           class="flex w-full items-center justify-between gap-2 rounded-xl bg-card ring-1 ring-border/60 dark:ring-0 px-3 py-2.5 text-left transition active:scale-[0.99] disabled:opacity-50"
-          @click="applyStrategy(s)"
+          @click="openApplyStrategy(s)"
         >
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-semibold">{{ s.name }}</p>
@@ -464,6 +487,42 @@ onUnmounted(() => {
       <span class="flex-1 font-semibold">대기 주문 {{ ordersStore.count }}건</span>
       <span class="text-muted-foreground">›</span>
     </RouterLink>
+
+    <!-- 전략 적용 — 자금 입력 시트 -->
+    <BottomSheet
+      :open="strategySheetOpen"
+      :title="strategySheetTarget?.name ?? '전략 적용'"
+      @close="closeApplyStrategy"
+    >
+      <div class="space-y-4">
+        <p class="text-xs text-muted-foreground">
+          <b class="text-foreground">{{ quote?.name ?? code }}</b> 에 적용할 자금을 입력해주세요.
+        </p>
+        <div>
+          <label class="mb-1 block text-[11px] font-semibold text-muted-foreground">자금 (원)</label>
+          <PriceStepper v-model="strategyBudget" :step="100_000" :min="1000" suffix="원" />
+          <div class="mt-1.5 grid grid-cols-4 gap-1">
+            <button
+              v-for="amt in [500_000, 1_000_000, 3_000_000, 5_000_000]" :key="amt"
+              type="button"
+              class="rounded bg-muted/50 py-1.5 text-[10px] font-semibold transition hover:bg-muted"
+              @click="strategyBudget = amt"
+            >{{ (amt / 10_000).toLocaleString() }}만</button>
+          </div>
+          <p v-if="balance" class="mt-1.5 text-[10px] text-muted-foreground tabular-nums">
+            예수금 {{ fmtKrw(balance.cash) }}원
+          </p>
+        </div>
+        <button
+          type="button"
+          :disabled="strategyApplying || strategyBudget < 1000"
+          class="w-full rounded-xl bg-primary py-3 text-sm font-bold text-primary-foreground transition active:scale-[0.98] disabled:opacity-40"
+          @click="confirmApplyStrategy"
+        >
+          {{ strategyApplying ? '적용 중…' : '전략 적용' }}
+        </button>
+      </div>
+    </BottomSheet>
 
     <!-- 종목 검색 시트 -->
     <BottomSheet :open="searchOpen" title="종목 검색" @close="closeSearch">

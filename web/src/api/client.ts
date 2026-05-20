@@ -135,7 +135,7 @@ export const api = {
     request<{ ok: boolean }>(`/api/strategies/${id}`, { method: 'DELETE' }),
   cloneStrategy: (id: string) =>
     request<StrategyItem>(`/api/strategies/${id}/clone`, { method: 'POST' }),
-  applyStrategy: (id: string, body: { stockCode: string }) =>
+  applyStrategy: (id: string, body: { stockCode: string; budgetAmount?: number }) =>
     request<StrategyApplicationRow>(`/api/strategies/${id}/apply`, {
       method: 'POST', body: JSON.stringify(body),
     }),

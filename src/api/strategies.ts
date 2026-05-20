@@ -164,6 +164,7 @@ export async function handleStrategyApply(c: Context) {
       strategyId: id,
       chatId,
       stockCode: parsed.data.stockCode,
+      budgetAmount: parsed.data.budgetAmount ?? null,
     });
     return c.json(app, 201);
   } catch (err) {

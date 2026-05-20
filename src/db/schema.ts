@@ -172,6 +172,9 @@ export const strategyApplications = sqliteTable(
     lastEvaluatedAt: integer('last_evaluated_at'),
     /** morning_staged 등 multi-step 전략의 runtime 상태 (JSON). null = 미시작. */
     runtimeJson: text('runtime_json'),
+    /** apply 시점에 사용자가 지정한 자금 (원). null 이면 strategy.budget 사용.
+     *  사용자 정책: 자금은 매수마다 다르게 정함 → strategy 자체엔 cash_ratio=1.0 placeholder. */
+    budgetAmount: integer('budget_amount'),
   },
   (t) => ({
     chatIdx: index('strat_app_chat_idx').on(t.chatId),

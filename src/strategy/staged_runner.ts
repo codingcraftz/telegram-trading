@@ -119,11 +119,14 @@ async function fetchOrderableCash(code: string, refPrice: number): Promise<numbe
   }
 }
 
-/** budget 정의 → 실제 사용 가능한 KRW. cash_ratio 면 종목 매수가능금액 기반. */
+/** budget 결정 우선순위: (1) application.budgetAmount (사용자가 매수 시점 입력) →
+ *  (2) strategy.budget — fixed_amount 그대로 / cash_ratio 면 매수가능금액 비율. */
 function resolveBudget(
   def: Extract<StrategyDefinition['entry'], { type: 'morning_staged' }>,
   cash: number,
+  appOverride: number | null,
 ): number {
+  if (appOverride && appOverride > 0) return appOverride;
   if (def.budget.mode === 'fixed_amount') return def.budget.value;
   return cash * def.budget.value;
 }
@@ -184,7 +187,7 @@ async function fireStage1(
     updateApplicationStatus(app.id, app.chatId, 'failed');
     return;
   }
-  const budget = Math.min(resolveBudget(entry, cash), cash);
+  const budget = Math.min(resolveBudget(entry, cash, app.budgetAmount), cash);
   const stage1Pct = entry.stages[0]!.entryPct;
   const stage1Budget = (budget * stage1Pct) / 100;
   const qty = Math.floor(stage1Budget / price.current);
@@ -381,7 +384,7 @@ async function fireStage2(
   // 2차 예산 — budget × stage2.entryPct / 100. 매수가능금액으로 제한.
   const cash = (await fetchOrderableCash(app.stockCode, currentPrice)) ?? 0;
   if (cash <= 0) return;
-  const baseBudget = Math.min(resolveBudget(entry, cash), cash);
+  const baseBudget = Math.min(resolveBudget(entry, cash, app.budgetAmount), cash);
   const stage2Pct = entry.stages[1]!.entryPct;
   const budget = (baseBudget * stage2Pct) / 100;
   const qty = Math.floor(budget / currentPrice);

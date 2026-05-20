@@ -52,6 +52,7 @@ export function createApplication(args: {
   strategyId: string;
   chatId: number;
   stockCode: string;
+  budgetAmount?: number | null;
 }): StrategyApplication {
   const id = newId();
   const now = Date.now();
@@ -65,6 +66,7 @@ export function createApplication(args: {
       status: 'active',
       appliedAt: now,
       lastEvaluatedAt: null,
+      budgetAmount: args.budgetAmount ?? null,
     })
     .run();
   return getApplicationById(id, args.chatId)!;

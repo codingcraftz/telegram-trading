@@ -171,6 +171,14 @@ export function ensureSchema() {
   } catch (e) {
     // 이미 존재
   }
+
+  // strategy_applications.budget_amount — apply 시점에 사용자가 지정한 자금 (원).
+  // null 이면 strategy.budget 사용. 사용자 정책: 자금은 매수마다 다르게.
+  try {
+    sqlite.exec(`ALTER TABLE strategy_applications ADD COLUMN budget_amount INTEGER`);
+  } catch (e) {
+    // 이미 존재
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
