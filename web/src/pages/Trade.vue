@@ -145,9 +145,15 @@ const priceStep = computed(() => {
   return 1000;
 });
 
+// 호가 클릭으로 가격 채워질 때 입력란 잠깐 강조 — 어디서 변경됐는지 시각 피드백.
+const priceFlash = ref(false);
+let priceFlashTimer: ReturnType<typeof setTimeout> | null = null;
 function onPickPrice(p: number) {
   priceMode.value = 'limit';
   limitPrice.value = p;
+  priceFlash.value = true;
+  if (priceFlashTimer) clearTimeout(priceFlashTimer);
+  priceFlashTimer = setTimeout(() => { priceFlash.value = false; }, 400);
 }
 
 const holding = computed(() =>
@@ -456,7 +462,11 @@ onUnmounted(() => {
         </div>
 
         <!-- 가격 ± -->
-        <div v-if="priceMode === 'limit'">
+        <div
+          v-if="priceMode === 'limit'"
+          class="rounded-lg transition-all duration-300"
+          :class="priceFlash ? 'ring-2 ring-primary/70 shadow-lg shadow-primary/20' : 'ring-0'"
+        >
           <PriceStepper v-model="limitPrice" :step="priceStep" :min="0" suffix="원" compact />
         </div>
         <div v-else class="rounded-md bg-muted/30 px-2 py-2 text-center text-[10px] text-muted-foreground">

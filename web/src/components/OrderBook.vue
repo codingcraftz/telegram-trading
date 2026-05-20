@@ -24,6 +24,17 @@ const emit = defineEmits<{ pickPrice: [price: number] }>();
 
 const data = ref<AskingResponse | null>(null);
 const streamLive = ref(false);
+
+// 클릭 피드백 — 누른 row 잠깐 ring + flash. 모바일 햅틱.
+const flashKey = ref<string | null>(null);
+let flashTimer: ReturnType<typeof setTimeout> | null = null;
+function pickPrice(side: 'a' | 'b', idx: number, price: number) {
+  flashKey.value = `${side}-${idx}`;
+  if (flashTimer) clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { flashKey.value = null; }, 220);
+  try { (navigator as Navigator & { vibrate?: (p: number) => boolean }).vibrate?.(8); } catch {}
+  emit('pickPrice', price);
+}
 let timer: ReturnType<typeof setInterval> | null = null;
 let es: EventSource | null = null;
 
@@ -186,8 +197,9 @@ watch(() => props.intervalMs, () => { if (!streamLive.value) startPolling(); });
           v-for="(row, idx) in askRows"
           :key="`a-${idx}-${row.price}`"
           type="button"
-          class="relative flex w-full items-center justify-between rounded px-1.5 py-1 text-[11px] transition active:scale-[0.98]"
-          @click="emit('pickPrice', row.price)"
+          class="relative flex w-full items-center justify-between rounded px-1.5 py-1 text-[11px] transition-all duration-150 active:scale-[0.96]"
+          :class="flashKey === `a-${idx}` ? 'scale-[1.03] bg-down/20 ring-2 ring-down/50 shadow-md' : ''"
+          @click="pickPrice('a', idx, row.price)"
         >
           <div class="absolute inset-y-0 right-0 rounded bg-down/10" :style="{ width: barWidth(row.qty) }" />
           <span class="relative z-10 font-bold text-down">{{ fmtKrw(row.price) }}</span>
@@ -200,8 +212,9 @@ watch(() => props.intervalMs, () => { if (!streamLive.value) startPolling(); });
           v-for="(row, idx) in bidRows"
           :key="`b-${idx}-${row.price}`"
           type="button"
-          class="relative flex w-full items-center justify-between rounded px-1.5 py-1 text-[11px] transition active:scale-[0.98]"
-          @click="emit('pickPrice', row.price)"
+          class="relative flex w-full items-center justify-between rounded px-1.5 py-1 text-[11px] transition-all duration-150 active:scale-[0.96]"
+          :class="flashKey === `b-${idx}` ? 'scale-[1.03] bg-up/20 ring-2 ring-up/50 shadow-md' : ''"
+          @click="pickPrice('b', idx, row.price)"
         >
           <div class="absolute inset-y-0 right-0 rounded bg-up/10" :style="{ width: barWidth(row.qty) }" />
           <span class="relative z-10 font-bold text-up">{{ fmtKrw(row.price) }}</span>
@@ -217,8 +230,9 @@ watch(() => props.intervalMs, () => { if (!streamLive.value) startPolling(); });
           v-for="(row, idx) in askRows"
           :key="`a-${idx}-${row.price}`"
           type="button"
-          class="relative grid w-full grid-cols-[1fr_auto] items-center gap-2 rounded-md px-2 py-1 text-left transition active:scale-[0.99]"
-          @click="emit('pickPrice', row.price)"
+          class="relative grid w-full grid-cols-[1fr_auto] items-center gap-2 rounded-md px-2 py-1 text-left transition-all duration-150 active:scale-[0.97]"
+          :class="flashKey === `a-${idx}` ? 'scale-[1.02] bg-down/20 ring-2 ring-down/50 shadow-md' : ''"
+          @click="pickPrice('a', idx, row.price)"
         >
           <div class="absolute inset-y-0 right-0 rounded-md bg-down/10" :style="{ width: barWidth(row.qty) }" />
           <span class="relative z-10 font-semibold text-down">{{ fmtKrw(row.price) }}</span>
@@ -231,8 +245,9 @@ watch(() => props.intervalMs, () => { if (!streamLive.value) startPolling(); });
           v-for="(row, idx) in bidRows"
           :key="`b-${idx}-${row.price}`"
           type="button"
-          class="relative grid w-full grid-cols-[1fr_auto] items-center gap-2 rounded-md px-2 py-1 text-left transition active:scale-[0.99]"
-          @click="emit('pickPrice', row.price)"
+          class="relative grid w-full grid-cols-[1fr_auto] items-center gap-2 rounded-md px-2 py-1 text-left transition-all duration-150 active:scale-[0.97]"
+          :class="flashKey === `b-${idx}` ? 'scale-[1.02] bg-up/20 ring-2 ring-up/50 shadow-md' : ''"
+          @click="pickPrice('b', idx, row.price)"
         >
           <div class="absolute inset-y-0 right-0 rounded-md bg-up/10" :style="{ width: barWidth(row.qty) }" />
           <span class="relative z-10 font-semibold text-up">{{ fmtKrw(row.price) }}</span>
