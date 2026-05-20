@@ -222,18 +222,47 @@ function closeApplyStrategy() {
 }
 async function confirmApplyStrategy() {
   const s = strategySheetTarget.value;
-  if (!s || strategyApplying.value || !hasCode.value) return;
+  if (!s || strategyApplying.value || !hasCode.value || !quote.value) return;
   if (strategyBudget.value < 1000) {
     toast.error('자금은 1,000원 이상');
     return;
   }
+  const isImmediate =
+    s.definition.entry.type === 'morning_staged' &&
+    (s.definition.entry.triggerMode ?? 'morning') === 'immediate';
   strategyApplying.value = true;
   try {
-    await api.applyStrategy(s.id, {
-      stockCode: code.value,
-      budgetAmount: Math.floor(strategyBudget.value),
-    });
-    toast.success(`'${s.name}' 전략이 적용되었습니다`);
+    if (isImmediate) {
+      // 일반 전략 — 즉시 시장가 매수 + 매수가 1차로 인식되어 감시 시작.
+      const price = quote.value.price;
+      const buyQty = Math.floor(strategyBudget.value / price);
+      if (buyQty < 1) {
+        toast.error('자금이 부족합니다.');
+        return;
+      }
+      const r = await api.tradeBuy({
+        code: code.value,
+        strategy: 'now',
+        amount: { mode: 'shares', value: buyQty },
+        tp: null, sl: null, limitPrice: null, execute: true,
+      });
+      if (!(r.result?.ok ?? true)) {
+        toast.error(r.result?.message || '매수 거절');
+        return;
+      }
+      await api.applyStrategy(s.id, {
+        stockCode: code.value,
+        stage1Snapshot: { qty: buyQty, avgPrice: Math.round(price) },
+      });
+      toast.success(`'${s.name}' 매수 + 감시 시작`);
+    } else {
+      // 시가매매 — applyStrategy 만. 다음 영업일 09:00 자동 발동.
+      await api.applyStrategy(s.id, {
+        stockCode: code.value,
+        budgetAmount: Math.floor(strategyBudget.value),
+      });
+      toast.success(`'${s.name}' 전략이 적용되었습니다`);
+    }
     closeApplyStrategy();
   } catch (err) {
     const msg = (err as Error).message;
@@ -258,24 +287,6 @@ async function submit() {
       });
       if (r.result?.ok ?? true) {
         toast.success('매수 주문이 접수되었습니다');
-        // immediate 모드 전략이 선택돼 있으면 매수 직후 application 도 함께 생성.
-        // 평단 = limit 면 limitPrice, 시장가면 현재가 (체결가 근사). 봇이 그 시점부터 감시.
-        const strat = selectedImmediateStrategy.value;
-        if (strat && quote.value) {
-          const avgPrice = priceMode.value === 'limit' ? limitPrice.value : quote.value.price;
-          try {
-            await api.applyStrategy(strat.id, {
-              stockCode: code.value,
-              stage1Snapshot: { qty: qty.value, avgPrice: Math.round(avgPrice) },
-            });
-            toast.success(`'${strat.name}' 전략 감시 시작`);
-            selectedImmediateStrategyId.value = '';
-          } catch (err) {
-            const msg = (err as Error).message;
-            if (/already_applied/i.test(msg)) toast.info('이미 적용된 전략');
-            else toast.error('전략 적용 실패: ' + msg);
-          }
-        }
         qty.value = 0;
       } else {
         toast.error(r.result?.message || '매수 거절');
@@ -458,20 +469,7 @@ onUnmounted(() => {
           <span class="font-bold tabular-nums">{{ orderAmount > 0 ? fmtKrw(orderAmount) + '원' : '—' }}</span>
         </div>
 
-        <!-- 전략 적용 (immediate 모드, 매수만) — 매수와 동시에 TP/SL/물타기 감시 시작 -->
-        <div v-if="side === 'buy' && immediateStrategies.length > 0" class="rounded-md bg-primary/10 ring-1 ring-primary/30 dark:ring-0 p-2.5 space-y-1.5">
-          <label class="block text-[11px] font-semibold text-primary">전략 적용 (선택)</label>
-          <select
-            v-model="selectedImmediateStrategyId"
-            class="w-full rounded-md border border-border bg-card px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            <option value="">— 전략 사용 안 함</option>
-            <option v-for="s in immediateStrategies" :key="s.id" :value="s.id">{{ s.name }}</option>
-          </select>
-          <p v-if="selectedImmediateStrategy" class="text-[10px] leading-snug text-muted-foreground">
-            매수 직후 자동으로 TP/SL/물타기 감시 시작.
-          </p>
-        </div>
+        <!-- 일반 전략은 매수 폼 아래 별도 섹션으로 분리됨. -->
 
         <!-- TP / SL — 한 줄 가로 배치 (매수만) -->
         <div v-if="side === 'buy'" class="flex items-center justify-between gap-3 rounded-md bg-muted/30 px-2.5 py-2 text-xs">
@@ -532,13 +530,13 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 전략 주문 — 시가매매(morning) 전략만 노출. immediate 전략은 매수 폼 안 dropdown 으로. -->
-    <section v-if="hasCode && strategiesLoaded" class="space-y-2">
+    <!-- 시가매매 전략 — 다음 영업일 09:00 자동 매수 + 감시 -->
+    <section v-if="hasCode && strategiesLoaded && morningStrategies.length > 0" class="space-y-2">
       <div class="flex items-center gap-1.5 px-1">
         <NotebookPen class="h-3.5 w-3.5 text-primary" />
         <h3 class="text-xs font-bold tracking-tight">시가매매 전략</h3>
       </div>
-      <div v-if="morningStrategies.length > 0" class="space-y-1.5">
+      <div class="space-y-1.5">
         <button
           v-for="s in morningStrategies" :key="s.id"
           type="button"
@@ -548,27 +546,46 @@ onUnmounted(() => {
         >
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-semibold">{{ s.name }}</p>
-            <p class="mt-0.5 text-[10px] text-muted-foreground">
-              {{ s.definition.entry.type === 'morning' ? '시가매매' :
-                 s.definition.entry.type === 'limit_price' ? '지정가 도달' :
-                 s.definition.entry.type === 'morning_staged' ? '분할 매수' : '전략' }}
-            </p>
+            <p class="mt-0.5 text-[10px] text-muted-foreground">다음 영업일 09:00 시가 매수</p>
           </div>
           <span class="shrink-0 text-[11px] font-semibold text-primary">적용 ›</span>
         </button>
       </div>
-      <RouterLink
-        v-else
-        to="/more/strategy/new"
-        class="flex items-center gap-2 rounded-xl border border-dashed border-border bg-card/50 px-3 py-3 text-xs transition hover:bg-card"
-      >
-        <Plus class="h-3.5 w-3.5 text-muted-foreground" />
-        <span class="flex-1 text-muted-foreground">
-          {{ strategies.length === 0 ? '저장된 전략이 없습니다.' : '시가매매 전략이 없습니다.' }}
-        </span>
-        <span class="font-semibold">전략 추가 ›</span>
-      </RouterLink>
     </section>
+
+    <!-- 일반 전략 — 지금 즉시 시장가 매수 + 감시 시작 -->
+    <section v-if="hasCode && strategiesLoaded && immediateStrategies.length > 0" class="space-y-2">
+      <div class="flex items-center gap-1.5 px-1">
+        <NotebookPen class="h-3.5 w-3.5 text-primary" />
+        <h3 class="text-xs font-bold tracking-tight">일반 전략</h3>
+      </div>
+      <div class="space-y-1.5">
+        <button
+          v-for="s in immediateStrategies" :key="s.id"
+          type="button"
+          :disabled="strategyApplying"
+          class="flex w-full items-center justify-between gap-2 rounded-xl bg-card ring-1 ring-border/60 dark:ring-0 px-3 py-2.5 text-left transition active:scale-[0.99] disabled:opacity-50"
+          @click="openApplyStrategy(s)"
+        >
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-semibold">{{ s.name }}</p>
+            <p class="mt-0.5 text-[10px] text-muted-foreground">지금 즉시 시장가 매수 + 감시</p>
+          </div>
+          <span class="shrink-0 text-[11px] font-semibold text-primary">적용 ›</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 전략 빈 상태 안내 -->
+    <RouterLink
+      v-if="hasCode && strategiesLoaded && morningStrategies.length === 0 && immediateStrategies.length === 0"
+      to="/more/strategy/new"
+      class="flex items-center gap-2 rounded-xl border border-dashed border-border bg-card/50 px-3 py-3 text-xs transition hover:bg-card"
+    >
+      <Plus class="h-3.5 w-3.5 text-muted-foreground" />
+      <span class="flex-1 text-muted-foreground">저장된 전략이 없습니다.</span>
+      <span class="font-semibold">전략 추가 ›</span>
+    </RouterLink>
 
     </template>
     <!-- ↑ '주문' 탭 콘텐츠 끝 -->
