@@ -185,23 +185,7 @@ const holdingCount = computed(() => balance.value?.holdings.length ?? 0);
       </div>
     </section>
 
-    <!-- 거래 대기 -->
-    <RouterLink
-      v-if="ordersStore.count > 0"
-      to="/orders"
-      class="flex items-center gap-3 rounded-2xl bg-primary/10 ring-1 ring-primary/20 dark:ring-0 px-4 py-3 transition active:scale-[0.99]"
-    >
-      <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15">
-        <Clock class="h-4 w-4 text-primary" />
-      </div>
-      <div class="min-w-0 flex-1">
-        <p class="text-sm font-semibold">거래 대기 {{ ordersStore.count }}건</p>
-        <p class="text-[11px] text-muted-foreground">눌러서 진행 상황 보기</p>
-      </div>
-      <ArrowUpRight class="h-4 w-4 -rotate-45 text-muted-foreground" />
-    </RouterLink>
-
-    <!-- 내 자산 -->
+    <!-- 내 자산 (거래 대기 카드는 자산 아래로 이동) -->
     <Card>
       <div class="flex items-start justify-between">
         <p class="text-xs font-medium text-muted-foreground">내 자산</p>
@@ -248,20 +232,35 @@ const holdingCount = computed(() => balance.value?.holdings.length ?? 0);
       </div>
     </Card>
 
-    <!-- 종목 탭으로 가는 단축 링크 -->
+    <!-- 거래 대기 — 자산 아래 위치. count>0 일 때만. -->
     <RouterLink
-      to="/stocks?seg=holding"
+      v-if="ordersStore.count > 0"
+      to="/trade?tab=history"
       class="flex items-center gap-3 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-4 py-3 transition active:scale-[0.99]"
     >
+      <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/15">
+        <Clock class="h-4 w-4 text-primary" />
+      </div>
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-semibold">거래 대기 {{ ordersStore.count }}건</p>
+        <p class="text-[11px] text-muted-foreground">진행 상황 · 미체결 · 전략 감시</p>
+      </div>
+      <ChevronRight class="h-4 w-4 text-muted-foreground" />
+    </RouterLink>
+
+    <!-- 보유 종목 — 잔고 페이지로 -->
+    <RouterLink
+      to="/holdings"
+      class="flex items-center gap-3 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-4 py-3 transition active:scale-[0.99]"
+    >
+      <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted/60">
+        <Wallet class="h-4 w-4 text-muted-foreground" />
+      </div>
       <div class="min-w-0 flex-1">
         <p class="text-sm font-semibold">
-          <template v-if="holdingCount > 0">내 종목 {{ holdingCount }}개</template>
-          <template v-else>종목 둘러보기</template>
+          {{ holdingCount > 0 ? `보유 종목 ${holdingCount}개` : '보유 종목' }}
         </p>
-        <p class="text-[11px] text-muted-foreground">
-          <template v-if="holdingCount > 0">보유·관심·순위 보기</template>
-          <template v-else>관심 종목을 추가하거나 순위에서 골라보세요</template>
-        </p>
+        <p class="text-[11px] text-muted-foreground">평가손익 · 종목별 상세</p>
       </div>
       <ChevronRight class="h-4 w-4 text-muted-foreground" />
     </RouterLink>

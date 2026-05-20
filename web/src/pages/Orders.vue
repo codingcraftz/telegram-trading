@@ -17,6 +17,9 @@ import { api, type FilledOrder } from '@/api/client';
 import { fmtKrw } from '@/lib/format';
 import { useOrdersStore } from '@/stores/orders';
 
+// Trade 페이지 내 inline 사용 시 자체 헤더 (h2 '주문') 숨김.
+defineProps<{ embedded?: boolean }>();
+
 const route = useRoute();
 const router = useRouter();
 const store = useOrdersStore();
@@ -205,7 +208,7 @@ watch(seg, (v) => { if (v === 'filled' && filledItems.value.length === 0) loadFi
 
 <template>
   <div class="space-y-4">
-    <div class="flex items-center justify-between px-1">
+    <div v-if="!embedded" class="flex items-center justify-between px-1">
       <h2 class="text-lg font-bold tracking-tight">주문</h2>
       <button
         v-if="seg === 'pending'"

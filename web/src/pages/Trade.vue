@@ -9,6 +9,8 @@ import { Search, Clock, X, NotebookPen, Plus } from 'lucide-vue-next';
 import OrderBook from '@/components/OrderBook.vue';
 import PriceStepper from '@/components/PriceStepper.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
+import SegmentedControl from '@/components/ui/SegmentedControl.vue';
+import OrdersView from './Orders.vue';
 import { api, type SearchItem, type QuoteResponse, type BalanceResponse, type StrategyItem } from '@/api/client';
 import { fmtKrw, fmtPct, pflsColor } from '@/lib/format';
 import { useOrdersStore } from '@/stores/orders';
@@ -19,6 +21,18 @@ const route = useRoute();
 const router = useRouter();
 const ordersStore = useOrdersStore();
 const watchlist = useWatchlistStore();
+
+// 상단 탭 — '주문' (매수/매도 폼) / '내역' (대기+체결 통합)
+type Tab = 'order' | 'history';
+const tab = ref<Tab>(((route.query.tab as string) === 'history' ? 'history' : 'order'));
+watch(tab, (v) => {
+  if (route.query.tab === v) return;
+  router.replace({ query: { ...route.query, tab: v } });
+});
+watch(() => route.query.tab, (v) => {
+  const next: Tab = v === 'history' ? 'history' : 'order';
+  if (tab.value !== next) tab.value = next;
+});
 
 // 차트/주문/잔고에서 마지막 본 종목 공유 — StockDetail.vue 와 같은 key.
 const LAST_KEY = 'owlim:last-code';
@@ -318,6 +332,20 @@ onUnmounted(() => {
     class="space-y-3 pt-2"
     style="overscroll-behavior: contain;"
   >
+    <!-- 상단 탭 — 주문 / 내역 -->
+    <SegmentedControl
+      v-model="tab"
+      :options="[
+        { value: 'order' as const, label: '주문' },
+        { value: 'history' as const, label: ordersStore.count > 0 ? `내역 ${ordersStore.count}` : '내역' },
+      ]"
+    />
+
+    <!-- 내역 탭 — 대기+체결 통합 -->
+    <OrdersView v-if="tab === 'history'" :embedded="true" />
+
+    <!-- 주문 탭 — 매수/매도 폼 -->
+    <template v-else>
     <!-- 종목 헤더 + 돋보기 + 대기 N 배지 (대기/전략 통합 진입) -->
     <div v-if="quote" class="flex items-center gap-2 px-1">
       <div class="min-w-0">
@@ -542,16 +570,8 @@ onUnmounted(() => {
       </RouterLink>
     </section>
 
-    <!-- 대기 주문 진입 링크 -->
-    <RouterLink
-      v-if="ordersStore.count > 0"
-      to="/orders"
-      class="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-xs"
-    >
-      <Clock class="h-3.5 w-3.5 text-primary" />
-      <span class="flex-1 font-semibold">대기 주문 {{ ordersStore.count }}건</span>
-      <span class="text-muted-foreground">›</span>
-    </RouterLink>
+    </template>
+    <!-- ↑ '주문' 탭 콘텐츠 끝 -->
 
     <!-- 전략 적용 — 자금 입력 시트 -->
     <BottomSheet
