@@ -689,7 +689,7 @@ onUnmounted(() => {
         <input
           v-model="themeQ"
           type="text"
-          placeholder="종목명/코드로 검색 (예: 광전자) — 속한 테마를 찾아드려요"
+          placeholder="종목명/테마명"
           class="w-full rounded-xl bg-muted px-3.5 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
         />
 
@@ -697,9 +697,6 @@ onUnmounted(() => {
         <template v-if="themeQ.trim()">
           <div v-if="themeSearchLoading" class="space-y-1.5">
             <div v-for="n in 3" :key="n" class="h-[72px] animate-pulse rounded-2xl bg-card" />
-            <p class="text-center text-[10px] text-muted-foreground">
-              30개 테마 검색 중… 첫 검색은 몇 초 걸려요.
-            </p>
           </div>
           <div v-else-if="themeSearchResults.length > 0" class="space-y-1.5">
             <p class="px-1 text-[11px] text-muted-foreground">
@@ -734,8 +731,7 @@ onUnmounted(() => {
 
         <!-- 검색 없을 때: 랭킹 모드 -->
         <template v-else>
-        <div class="flex items-center justify-between px-1">
-          <p class="text-[11px] text-muted-foreground">전일 대비 등락률 상위 (1시간 캐싱)</p>
+        <div class="flex items-center justify-end px-1">
           <button
             class="rounded-md p-1.5 text-muted-foreground transition hover:bg-accent"
             :disabled="themesLoading"
