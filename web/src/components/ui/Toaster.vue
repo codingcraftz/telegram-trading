@@ -20,11 +20,11 @@ import { CheckCircle2, XCircle, Info } from 'lucide-vue-next';
         <div
           v-for="t in toasts"
           :key="t.id"
-          class="pointer-events-auto flex items-center gap-2 rounded-xl border px-3 py-2 text-sm shadow-lg backdrop-blur"
+          class="pointer-events-auto flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium text-white shadow-lg"
           :class="{
-            'bg-emerald-500/15 border-emerald-500/40 text-emerald-200': t.kind === 'success',
-            'bg-red-500/15 border-red-500/40 text-red-200': t.kind === 'error',
-            'bg-sky-500/15 border-sky-500/40 text-sky-200': t.kind === 'info',
+            'bg-emerald-600 border-emerald-700': t.kind === 'success',
+            'bg-red-600 border-red-700': t.kind === 'error',
+            'bg-sky-600 border-sky-700': t.kind === 'info',
           }"
         >
           <CheckCircle2 v-if="t.kind === 'success'" class="h-4 w-4 shrink-0" />
