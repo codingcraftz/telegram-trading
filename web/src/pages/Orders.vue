@@ -196,8 +196,8 @@ function strategyMiddle(d: EditableOrder): string {
   const held = d.heldQty ?? 0;
   const avg = d.avgPrice ?? 0;
   const phase = d.phaseLabel ?? '대기';
-  if (held > 0 && avg > 0) return `${held}주 보유 · 평단 ${fmtKrw(avg)}원 · ${phase}`;
-  if (d.budgetAmount && d.budgetAmount > 0) return `자금 ${fmtKrw(d.budgetAmount)}원 · ${phase}`;
+  if (held > 0 && avg > 0) return `${held}주 보유 · 평단 ${fmtKrw(avg)} · ${phase}`;
+  if (d.budgetAmount && d.budgetAmount > 0) return `자금 ${fmtKrw(d.budgetAmount)} · ${phase}`;
   return phase;
 }
 
@@ -258,7 +258,7 @@ watch(seg, (v) => { if (v === 'filled' && filledItems.value.length === 0) loadFi
           "
           :middle-line="
             p.type === 'unfilled'
-              ? `${p.data.orderPrice === 0 ? '시장가' : fmtKrw(p.data.orderPrice) + '원'} × ${p.data.remaining}주 잔여`
+              ? `${p.data.orderPrice === 0 ? '시장가' : fmtKrw(p.data.orderPrice)} × ${p.data.remaining}주 잔여`
               : p.type === 'morning'
                 ? `다음 영업일 09:00 / ${p.data.qtyDesc}`
                 : strategyMiddle(p.data)
@@ -310,17 +310,17 @@ watch(seg, (v) => { if (v === 'filled' && filledItems.value.length === 0) loadFi
                   >{{ f.side === 'buy' ? '매수' : '매도' }}</span>
                 </div>
                 <p class="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
-                  {{ fmtTimeKst(f.ts) }} · {{ fmtKrw(f.price) }}원 × {{ f.qty }}주
+                  {{ fmtTimeKst(f.ts) }} · {{ fmtKrw(f.price) }} × {{ f.qty }}주
                 </p>
               </div>
               <div class="shrink-0 text-right tabular-nums">
-                <p class="text-sm font-bold">{{ fmtKrw(f.amount) }}원</p>
+                <p class="text-sm font-bold">{{ fmtKrw(f.amount) }}</p>
                 <p
                   v-if="f.side === 'sell' && f.pnl !== undefined && f.pnl !== null"
                   class="mt-0.5 text-[11px] font-semibold"
                   :class="f.pnl > 0 ? 'text-up' : f.pnl < 0 ? 'text-down' : 'text-muted-foreground'"
                 >
-                  {{ f.pnl > 0 ? '+' : '' }}{{ fmtKrw(f.pnl) }}원
+                  {{ f.pnl > 0 ? '+' : '' }}{{ fmtKrw(f.pnl) }}
                 </p>
               </div>
             </button>

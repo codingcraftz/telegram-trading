@@ -166,7 +166,7 @@ function strategySummary(s: StrategyItem): string {
   if (e.type === 'morning') return '내일 시가 매수';
   if (e.type === 'limit_price') {
     const dir = e.direction === 'above' ? '이상' : '이하';
-    return `${fmtKrw(e.targetPrice)}원 ${dir} 도달 시`;
+    return `${fmtKrw(e.targetPrice)} ${dir} 도달 시`;
   }
   if (e.type === 'morning_staged') {
     const parts: string[] = [];
@@ -257,7 +257,7 @@ function gotoNewStrategy() {
           <template v-if="mode !== 'strategy'">
             <!-- 가격 표시/입력 -->
             <div v-if="mode === 'market'" class="flex items-baseline justify-between rounded-xl bg-muted/40 px-3 py-2.5">
-              <span class="text-lg font-bold tabular-nums">{{ fmtKrw(currentPrice) }}원</span>
+              <span class="text-lg font-bold tabular-nums">{{ fmtKrw(currentPrice) }}</span>
               <span class="text-[10px] text-muted-foreground">시장가로 즉시 체결</span>
             </div>
             <div v-else>
@@ -336,7 +336,7 @@ function gotoNewStrategy() {
             <div class="space-y-1 rounded-xl bg-primary/10 px-3 py-2.5 tabular-nums">
               <div class="flex items-baseline justify-between">
                 <span class="text-[11px] text-muted-foreground">예상 매수액</span>
-                <span class="text-base font-bold">{{ fmtKrw(totalAmount) }}원</span>
+                <span class="text-base font-bold">{{ fmtKrw(totalAmount) }}</span>
               </div>
               <div class="flex items-baseline justify-between text-[10px] text-muted-foreground">
                 <span>
@@ -344,7 +344,7 @@ function gotoNewStrategy() {
                   <span v-if="orderableLoading" class="ml-1 text-[9px]">조회 중…</span>
                   <span v-else-if="orderableCash === null" class="ml-1 text-[9px]">(추정)</span>
                 </span>
-                <span>{{ fmtKrw(effectiveCash) }}원</span>
+                <span>{{ fmtKrw(effectiveCash) }}</span>
               </div>
             </div>
           </template>
@@ -399,15 +399,15 @@ function gotoNewStrategy() {
           <div class="space-y-2 rounded-xl border border-border/60 dark:border-0 bg-muted/30 px-4 py-3 text-sm">
             <div class="flex justify-between"><span class="text-muted-foreground">가격</span>
               <span class="font-semibold tabular-nums">
-                <template v-if="mode === 'limit'">{{ fmtKrw(limitPrice) }}원 지정가</template>
-                <template v-else>{{ fmtKrw(currentPrice) }}원 시장가</template>
+                <template v-if="mode === 'limit'">{{ fmtKrw(limitPrice) }} 지정가</template>
+                <template v-else>{{ fmtKrw(currentPrice) }} 시장가</template>
               </span>
             </div>
             <div class="flex justify-between"><span class="text-muted-foreground">수량</span>
               <span class="font-semibold tabular-nums">{{ qty }}주</span>
             </div>
             <div class="flex justify-between"><span class="text-muted-foreground">예상 매수액</span>
-              <span class="font-semibold tabular-nums">{{ fmtKrw(totalAmount) }}원</span>
+              <span class="font-semibold tabular-nums">{{ fmtKrw(totalAmount) }}</span>
             </div>
             <div v-if="(tpEnabled && tpPct > 0) || (slEnabled && slPct > 0)" class="border-t border-border pt-2 text-xs">
               <span class="text-muted-foreground">자동매도</span>

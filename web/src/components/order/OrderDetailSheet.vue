@@ -46,7 +46,7 @@ const rows = computed<DetailRow[]>(() => {
       return [
         { label: '종류', value: '미체결' },
         { label: '주문번호', value: o.odno ?? '-' },
-        { label: '가격', value: o.orderPrice ? `${fmtKrw(o.orderPrice)}원` : '시장가' },
+        { label: '가격', value: o.orderPrice ? fmtKrw(o.orderPrice) : '시장가' },
         { label: '수량', value: `${o.qty ?? 0}주` },
         { label: '잔여', value: `${o.remaining ?? 0}주` },
       ];
@@ -65,9 +65,9 @@ const rows = computed<DetailRow[]>(() => {
     return [
       { label: '체결 시각', value: fmtKst(f.ts) },
       { label: '주문번호', value: f.odno },
-      { label: '체결가', value: `${fmtKrw(f.price)}원` },
+      { label: '체결가', value: fmtKrw(f.price) },
       { label: '수량', value: `${f.qty}주` },
-      { label: '체결금액', value: `${fmtKrw(f.amount)}원` },
+      { label: '체결금액', value: fmtKrw(f.amount) },
     ];
   }
   return [];

@@ -91,7 +91,7 @@ async function submit() {
         <template v-if="!confirmStage">
           <!-- 현재가 -->
           <div class="flex items-baseline justify-between rounded-xl bg-muted/40 px-3 py-2.5">
-            <span class="text-lg font-bold tabular-nums">{{ fmtKrw(currentPrice) }}원</span>
+            <span class="text-lg font-bold tabular-nums">{{ fmtKrw(currentPrice) }}</span>
             <span class="text-[10px] text-muted-foreground">시장가로 즉시 매도</span>
           </div>
 
@@ -129,7 +129,7 @@ async function submit() {
           <div class="space-y-1 rounded-xl bg-primary/10 px-3 py-2.5 tabular-nums">
             <div class="flex items-baseline justify-between">
               <span class="text-[11px] text-muted-foreground">예상 받을 돈</span>
-              <span class="text-base font-bold">{{ fmtKrw(totalRevenue) }}원</span>
+              <span class="text-base font-bold">{{ fmtKrw(totalRevenue) }}</span>
             </div>
             <div class="flex items-baseline justify-between text-[10px] text-muted-foreground">
               <span>보유</span>
@@ -142,13 +142,13 @@ async function submit() {
         <template v-else>
           <div class="space-y-2 rounded-xl border border-border/60 dark:border-0 bg-muted/30 px-4 py-3 text-sm">
             <div class="flex justify-between"><span class="text-muted-foreground">가격</span>
-              <span class="font-semibold tabular-nums">{{ fmtKrw(currentPrice) }}원 시장가</span>
+              <span class="font-semibold tabular-nums">{{ fmtKrw(currentPrice) }} · 시장가</span>
             </div>
             <div class="flex justify-between"><span class="text-muted-foreground">수량</span>
               <span class="font-semibold tabular-nums">{{ effectiveQty }}주</span>
             </div>
             <div class="flex justify-between"><span class="text-muted-foreground">예상 받을 돈</span>
-              <span class="font-semibold tabular-nums">{{ fmtKrw(totalRevenue) }}원</span>
+              <span class="font-semibold tabular-nums">{{ fmtKrw(totalRevenue) }}</span>
             </div>
           </div>
           <p class="text-[11px] text-muted-foreground">확인 누르면 곧바로 증권사로 주문이 전송돼요.</p>

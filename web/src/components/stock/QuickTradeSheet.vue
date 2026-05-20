@@ -98,7 +98,7 @@ function gotoDetail() {
         </div>
 
         <div class="flex items-baseline justify-between rounded-xl bg-muted/40 px-3 py-2.5">
-          <span class="text-lg font-bold tabular-nums">{{ fmtKrw(currentPrice) }}원</span>
+          <span class="text-lg font-bold tabular-nums">{{ fmtKrw(currentPrice) }}</span>
           <span class="text-[10px] text-muted-foreground">시장가</span>
         </div>
 
@@ -132,7 +132,7 @@ function gotoDetail() {
 
           <div class="flex items-center justify-between rounded-xl bg-primary/10 px-3 py-2.5 tabular-nums">
             <span class="text-[11px] text-muted-foreground">{{ side === 'buy' ? '예상 매수액' : '예상 받을 돈' }}</span>
-            <span class="text-base font-bold">{{ fmtKrw(totalAmount) }}원</span>
+            <span class="text-base font-bold">{{ fmtKrw(totalAmount) }}</span>
           </div>
 
           <button
@@ -151,7 +151,7 @@ function gotoDetail() {
               <span class="font-semibold tabular-nums">{{ qty }}주</span>
             </div>
             <div class="flex justify-between"><span class="text-muted-foreground">{{ side === 'buy' ? '예상 매수액' : '예상 받을 돈' }}</span>
-              <span class="font-semibold tabular-nums">{{ fmtKrw(totalAmount) }}원</span>
+              <span class="font-semibold tabular-nums">{{ fmtKrw(totalAmount) }}</span>
             </div>
             <div class="flex justify-between"><span class="text-muted-foreground">가격</span>
               <span class="font-semibold">시장가</span>

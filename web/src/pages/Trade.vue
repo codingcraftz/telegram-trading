@@ -470,7 +470,7 @@ onUnmounted(() => {
           <PriceStepper v-model="limitPrice" :step="priceStep" :min="0" suffix="원" compact />
         </div>
         <div v-else class="rounded-md bg-muted/30 px-2 py-2 text-center text-[10px] text-muted-foreground">
-          {{ quote ? fmtKrw(quote.price) + '원' : '...' }} 즉시 체결
+          {{ quote ? fmtKrw(quote.price) : '...' }} 즉시 체결
         </div>
 
         <!-- 수량 ± -->
@@ -493,7 +493,7 @@ onUnmounted(() => {
         <!-- 주문금액 -->
         <div class="flex items-center justify-between rounded-md bg-muted/40 px-2.5 py-2 text-[11px]">
           <span class="text-muted-foreground">주문금액</span>
-          <span class="font-bold tabular-nums">{{ orderAmount > 0 ? fmtKrw(orderAmount) + '원' : '—' }}</span>
+          <span class="font-bold tabular-nums">{{ orderAmount > 0 ? fmtKrw(orderAmount) : '—' }}</span>
         </div>
 
         <!-- 일반 전략은 매수 폼 아래 별도 섹션으로 분리됨. -->
@@ -655,7 +655,7 @@ onUnmounted(() => {
             >{{ p === 100 ? '전부' : `${p}%` }}</button>
           </div>
           <p v-if="balance" class="mt-1.5 text-[10px] text-muted-foreground tabular-nums">
-            매수가능 {{ fmtKrw(balance.cash) }}원
+            매수가능 {{ fmtKrw(balance.cash) }}
           </p>
         </div>
         <button

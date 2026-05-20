@@ -101,7 +101,7 @@ async function doCancel() {
           <p class="text-sm font-bold">{{ order.name }}</p>
           <p class="text-[10px] text-muted-foreground tabular-nums">{{ order.code }}</p>
           <p v-if="order.kind === 'unfilled' && order.orderPrice !== undefined" class="text-xs text-muted-foreground tabular-nums">
-            {{ order.orderPrice === 0 ? '시장가' : `${fmtKrw(order.orderPrice)}원` }}
+            {{ order.orderPrice === 0 ? '시장가' : fmtKrw(order.orderPrice) }}
             × {{ order.remaining ?? order.qty ?? 0 }}주 잔여
           </p>
           <p v-else-if="order.kind === 'morning'" class="text-xs text-muted-foreground">
