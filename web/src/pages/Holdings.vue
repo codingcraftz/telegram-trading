@@ -151,12 +151,7 @@ const totalCost = computed(() =>
         >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <div class="flex items-baseline gap-1.5">
-                <p class="truncate text-sm font-bold tracking-tight">{{ h.name }}</p>
-                <p class="text-[10px] font-medium tabular-nums text-muted-foreground/70">
-                  {{ fmtKrw(Math.round(h.avg * h.qty)) }}
-                </p>
-              </div>
+              <p class="truncate text-sm font-bold tracking-tight">{{ h.name }}</p>
               <p class="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
                 {{ h.code }} · {{ h.qty }}주
               </p>
@@ -176,13 +171,13 @@ const totalCost = computed(() =>
               </p>
             </div>
           </div>
-          <!-- 하단 — 매입단가 / 평가금액 좌우 -->
+          <!-- 하단 — 매입금액 / 평가액 좌우 -->
           <div class="mt-2 flex items-center justify-between border-t border-border/60 pt-2 text-[11px]">
             <span class="text-muted-foreground">
-              매입단가 <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(h.avg) }}</span>
+              매입금액 <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(Math.round(h.avg * h.qty)) }}</span>
             </span>
             <span class="text-muted-foreground">
-              평가금액 <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(Math.round(h.cur * h.qty)) }}</span>
+              평가액 <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(Math.round(h.cur * h.qty)) }}</span>
             </span>
           </div>
         </button>
