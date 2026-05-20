@@ -151,9 +151,14 @@ const totalCost = computed(() =>
         >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="truncate text-sm font-bold tracking-tight">{{ h.name }}</p>
+              <div class="flex items-baseline gap-1.5">
+                <p class="truncate text-sm font-bold tracking-tight">{{ h.name }}</p>
+                <p class="text-[10px] font-semibold tabular-nums text-primary/80">
+                  {{ fmtKrw(Math.round(h.avg * h.qty)) }}
+                </p>
+              </div>
               <p class="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
-                {{ h.code }} · {{ h.qty }}주
+                {{ h.code }} · {{ h.qty }}주 · 매입 {{ fmtKrw(h.avg) }}
               </p>
             </div>
             <div class="text-right shrink-0">
@@ -169,24 +174,6 @@ const totalCost = computed(() =>
               >
                 {{ fmtPct(h.pflsRt) }}
               </p>
-            </div>
-          </div>
-          <div class="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
-            <div class="flex justify-between text-muted-foreground">
-              <span>평균매입</span>
-              <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(h.avg) }}</span>
-            </div>
-            <div class="flex justify-between text-muted-foreground">
-              <span>현재가</span>
-              <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(h.cur) }}</span>
-            </div>
-            <div class="flex justify-between text-muted-foreground">
-              <span>매입금액</span>
-              <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(Math.round(h.avg * h.qty)) }}</span>
-            </div>
-            <div class="flex justify-between text-muted-foreground">
-              <span>평가액</span>
-              <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(Math.round(h.cur * h.qty)) }}</span>
             </div>
           </div>
         </button>

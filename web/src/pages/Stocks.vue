@@ -498,77 +498,115 @@ onUnmounted(() => {
           </template>
         </SectionHeader>
 
-        <!-- 관심 검색 — watchlist 안 종목명/코드 필터링 -->
-        <div v-if="watchlist.items.length > 0" class="relative">
-          <input
-            v-model="watchQ"
-            type="text"
-            placeholder="관심 종목 검색"
-            class="w-full rounded-xl bg-muted px-3.5 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </div>
+        <!-- 종목 검색 — 전체 종목 중에서 검색해 별표로 관심에 추가. -->
+        <input
+          v-model="q"
+          type="text"
+          placeholder="종목명/코드 검색해서 별표 ★로 관심 추가"
+          class="w-full rounded-xl bg-muted px-3.5 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+        />
 
-        <div v-if="filteredWatchlist.length > 0" class="divide-y divide-border/60 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0">
-          <div
-            v-for="item in filteredWatchlist"
-            :key="item.id"
-            class="flex select-none items-center gap-3 px-3 py-2.5 transition active:bg-accent/30"
-            role="button"
-            tabindex="0"
-            @click="!editing ? go(item.code) : toggleSelect(item.id)"
-          >
+        <!-- 검색 결과 모드 -->
+        <template v-if="searchActive">
+          <div v-if="searchResults.length > 0" class="divide-y divide-border/60 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0">
             <div
-              v-if="editing"
-              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
-              :class="selectedIds.has(item.id) ? 'border-destructive bg-destructive text-destructive-foreground' : 'border-border'"
+              v-for="r in searchResults" :key="r.code"
+              class="flex select-none items-center gap-3 px-3 py-2.5 transition active:bg-accent/30"
+              role="button"
+              tabindex="0"
+              @click="go(r.code)"
             >
-              <Check v-if="selectedIds.has(item.id)" class="h-3 w-3" />
+              <button
+                class="-ml-1 p-1 transition hover:bg-accent rounded"
+                :aria-label="watchlist.has(r.code) ? '관심 제거' : '관심 추가'"
+                @click.stop="toggleWatch(r.code)"
+              >
+                <Star
+                  class="h-3.5 w-3.5"
+                  :class="watchlist.has(r.code) ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground'"
+                />
+              </button>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-semibold tracking-tight">{{ r.name || (searchQuotes.get(r.code)?.name ?? r.code) }}</p>
+                <p class="text-[10px] text-muted-foreground tabular-nums">{{ r.code }}</p>
+              </div>
+              <div v-if="searchQuotes.get(r.code)?.ok" class="shrink-0 text-right tabular-nums">
+                <p class="text-sm font-bold leading-tight" :class="pflsColor(searchQuotes.get(r.code)!.changePct)">
+                  {{ fmtKrw(searchQuotes.get(r.code)!.price) }}
+                </p>
+                <p class="text-[10px] font-semibold leading-tight" :class="pflsColor(searchQuotes.get(r.code)!.changePct)">
+                  {{ fmtPct(searchQuotes.get(r.code)!.changePct) }}
+                </p>
+              </div>
             </div>
-
-            <button
-              v-if="!editing"
-              class="-ml-1 p-1 text-amber-400 transition hover:bg-accent rounded"
-              aria-label="관심 제거"
-              @click.stop="watchlist.removeByCode(item.code)"
-            >
-              <Star class="h-3.5 w-3.5 fill-amber-400" />
-            </button>
-
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-semibold tracking-tight">{{ item.name }}</p>
-              <p class="text-[10px] text-muted-foreground tabular-nums">{{ item.code }}</p>
-            </div>
-
-            <div v-if="watchlist.quotes.get(item.code)?.ok" class="shrink-0 text-right tabular-nums">
-              <p class="text-sm font-bold leading-tight" :class="pflsColor(watchlist.quotes.get(item.code)!.changePct)">
-                {{ fmtKrw(watchlist.quotes.get(item.code)!.price) }}
-              </p>
-              <p class="text-[10px] font-semibold leading-tight" :class="pflsColor(watchlist.quotes.get(item.code)!.changePct)">
-                {{ fmtPct(watchlist.quotes.get(item.code)!.changePct) }}
-              </p>
-            </div>
-            <span v-else class="shrink-0 text-[10px] text-muted-foreground">—</span>
           </div>
-        </div>
+          <EmptyState
+            v-else-if="!searching"
+            :icon="Inbox"
+            title="검색 결과가 없어요"
+            description="이름이나 종목 코드의 일부로 다시 검색해 보세요."
+          />
+          <div v-else class="space-y-1.5">
+            <div v-for="n in 3" :key="n" class="h-[64px] animate-pulse rounded-2xl bg-card" />
+          </div>
+        </template>
 
-        <!-- 검색어 있는데 매칭 없을 때 -->
-        <EmptyState
-          v-else-if="watchQ.trim() && watchlist.loaded"
-          :icon="Inbox"
-          title="검색 결과가 없어요"
-          description="이름이나 종목 코드의 일부로 다시 검색해 보세요."
-        />
+        <!-- 평소 모드 — 관심 등록된 종목 -->
+        <template v-else>
+          <div v-if="watchlist.items.length > 0" class="divide-y divide-border/60 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0">
+            <div
+              v-for="item in watchlist.items"
+              :key="item.id"
+              class="flex select-none items-center gap-3 px-3 py-2.5 transition active:bg-accent/30"
+              role="button"
+              tabindex="0"
+              @click="!editing ? go(item.code) : toggleSelect(item.id)"
+            >
+              <div
+                v-if="editing"
+                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
+                :class="selectedIds.has(item.id) ? 'border-destructive bg-destructive text-destructive-foreground' : 'border-border'"
+              >
+                <Check v-if="selectedIds.has(item.id)" class="h-3 w-3" />
+              </div>
 
-        <EmptyState
-          v-else-if="watchlist.loaded"
-          :icon="Star"
-          title="관심 종목을 등록해보세요"
-          description="종목 화면에서 별표 ★를 눌러 관심 종목으로 담아보세요."
-        />
+              <button
+                v-if="!editing"
+                class="-ml-1 p-1 text-amber-400 transition hover:bg-accent rounded"
+                aria-label="관심 제거"
+                @click.stop="watchlist.removeByCode(item.code)"
+              >
+                <Star class="h-3.5 w-3.5 fill-amber-400" />
+              </button>
 
-        <div v-else class="space-y-1.5">
-          <div v-for="n in 3" :key="n" class="h-[110px] animate-pulse rounded-2xl bg-card" />
-        </div>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-semibold tracking-tight">{{ item.name }}</p>
+                <p class="text-[10px] text-muted-foreground tabular-nums">{{ item.code }}</p>
+              </div>
+
+              <div v-if="watchlist.quotes.get(item.code)?.ok" class="shrink-0 text-right tabular-nums">
+                <p class="text-sm font-bold leading-tight" :class="pflsColor(watchlist.quotes.get(item.code)!.changePct)">
+                  {{ fmtKrw(watchlist.quotes.get(item.code)!.price) }}
+                </p>
+                <p class="text-[10px] font-semibold leading-tight" :class="pflsColor(watchlist.quotes.get(item.code)!.changePct)">
+                  {{ fmtPct(watchlist.quotes.get(item.code)!.changePct) }}
+                </p>
+              </div>
+              <span v-else class="shrink-0 text-[10px] text-muted-foreground">—</span>
+            </div>
+          </div>
+
+          <EmptyState
+            v-else-if="watchlist.loaded"
+            :icon="Star"
+            title="관심 종목을 등록해보세요"
+            description="위 검색창에서 종목을 찾아 별표 ★로 추가하세요."
+          />
+
+          <div v-else class="space-y-1.5">
+            <div v-for="n in 3" :key="n" class="h-[64px] animate-pulse rounded-2xl bg-card" />
+          </div>
+        </template>
 
         <div
           v-if="editing && selectedCount > 0"
