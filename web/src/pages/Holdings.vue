@@ -116,13 +116,11 @@ const totalCost = computed(() =>
         · 거래가능금액
         <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(balance.cash) }}</span>
       </p>
-      <div v-else-if="loading" class="mt-2">
-        <LoadingState
-          :compact="true"
-          :messages="['증권사에서 잔고 가져오는 중…', '잠깐만 기다려주세요…']"
-        />
+      <div v-else class="mt-1 animate-pulse">
+        <div class="h-8 w-40 rounded bg-muted/60" />
+        <div class="mt-2 h-4 w-56 rounded bg-muted/40" />
       </div>
-      <p v-else-if="error" class="mt-2 text-sm text-muted-foreground">{{ error }}</p>
+      <p v-if="error && !balance" class="mt-2 text-sm text-muted-foreground">{{ error }}</p>
     </Card>
 
     <!-- 보유 종목 -->
@@ -132,8 +130,12 @@ const totalCost = computed(() =>
           보유 종목 <span class="text-muted-foreground font-normal">({{ holdings.length }})</span>
         </h2>
       </div>
+      <!-- balance 로딩 전 skeleton -->
+      <div v-if="!balance" class="space-y-2">
+        <div v-for="n in 3" :key="n" class="h-[110px] animate-pulse rounded-2xl bg-card" />
+      </div>
       <div
-        v-if="holdings.length === 0"
+        v-else-if="holdings.length === 0"
         class="rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-4 py-10"
       >
         <EmptyState

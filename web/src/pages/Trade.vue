@@ -365,8 +365,20 @@ onUnmounted(() => {
 
     <!-- 주문 탭 — 매수/매도 폼 -->
     <template v-else>
+    <!-- 종목 헤더 skeleton — quote 로딩 전 동일 사이즈 placeholder -->
+    <div v-if="!quote" class="flex items-center gap-2 px-1 animate-pulse">
+      <div class="min-w-0 flex-1">
+        <div class="h-5 w-32 rounded bg-muted/60" />
+        <div class="mt-1 h-3 w-16 rounded bg-muted/40" />
+      </div>
+      <div class="text-right">
+        <div class="h-5 w-24 rounded bg-muted/60" />
+        <div class="mt-1 h-3 w-20 rounded bg-muted/40" />
+      </div>
+    </div>
+
     <!-- 종목 헤더 + 돋보기 + 대기 N 배지 (대기/전략 통합 진입) -->
-    <div v-if="quote" class="flex items-center gap-2 px-1">
+    <div v-else class="flex items-center gap-2 px-1">
       <div class="min-w-0">
         <div class="flex items-center gap-1.5">
           <p class="truncate text-base font-bold tracking-tight">{{ quote.name }}</p>

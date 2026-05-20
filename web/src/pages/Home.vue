@@ -145,8 +145,18 @@ const holdingCount = computed(() => balance.value?.holdings.length ?? 0);
       <span v-if="timeText" class="text-muted-foreground tabular-nums">{{ timeText }}</span>
     </div>
 
+    <!-- 시장 지수 skeleton — 로딩 전 동일 사이즈 placeholder -->
+    <section v-if="orderedIndices.length === 0" class="-mx-4 px-4">
+      <div class="mb-2 px-1">
+        <div class="h-4 w-20 animate-pulse rounded bg-muted/60" />
+      </div>
+      <div class="flex gap-2 overflow-hidden">
+        <div v-for="n in 4" :key="n" class="min-w-[9.5rem] h-[78px] shrink-0 animate-pulse rounded-2xl bg-card" />
+      </div>
+    </section>
+
     <!-- 시장 지수 -->
-    <section v-if="orderedIndices.length > 0" class="-mx-4 px-4">
+    <section v-else class="-mx-4 px-4">
       <div class="mb-2 px-1">
         <h2 class="text-sm font-bold tracking-tight">오늘의 시장</h2>
       </div>
@@ -202,8 +212,9 @@ const holdingCount = computed(() => balance.value?.holdings.length ?? 0);
       <p v-if="balance" class="mt-1 text-[2.6rem] font-bold leading-none tabular-nums tracking-tighter">
         {{ fmtKrw(balance.totalEvlu) }}
       </p>
-      <div v-else-if="loading" class="mt-3">
-        <LoadingState :compact="true" :messages="['증권사에서 잔고 가져오는 중…', '잠깐만 기다려주세요…', '응답이 늦네요. 다시 시도하고 있어요']" />
+      <div v-else-if="loading || !error" class="mt-1 animate-pulse">
+        <div class="h-10 w-48 rounded bg-muted/60" />
+        <div class="mt-3 h-4 w-32 rounded bg-muted/40" />
       </div>
       <p v-else class="mt-2 flex items-center gap-1.5 text-sm text-muted-foreground">
         <RefreshCw class="h-3.5 w-3.5 animate-spin" />

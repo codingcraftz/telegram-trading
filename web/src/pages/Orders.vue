@@ -270,7 +270,9 @@ watch(seg, (v) => { if (v === 'filled' && filledItems.value.length === 0) loadFi
           </RouterLink>
         </template>
       </EmptyState>
-      <LoadingState v-else :compact="true" />
+      <div v-else class="space-y-2">
+        <div v-for="n in 3" :key="n" class="h-[96px] animate-pulse rounded-2xl bg-card" />
+      </div>
     </template>
 
     <!-- 체결 -->
@@ -335,7 +337,9 @@ watch(seg, (v) => { if (v === 'filled' && filledItems.value.length === 0) loadFi
         description="첫 거래를 시작해보세요."
       />
 
-      <LoadingState v-else :compact="true" />
+      <div v-else class="space-y-2">
+        <div v-for="n in 3" :key="n" class="h-[96px] animate-pulse rounded-2xl bg-card" />
+      </div>
     </template>
 
     <OrderDetailSheet
