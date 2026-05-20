@@ -4,6 +4,13 @@ import { maybeFire } from './trigger.js';
 
 // 30초 간격으로 오픈 포지션의 현재가 폴링.
 // 시장(국내/해외)에 따라 다른 KIS API 호출. v2에서 WS로 업그레이드.
+//
+// TODO (사용자 결정 보류): 사용자가 봇 외부(HTS 등)에서 손 매도한 경우 처리.
+// 현재 동작 — position 은 'open' 으로 남고 monitor 가 TP/SL 도달 시 매도 발주 시도 → KIS
+// 가 잔량부족으로 거부. 안전하지만 유령 position 으로 화면에 잔존 + 물타기는 추가 매수 위험.
+// 후보안: (1) tick 시작 시 KIS balance fetch → holdings 와 cross-check, KIS 에 없으면
+// position 'closed' 자동 처리. (2) staged_runner 도 동일 cross-check. (3) UI 에서 수동
+// '봇 추적 종료' 버튼.
 
 const INTERVAL_MS = 30_000;
 let _running = false;
