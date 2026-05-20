@@ -233,6 +233,37 @@ async function loadThemes() {
   finally { themesLoading.value = false; }
 }
 
+// ===== 관심 검색 (watchlist 내부 필터링) =====
+const watchQ = ref('');
+const filteredWatchlist = computed(() => {
+  const list = watchlist.items;
+  const q = watchQ.value.trim().toLowerCase();
+  if (!q) return list;
+  return list.filter((it) =>
+    it.name.toLowerCase().includes(q) || it.code.includes(q),
+  );
+});
+
+// ===== 테마 검색 (종목명 → 속한 테마) =====
+const themeQ = ref('');
+const themeSearchLoading = ref(false);
+type ThemeMatch = ThemeItem & { matchedStocks: ThemeStock[] };
+const themeSearchResults = ref<ThemeMatch[]>([]);
+let themeSearchTimer: ReturnType<typeof setTimeout> | null = null;
+watch(themeQ, (v) => {
+  if (themeSearchTimer) clearTimeout(themeSearchTimer);
+  const trimmed = v.trim();
+  if (!trimmed) { themeSearchResults.value = []; return; }
+  themeSearchTimer = setTimeout(async () => {
+    themeSearchLoading.value = true;
+    try {
+      const r = await api.themeSearch(trimmed);
+      themeSearchResults.value = r.items;
+    } catch (err) { toast.error((err as Error).message); }
+    finally { themeSearchLoading.value = false; }
+  }, 350);
+});
+
 async function openTheme(t: ThemeItem) {
   selectedTheme.value = t;
   themeStocks.value = [];
@@ -376,108 +407,15 @@ onUnmounted(() => {
 
 <template>
   <div class="space-y-4">
-    <StockSearchBar
-      ref="searchBarRef"
-      v-model="q"
-      @focus="searchFocused = true"
-      @blur="searchFocused = false"
-    />
+    <div class="px-1">
+      <h2 class="text-lg font-bold tracking-tight">종목</h2>
+    </div>
 
-    <!-- 검색 결과 모드 -->
-    <template v-if="searchActive">
-      <div v-if="searchResults.length > 0" class="space-y-1.5">
-        <p class="px-1 text-[11px] text-muted-foreground">
-          검색 결과 <span class="tabular-nums">{{ searchResults.length }}</span>건
-        </p>
-        <div
-          v-for="r in searchResults"
-          :key="r.code"
-          class="cursor-pointer rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-4 py-3.5 transition active:scale-[0.99]"
-          @click="go(r.code)"
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-base font-bold tracking-tight">
-                {{ r.name || (searchQuotes.get(r.code)?.name ?? r.code) }}
-              </p>
-              <p class="mt-0.5 text-[11px] text-muted-foreground tabular-nums">{{ r.code }}</p>
-            </div>
-            <div v-if="searchQuotes.get(r.code)?.ok" class="shrink-0 text-right tabular-nums">
-              <p class="text-base font-bold">{{ fmtKrw(searchQuotes.get(r.code)!.price) }}</p>
-              <p class="flex items-center justify-end gap-0.5 text-xs font-medium" :class="pflsColor(searchQuotes.get(r.code)!.changePct)">
-                <ArrowUpRight v-if="searchQuotes.get(r.code)!.changePct > 0" class="h-3 w-3" />
-                <ArrowDownRight v-else-if="searchQuotes.get(r.code)!.changePct < 0" class="h-3 w-3" />
-                {{ fmtPct(searchQuotes.get(r.code)!.changePct) }}
-              </p>
-            </div>
-            <button
-              class="rounded-full p-1.5 text-muted-foreground transition hover:bg-accent"
-              :aria-label="watchlist.has(r.code) ? '관심 제거' : '관심 추가'"
-              @click.stop="toggleWatch(r.code)"
-            >
-              <Star
-                class="h-4 w-4"
-                :class="watchlist.has(r.code) ? 'fill-amber-400 text-amber-400' : ''"
-              />
-            </button>
-          </div>
-          <div
-            class="mt-3 flex items-center justify-end gap-1 border-t border-border/60 pt-2.5"
-            @click.stop
-          >
-            <button
-              type="button"
-              class="rounded-md bg-up px-3 py-1 text-[11px] font-semibold text-white transition hover:brightness-110"
-              @click.stop="openQuick(r.code, r.name || r.code, 'buy', searchQuotes.get(r.code)?.price ?? 0)"
-            >매수</button>
-            <button
-              type="button"
-              class="rounded-md bg-down px-3 py-1 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
-              :disabled="!isHolding(r.code)"
-              @click.stop="openQuick(r.code, r.name || r.code, 'sell', searchQuotes.get(r.code)?.price ?? 0)"
-            >매도</button>
-          </div>
-        </div>
-      </div>
+    <SegmentedControl v-model="seg" :options="segOptions" />
 
-      <EmptyState
-        v-else-if="!searching"
-        :icon="Inbox"
-        title="검색 결과가 없어요"
-        description="6자리 코드 또는 종목명으로 다시 시도해보세요."
-      />
-
-      <div v-else class="space-y-1.5">
-        <div v-for="n in 3" :key="n" class="h-[100px] animate-pulse rounded-2xl bg-card" />
-      </div>
-    </template>
-
-    <!-- 탐색 모드 -->
-    <template v-else>
-      <div class="px-1">
-        <h2 class="text-lg font-bold tracking-tight">종목</h2>
-      </div>
-
-      <!-- 최근 검색 (검색바 포커스 + 검색어 비어있을 때) -->
-      <div v-if="searchFocused && recent.length > 0" class="space-y-1.5">
-        <div class="flex items-center justify-between px-1">
-          <p class="text-[11px] font-semibold text-muted-foreground">최근 검색</p>
-          <button
-            class="text-[11px] text-muted-foreground transition hover:text-foreground"
-            @click="clearRecent"
-          >전체 지우기</button>
-        </div>
-        <div class="flex flex-wrap gap-1.5 px-1">
-          <button
-            v-for="r in recent" :key="r"
-            type="button"
-            class="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground transition hover:bg-accent hover:text-foreground"
-            @click="q = r"
-          >{{ r }}</button>
-        </div>
-      </div>
-
-      <SegmentedControl v-model="seg" :options="segOptions" />
+    <!-- 사용자 요청: 페이지 상단 글로벌 검색바 제거.
+         관심 탭은 watchlist 안 검색, 테마 탭은 종목→테마 매칭 검색.
+         순위 탭은 검색바 없음. 검색바는 각 탭 내부에. -->
 
       <!-- 보유 -->
       <section v-if="seg === 'holding'" class="space-y-2">
@@ -560,9 +498,19 @@ onUnmounted(() => {
           </template>
         </SectionHeader>
 
-        <div v-if="watchlist.items.length > 0" class="space-y-1.5">
+        <!-- 관심 검색 — watchlist 안 종목명/코드 필터링 -->
+        <div v-if="watchlist.items.length > 0" class="relative">
+          <input
+            v-model="watchQ"
+            type="text"
+            placeholder="관심 종목 검색"
+            class="w-full rounded-xl bg-muted px-3.5 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+
+        <div v-if="filteredWatchlist.length > 0" class="space-y-1.5">
           <div
-            v-for="item in watchlist.items"
+            v-for="item in filteredWatchlist"
             :key="item.id"
             class="select-none rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-4 py-3.5 transition active:scale-[0.99]"
             role="button"
@@ -628,11 +576,19 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- 검색어 있는데 매칭 없을 때 -->
+        <EmptyState
+          v-else-if="watchQ.trim() && watchlist.loaded"
+          :icon="Inbox"
+          title="검색 결과가 없어요"
+          description="이름이나 종목 코드의 일부로 다시 검색해 보세요."
+        />
+
         <EmptyState
           v-else-if="watchlist.loaded"
           :icon="Star"
           title="관심 종목을 등록해보세요"
-          description="위 검색창에서 종목을 찾아 별표 ★를 누르면 여기 담겨요."
+          description="종목 화면에서 별표 ★를 눌러 관심 종목으로 담아보세요."
         />
 
         <div v-else class="space-y-1.5">
@@ -729,6 +685,55 @@ onUnmounted(() => {
 
       <!-- 테마주 — 네이버 finance 테마 랭킹 -->
       <section v-else-if="seg === 'theme'" class="space-y-2">
+        <!-- 테마 검색 — 종목명/코드 → 그 종목이 속한 테마 -->
+        <input
+          v-model="themeQ"
+          type="text"
+          placeholder="종목명/코드로 검색 (예: 광전자) — 속한 테마를 찾아드려요"
+          class="w-full rounded-xl bg-muted px-3.5 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+
+        <!-- 검색 모드 -->
+        <template v-if="themeQ.trim()">
+          <div v-if="themeSearchLoading" class="space-y-1.5">
+            <div v-for="n in 3" :key="n" class="h-[72px] animate-pulse rounded-2xl bg-card" />
+            <p class="text-center text-[10px] text-muted-foreground">
+              30개 테마 검색 중… 첫 검색은 몇 초 걸려요.
+            </p>
+          </div>
+          <div v-else-if="themeSearchResults.length > 0" class="space-y-1.5">
+            <p class="px-1 text-[11px] text-muted-foreground">
+              검색 결과 <span class="tabular-nums">{{ themeSearchResults.length }}</span>개 테마
+            </p>
+            <button
+              v-for="t in themeSearchResults" :key="t.no"
+              type="button"
+              class="w-full rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-4 py-3 text-left transition active:scale-[0.99]"
+              @click="openTheme(t)"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-bold tracking-tight">{{ t.name }}</p>
+                  <p class="mt-0.5 truncate text-[10px] text-muted-foreground">
+                    매칭 종목: {{ t.matchedStocks.map((s) => s.name).join(' · ') }}
+                  </p>
+                </div>
+                <p class="shrink-0 text-sm font-bold tabular-nums" :class="pflsColor(t.changePct)">
+                  {{ fmtPct(t.changePct) }}
+                </p>
+              </div>
+            </button>
+          </div>
+          <EmptyState
+            v-else
+            :icon="Inbox"
+            title="속한 테마가 없어요"
+            description="다른 종목으로 다시 시도해보세요."
+          />
+        </template>
+
+        <!-- 검색 없을 때: 랭킹 모드 -->
+        <template v-else>
         <div class="flex items-center justify-between px-1">
           <p class="text-[11px] text-muted-foreground">전일 대비 등락률 상위 (1시간 캐싱)</p>
           <button
@@ -781,6 +786,7 @@ onUnmounted(() => {
           title="테마 데이터를 불러오지 못했어요"
           description="새로고침을 눌러 다시 시도해 보세요."
         />
+        </template>
       </section>
 
       <Modal :open="removeOpen" title="관심 종목에서 뺄까요?" @close="removeOpen = false">
@@ -792,7 +798,6 @@ onUnmounted(() => {
           <Button variant="destructive" @click="confirmRemove">빼기</Button>
         </div>
       </Modal>
-    </template>
 
     <QuickTradeSheet
       :open="quick.open"

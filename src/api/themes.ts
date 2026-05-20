@@ -151,6 +151,58 @@ export async function handleThemes(c: Context) {
   }
 }
 
+// GET /api/themes/search?q=종목명 — 종목명/코드로 검색해 그 종목이 속한 테마들 반환.
+// 첫 호출은 30개 테마 detail 을 모두 fetch (concurrent 10) — 1시간 캐시 활용해 이후 빠름.
+export async function handleThemeSearch(c: Context) {
+  const q = (c.req.query('q') ?? '').trim();
+  if (!q) return c.json({ q, items: [] });
+
+  try {
+    const list = await cached('themes:list', 60 * 60 * 1000, async () => {
+      const html = await fetchKoreanHtml(NAVER_THEME_LIST_URL);
+      return parseThemes(html);
+    });
+
+    // 각 테마 detail fetch — 캐시 hit 면 즉시 반환, miss 면 네이버 호출.
+    // concurrency 10 으로 batching: 30개 / 10 = 3 batch → 첫 호출 ~3초.
+    const detailFor = async (no: number): Promise<ThemeStock[]> => {
+      return cached(`themes:detail:${no}`, 30 * 60 * 1000, async () => {
+        const html = await fetchKoreanHtml(`${NAVER_THEME_DETAIL_URL}?type=theme&no=${no}`);
+        return parseThemeStocks(html);
+      });
+    };
+
+    const themeStocks: { theme: ThemeItem; stocks: ThemeStock[] }[] = [];
+    const concurrency = 10;
+    for (let i = 0; i < list.length; i += concurrency) {
+      const batch = list.slice(i, i + concurrency);
+      const results = await Promise.all(
+        batch.map(async (t) => {
+          try { return { theme: t, stocks: await detailFor(t.no) }; }
+          catch { return { theme: t, stocks: [] as ThemeStock[] }; }
+        }),
+      );
+      themeStocks.push(...results);
+    }
+
+    const lowerQ = q.toLowerCase();
+    // 종목명 부분일치 + 종목코드 일치 모두 허용. 매칭된 테마 list 반환.
+    const matched = themeStocks
+      .filter(({ stocks }) => stocks.some((s) => s.name.toLowerCase().includes(lowerQ) || s.code === q))
+      .map(({ theme, stocks }) => ({
+        ...theme,
+        // 매칭된 종목 정보도 같이 (검색어가 어느 종목과 일치했는지)
+        matchedStocks: stocks
+          .filter((s) => s.name.toLowerCase().includes(lowerQ) || s.code === q)
+          .slice(0, 3),
+      }));
+
+    return c.json({ q, items: matched });
+  } catch (err) {
+    return c.json({ error: (err as Error).message, items: [] }, 502);
+  }
+}
+
 export async function handleThemeDetail(c: Context) {
   const no = Number(c.req.param('no'));
   if (!Number.isFinite(no) || no <= 0) {

@@ -63,6 +63,10 @@ export const api = {
   // 네이버 테마주
   themes: (limit = 30) => request<{ items: ThemeItem[] }>(`/api/themes?limit=${limit}`),
   themeDetail: (no: number) => request<{ no: number; items: ThemeStock[] }>(`/api/themes/${no}`),
+  themeSearch: (q: string) =>
+    request<{ q: string; items: (ThemeItem & { matchedStocks: ThemeStock[] })[] }>(
+      `/api/themes/search?q=${encodeURIComponent(q)}`,
+    ),
 
   asking: (code: string) => request<AskingResponse>(`/api/asking?code=${code}`),
   watchlist: () => request<WatchlistResponse>('/api/watchlist'),
