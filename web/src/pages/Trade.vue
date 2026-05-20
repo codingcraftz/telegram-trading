@@ -22,7 +22,7 @@ const router = useRouter();
 const ordersStore = useOrdersStore();
 const watchlist = useWatchlistStore();
 
-// 상단 탭 — '주문' (매수/매도 폼) / '내역' (대기+체결 통합)
+// 상단 탭 — '주문' (매수/매도 폼) / '거래' (대기+체결 통합)
 type Tab = 'order' | 'history';
 const tab = ref<Tab>(((route.query.tab as string) === 'history' ? 'history' : 'order'));
 watch(tab, (v) => {
@@ -343,12 +343,12 @@ onUnmounted(() => {
     class="space-y-3 pt-2"
     style="overscroll-behavior: contain;"
   >
-    <!-- 상단 탭 — 주문 / 내역 -->
+    <!-- 상단 탭 — 주문 / 거래 (대기+체결 통합) -->
     <SegmentedControl
       v-model="tab"
       :options="[
         { value: 'order' as const, label: '주문' },
-        { value: 'history' as const, label: ordersStore.count > 0 ? `내역 ${ordersStore.count}` : '내역' },
+        { value: 'history' as const, label: ordersStore.count > 0 ? `거래 ${ordersStore.count}` : '거래' },
       ]"
     />
 
