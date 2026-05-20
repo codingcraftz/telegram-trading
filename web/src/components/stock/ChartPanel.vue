@@ -150,7 +150,14 @@ onMounted(load);
         </div>
       </div>
     </template>
+    <!-- 캔들 로딩 전 skeleton — 실제 차트와 동일한 높이 유지 -->
+    <div
+      v-if="candles.length === 0"
+      class="animate-pulse rounded-md bg-muted/40"
+      :style="{ height: `${height + 80}px` }"
+    />
     <TradeChart
+      v-else
       :key="themeKey"
       :candles="candles"
       :height="height"

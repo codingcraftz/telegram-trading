@@ -145,55 +145,62 @@ const holdingCount = computed(() => balance.value?.holdings.length ?? 0);
       <span v-if="timeText" class="text-muted-foreground tabular-nums">{{ timeText }}</span>
     </div>
 
-    <!-- 시장 지수 skeleton — 로딩 전 동일 사이즈 placeholder -->
-    <section v-if="orderedIndices.length === 0" class="-mx-4 px-4">
-      <div class="mb-2 px-1">
-        <div class="h-4 w-20 animate-pulse rounded bg-muted/60" />
-      </div>
-      <div class="flex gap-2 overflow-hidden">
-        <div v-for="n in 4" :key="n" class="min-w-[9.5rem] h-[78px] shrink-0 animate-pulse rounded-2xl bg-card" />
-      </div>
-    </section>
-
-    <!-- 시장 지수 -->
-    <section v-else class="-mx-4 px-4">
-      <div class="mb-2 px-1">
-        <h2 class="text-sm font-bold tracking-tight">오늘의 시장</h2>
-      </div>
-      <div class="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div
-          v-for="idx in orderedIndices"
-          :key="idx.key"
-          class="min-w-[9.5rem] shrink-0 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-3 py-2.5"
-        >
-          <div class="flex items-start justify-between">
-            <div class="min-w-0">
-              <p class="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
-                <span>{{ idx.label }}</span>
-                <span
-                  v-if="isUsIndex(idx.key)"
-                  class="rounded-sm bg-muted px-1 py-px text-[9px]"
-                  :class="usSessionLabel === '미장 거래중' ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'"
-                >{{ usSessionLabel }}</span>
-              </p>
-              <p class="mt-0.5 text-sm font-bold tabular-nums tracking-tight">{{ fmtIndex(idx.price) }}</p>
-            </div>
-            <p class="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold tabular-nums" :class="pflsColor(idx.change)">
-              <ArrowUpRight v-if="idx.change > 0" class="h-3 w-3" />
-              <ArrowDownRight v-else-if="idx.change < 0" class="h-3 w-3" />
-              {{ fmtPct(idx.changePct) }}
-            </p>
-          </div>
-          <Sparkline
-            v-if="idx.series.length >= 2"
-            :data="idx.series"
-            :width="140"
-            :height="36"
-            class="mt-1.5 w-full"
-          />
+    <!-- 시장 지수 — skeleton ↔ 실데이터 fade transition -->
+    <Transition
+      mode="out-in"
+      enter-active-class="transition duration-200 ease-out"
+      enter-from-class="opacity-0"
+      leave-active-class="transition duration-150 ease-in"
+      leave-to-class="opacity-0"
+    >
+      <section v-if="orderedIndices.length === 0" key="skeleton" class="-mx-4 px-4">
+        <div class="mb-2 px-1">
+          <div class="h-4 w-20 animate-pulse rounded bg-muted/60" />
         </div>
-      </div>
-    </section>
+        <div class="flex gap-2 overflow-hidden">
+          <div v-for="n in 4" :key="n" class="min-w-[9.5rem] h-[78px] shrink-0 animate-pulse rounded-2xl bg-card" />
+        </div>
+      </section>
+
+      <section v-else key="data" class="-mx-4 px-4">
+        <div class="mb-2 px-1">
+          <h2 class="text-sm font-bold tracking-tight">오늘의 시장</h2>
+        </div>
+        <div class="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div
+            v-for="idx in orderedIndices"
+            :key="idx.key"
+            class="min-w-[9.5rem] shrink-0 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-3 py-2.5"
+          >
+            <div class="flex items-start justify-between">
+              <div class="min-w-0">
+                <p class="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                  <span>{{ idx.label }}</span>
+                  <span
+                    v-if="isUsIndex(idx.key)"
+                    class="rounded-sm bg-muted px-1 py-px text-[9px]"
+                    :class="usSessionLabel === '미장 거래중' ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'"
+                  >{{ usSessionLabel }}</span>
+                </p>
+                <p class="mt-0.5 text-sm font-bold tabular-nums tracking-tight">{{ fmtIndex(idx.price) }}</p>
+              </div>
+              <p class="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold tabular-nums" :class="pflsColor(idx.change)">
+                <ArrowUpRight v-if="idx.change > 0" class="h-3 w-3" />
+                <ArrowDownRight v-else-if="idx.change < 0" class="h-3 w-3" />
+                {{ fmtPct(idx.changePct) }}
+              </p>
+            </div>
+            <Sparkline
+              v-if="idx.series.length >= 2"
+              :data="idx.series"
+              :width="140"
+              :height="36"
+              class="mt-1.5 w-full"
+            />
+          </div>
+        </div>
+      </section>
+    </Transition>
 
     <!-- 내 자산 (거래 대기 카드는 자산 아래로 이동) -->
     <Card>
