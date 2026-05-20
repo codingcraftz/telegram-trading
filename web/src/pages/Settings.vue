@@ -154,6 +154,67 @@ onMounted(() => {
       <h2 class="text-lg font-bold tracking-tight">설정</h2>
     </div>
 
+    <!-- 버전 정보 + 업데이트 — 최상단 -->
+    <Card>
+      <template #header>
+        <h3 class="text-sm font-bold tracking-tight">버전 정보</h3>
+      </template>
+      <div class="space-y-3">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-[11px] text-muted-foreground">현재 버전</p>
+            <p class="mt-0.5 font-mono text-sm font-bold tabular-nums">
+              {{ version?.sha ?? '—' }}
+            </p>
+            <p v-if="buildDate" class="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
+              빌드 {{ buildDate }}
+            </p>
+          </div>
+          <div v-if="updateInfo" class="text-right min-w-0">
+            <p class="text-[11px] text-muted-foreground">최신 버전</p>
+            <p
+              class="mt-0.5 font-mono text-sm font-bold tabular-nums"
+              :class="updateInfo.updateAvailable ? 'text-primary' : ''"
+            >
+              {{ updateInfo.latest || '—' }}
+            </p>
+            <p v-if="updateCheckedLabel" class="mt-0.5 text-[10px] text-muted-foreground">
+              {{ updateCheckedLabel }}
+            </p>
+          </div>
+        </div>
+
+        <div
+          v-if="updateInfo?.updateAvailable && updateInfo.latestMessage"
+          class="rounded-lg bg-primary/10 px-3 py-2.5 text-[11px] leading-relaxed"
+        >
+          <p class="font-semibold text-primary">새 업데이트가 있어요</p>
+          <p class="mt-1 break-words text-foreground/80">{{ updateInfo.latestMessage }}</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <Button
+            variant="secondary"
+            size="md"
+            :disabled="updateChecking"
+            @click="checkForUpdate(false)"
+          >
+            <RefreshCw class="mr-1 h-4 w-4" :class="updateChecking ? 'animate-spin' : ''" />
+            확인
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
+            :disabled="!updateInfo?.updateAvailable || updateRunning"
+            @click="runUpdate"
+          >
+            <Rocket class="mr-1 h-4 w-4" />
+            {{ updateRunning ? '요청 중…' : '업데이트' }}
+          </Button>
+        </div>
+      </div>
+    </Card>
+
     <!-- PWA 앱 설치 — canShowInstallButton 일 때만 -->
     <Card v-if="pwa.canShowInstallButton.value">
       <template #header>
@@ -351,70 +412,5 @@ onMounted(() => {
     </Card>
 
     <!-- 버전 + 업데이트 -->
-    <Card>
-      <template #header>
-        <h3 class="text-sm font-bold tracking-tight">버전 정보</h3>
-      </template>
-      <div class="space-y-3">
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="text-[11px] text-muted-foreground">현재 버전</p>
-            <p class="mt-0.5 font-mono text-sm font-bold tabular-nums">
-              {{ version?.sha ?? '—' }}
-            </p>
-            <p v-if="buildDate" class="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
-              빌드 {{ buildDate }}
-            </p>
-          </div>
-          <div v-if="updateInfo" class="text-right min-w-0">
-            <p class="text-[11px] text-muted-foreground">최신 버전</p>
-            <p
-              class="mt-0.5 font-mono text-sm font-bold tabular-nums"
-              :class="updateInfo.updateAvailable ? 'text-primary' : ''"
-            >
-              {{ updateInfo.latest || '—' }}
-            </p>
-            <p v-if="updateCheckedLabel" class="mt-0.5 text-[10px] text-muted-foreground">
-              {{ updateCheckedLabel }}
-            </p>
-          </div>
-        </div>
-
-        <!-- 새 버전 안내 + 변경사항 -->
-        <div
-          v-if="updateInfo?.updateAvailable && updateInfo.latestMessage"
-          class="rounded-lg bg-primary/10 px-3 py-2.5 text-[11px] leading-relaxed"
-        >
-          <p class="font-semibold text-primary">새 업데이트가 있어요</p>
-          <p class="mt-1 break-words text-foreground/80">{{ updateInfo.latestMessage }}</p>
-        </div>
-
-        <div class="grid grid-cols-2 gap-2">
-          <Button
-            variant="secondary"
-            size="md"
-            :disabled="updateChecking"
-            @click="checkForUpdate(false)"
-          >
-            <RefreshCw class="mr-1 h-4 w-4" :class="updateChecking ? 'animate-spin' : ''" />
-            확인
-          </Button>
-          <Button
-            variant="primary"
-            size="md"
-            :disabled="!updateInfo?.updateAvailable || updateRunning"
-            @click="runUpdate"
-          >
-            <Rocket class="mr-1 h-4 w-4" />
-            {{ updateRunning ? '요청 중…' : '업데이트' }}
-          </Button>
-        </div>
-
-        <p class="text-[10px] leading-relaxed text-muted-foreground">
-          ※ 자동으로도 5분마다 새 이미지를 확인해서 갱신합니다.
-          즉시 업데이트가 필요하면 위 버튼을 누르세요 — 1~2분 후 적용됩니다.
-        </p>
-      </div>
-    </Card>
   </div>
 </template>

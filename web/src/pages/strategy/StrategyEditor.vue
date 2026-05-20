@@ -50,16 +50,16 @@ const stage1Pct = ref<number>(100);
 // 2차 (물타기) — default OFF
 const stage2Enabled = ref<boolean>(false);
 const stage2DropPct = ref<number>(5);
-// 익절 1차 — default ON. 2차 OFF 면 sellPct 100% 강제.
+// 익절 1차 — default ON, 평단 +10%. 2차 OFF 면 sellPct 100% 강제.
 const tp1Enabled = ref<boolean>(true);
-const tp1AtPct = ref<number>(5);
+const tp1AtPct = ref<number>(10);
 const tp1SellPct = ref<number>(100);
-// 익절 2차 — default OFF. ON 이면 잔량(100 - tp1SellPct) 익절.
+// 익절 2차 — default OFF, 평단 +20%.
 const tp2Enabled = ref<boolean>(false);
-const tp2AtPct = ref<number>(10);
-// 손절 — default OFF
+const tp2AtPct = ref<number>(20);
+// 손절 — default OFF, 평단 -10%
 const stagedSlEnabled = ref<boolean>(false);
-const stagedSlPct = ref<number>(5);
+const stagedSlPct = ref<number>(10);
 const stage2Pct = computed(() => Math.max(0, 100 - stage1Pct.value));
 
 // 2차 토글 변경 시 1차 비율/tp1SellPct 자동 조정 (사용자 정책).
@@ -434,12 +434,6 @@ async function removeApp(appId: string) {
           <Trash2 class="h-4 w-4" />
         </button>
       </div>
-    </div>
-
-    <!-- 발동 안 함 안내 -->
-    <div class="flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
-      <AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span>전략은 저장되지만 아직 자동 발동되지 않아요. 스케줄러 통합 후 활성화됩니다.</span>
     </div>
 
     <!-- 1. 기본 정보 -->

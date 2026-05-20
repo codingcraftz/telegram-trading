@@ -98,12 +98,6 @@ async function toggleActive(s: StrategyItem) {
       </div>
     </div>
 
-    <!-- 발동 안 함 안내 -->
-    <div class="flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
-      <AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span>전략은 저장되지만 아직 자동 발동되지 않아요. 스케줄러 통합 후 활성화됩니다.</span>
-    </div>
-
     <!-- 리스트 -->
     <div v-if="items.length > 0" class="space-y-1.5">
       <div
