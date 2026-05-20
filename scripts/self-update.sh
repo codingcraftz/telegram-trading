@@ -76,7 +76,21 @@ fi
 
 # --- 3) 인프라 파일 sync ---
 changed=0
-declare -a track=("docker-compose.yml" "infra/Caddyfile")
+# .env 에 DASHBOARD_PIN_HASH 가 있으면 신규 (PIN 흐름) VPS — Caddyfile 은 install.sh 가
+# 인라인으로 PIN 전용 (basic_auth 없는) 버전을 썼으므로, GitHub main 의 옛 basic_auth Caddyfile
+# 로 덮어쓰면 인증 깨짐 + Caddy 시작 실패 (DASHBOARD_PASSWORD_HASH 빈값). → Caddyfile sync skip.
+# DASHBOARD_PIN_HASH 없으면 기존 (basic_auth) VPS — GitHub main 의 Caddyfile 갱신 OK.
+HAS_PIN_HASH=0
+if [ -f "$INSTALL_DIR/.env" ] && grep -qE '^DASHBOARD_PIN_HASH=.+' "$INSTALL_DIR/.env"; then
+  HAS_PIN_HASH=1
+fi
+
+if [ "$HAS_PIN_HASH" = "1" ]; then
+  declare -a track=("docker-compose.yml")
+  echo "$LOG_PREFIX PIN 흐름 VPS 감지 — Caddyfile sync skip"
+else
+  declare -a track=("docker-compose.yml" "infra/Caddyfile")
+fi
 
 for f in "${track[@]}"; do
   tmp=$(mktemp)

@@ -58,6 +58,10 @@ services:
       - "443:443"
     environment:
       DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN}
+      # 옛 basic_auth Caddyfile 호환 (기존 VPS 가 self-update 로 받는 경로).
+      # 새 VPS 는 install.sh 가 PIN 흐름의 인라인 Caddyfile 을 쓰므로 이 변수들은 무시됨.
+      DASHBOARD_USER: ${DASHBOARD_USER:-admin}
+      DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH:-}
       CADDY_EMAIL: ${CADDY_EMAIL:-}
     volumes:
       - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro

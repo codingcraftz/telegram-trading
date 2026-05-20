@@ -96,12 +96,23 @@ if ! docker compose version &>/dev/null; then
   apt-get install -y -qq docker-compose-plugin
 fi
 
-# ---------- 3) compose 파일 다운로드 ----------
+# ---------- 3) compose 파일 + 인라인 Caddyfile ----------
 report 3 "봇 구성 파일 다운로드"
 mkdir -p $INSTALL_DIR/infra $INSTALL_DIR/data
 cd $INSTALL_DIR
 curl -fsSL $RAW_BASE/docker-compose.yml -o docker-compose.yml
-curl -fsSL $RAW_BASE/infra/Caddyfile -o infra/Caddyfile
+# Caddyfile 은 인라인 — GitHub main 의 Caddyfile 은 옛 basic_auth 버전 (기존 VPS 호환용).
+# 신규 VPS 는 PIN 흐름이라 봇 앱이 직접 /login 인증, Caddy 는 단순 reverse_proxy.
+# self-update.sh 가 .env 의 DASHBOARD_PIN_HASH 보고 Caddyfile fetch skip 함.
+cat > infra/Caddyfile <<'CADDYEOF'
+{
+  email {$CADDY_EMAIL}
+}
+
+{$DASHBOARD_DOMAIN} {
+  reverse_proxy bot:8080
+}
+CADDYEOF
 
 # ---------- 4) IP + sslip.io 도메인 + PIN bcrypt + 세션 secret ----------
 report 4 "도메인/HTTPS 설정 중"
