@@ -14,7 +14,7 @@ const ordersStore = useOrdersStore();
 const items = [
   { key: 'home', to: '/', label: '홈', icon: Home, match: ['home'] },
   { key: 'watchlist', to: '/stocks', label: '관심', icon: Star, match: ['stocks', 'stock-detail'] },
-  { key: 'orders', to: '/orders', label: '주문', icon: ArrowLeftRight, match: ['orders'] },
+  { key: 'orders', to: '/trade', label: '주문', icon: ArrowLeftRight, match: ['trade', 'orders'] },
   { key: 'holdings', to: '/holdings', label: '잔고', icon: Briefcase, match: ['holdings'] },
   { key: 'menu', to: '/settings', label: '메뉴', icon: Menu, match: ['settings', 'strategy-list', 'strategy-new', 'strategy-edit', 'strategy-templates'] },
 ];
