@@ -296,6 +296,25 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- 내 전략 — 핵심 기능. highlight 카드. -->
+    <RouterLink
+      to="/more/strategy"
+      class="block rounded-2xl bg-gradient-to-br from-primary/15 to-primary/5 ring-1 ring-primary/30 dark:ring-primary/40 px-4 py-3.5 transition active:scale-[0.99]"
+    >
+      <div class="flex items-center gap-3">
+        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/20">
+          <NotebookPen class="h-5 w-5 text-primary" />
+        </div>
+        <div class="min-w-0 flex-1">
+          <p class="text-base font-bold tracking-tight">내 전략</p>
+          <p class="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+            {{ strategyCount > 0 ? `${strategyCount}개 저장됨 — 활성/편집/추가` : '전략 만들기 — 자동 매매 패턴 정의' }}
+          </p>
+        </div>
+        <ChevronRight class="h-5 w-5 shrink-0 text-primary" />
+      </div>
+    </RouterLink>
+
     <!-- 화면 색 — 밝게/어둡게/자동 -->
     <Card>
       <template #header>
@@ -312,72 +331,27 @@ onUnmounted(() => {
       />
     </Card>
 
-    <!-- 내 전략 — 단일 메뉴 항목. 추가/편집/삭제는 내 전략 페이지 안에서. -->
-    <Card>
-      <RouterLink
-        to="/more/strategy"
-        class="-mx-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-accent"
-      >
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-          <NotebookPen class="h-5 w-5 text-primary" />
-        </div>
-        <div class="min-w-0 flex-1">
-          <p class="text-sm font-semibold">내 전략</p>
-          <p class="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-            {{ strategyCount > 0 ? `${strategyCount}개 저장됨 — 활성/편집/추가` : '전략 만들기' }}
-          </p>
-        </div>
-        <ChevronRight class="h-4 w-4 shrink-0 text-muted-foreground" />
-      </RouterLink>
-    </Card>
-
-    <!-- 연결 상태 — 모의/실전 키 연결 유무. 키 옆에 수정/추가 진입 버튼. -->
+    <!-- 연결 상태 — 단순 표시만. 수정/추가는 'KIS 키 다시 입력' 메뉴에서. -->
     <Card v-if="keys">
       <template #header>
         <h3 class="text-sm font-bold tracking-tight">연결 상태</h3>
       </template>
-      <ul class="space-y-2.5 text-sm">
-        <li class="flex items-center justify-between gap-2">
+      <ul class="space-y-2 text-sm">
+        <li class="flex items-center justify-between">
           <span class="text-muted-foreground">모의투자</span>
-          <button
-            v-if="keys.paperKeys"
-            class="flex items-center gap-2 rounded-md px-2 py-1 text-up hover:bg-accent transition"
-            @click="gotoOnboarding"
-          >
-            <CircleCheck class="h-4 w-4" />
-            <span class="font-semibold">연결됨</span>
-            <span class="text-[10px] text-muted-foreground">· 수정</span>
-          </button>
-          <button
-            v-else
-            class="flex items-center gap-2 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent transition"
-            @click="gotoOnboarding"
-          >
-            <CircleX class="h-4 w-4" />
-            <span class="font-semibold">연결안됨</span>
-            <span class="text-[10px] text-primary">· 추가하기</span>
-          </button>
+          <span class="flex items-center gap-1 font-semibold" :class="keys.paperKeys ? 'text-up' : 'text-muted-foreground'">
+            <CircleCheck v-if="keys.paperKeys" class="h-4 w-4" />
+            <CircleX v-else class="h-4 w-4" />
+            {{ keys.paperKeys ? '연결됨' : '연결안됨' }}
+          </span>
         </li>
-        <li class="flex items-center justify-between gap-2">
+        <li class="flex items-center justify-between">
           <span class="text-muted-foreground">실전투자</span>
-          <button
-            v-if="keys.realKeys"
-            class="flex items-center gap-2 rounded-md px-2 py-1 text-up hover:bg-accent transition"
-            @click="gotoOnboarding"
-          >
-            <CircleCheck class="h-4 w-4" />
-            <span class="font-semibold">연결됨</span>
-            <span class="text-[10px] text-muted-foreground">· 수정</span>
-          </button>
-          <button
-            v-else
-            class="flex items-center gap-2 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent transition"
-            @click="gotoOnboarding"
-          >
-            <CircleX class="h-4 w-4" />
-            <span class="font-semibold">연결안됨</span>
-            <span class="text-[10px] text-primary">· 추가하기</span>
-          </button>
+          <span class="flex items-center gap-1 font-semibold" :class="keys.realKeys ? 'text-up' : 'text-muted-foreground'">
+            <CircleCheck v-if="keys.realKeys" class="h-4 w-4" />
+            <CircleX v-else class="h-4 w-4" />
+            {{ keys.realKeys ? '연결됨' : '연결안됨' }}
+          </span>
         </li>
         <li class="flex items-center justify-between">
           <span class="text-muted-foreground">시세 / 차트</span>

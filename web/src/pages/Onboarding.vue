@@ -3,7 +3,7 @@
 // 텔레그램·UI 옵션은 Settings 페이지에서. router 가드가 /api/keys-status 로 키 미입력 감지 시 redirect.
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { TestTube2, Flame, Info, ChevronLeft } from 'lucide-vue-next';
+import { TestTube2, Flame, Info, ChevronLeft, CircleCheck, CircleX } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import { toast } from '@/lib/toast';
@@ -13,9 +13,11 @@ const router = useRouter();
 
 // 이미 키가 있는 사용자 (= 설정에서 들어옴) 면 뒤로가기 노출. 첫 셋업이면 숨김.
 const hasExistingKeys = ref(false);
+const status = ref<{ paperKeys: boolean; realKeys: boolean } | null>(null);
 onMounted(async () => {
   try {
     const k = await api.keysStatus();
+    status.value = { paperKeys: k.paperKeys, realKeys: k.realKeys };
     hasExistingKeys.value = k.paperKeys || k.realKeys || k.realMarketKeys;
   } catch { hasExistingKeys.value = false; }
 });
@@ -145,7 +147,15 @@ async function pollRestart() {
       <template #header>
         <div class="flex items-center gap-2">
           <TestTube2 class="h-4 w-4 text-primary" />
-          <h2 class="text-sm font-bold tracking-tight">KIS 모의투자</h2>
+          <h2 class="flex-1 text-sm font-bold tracking-tight">KIS 모의투자</h2>
+          <span v-if="status?.paperKeys" class="flex items-center gap-1 text-[11px] font-semibold text-up">
+            <CircleCheck class="h-3.5 w-3.5" />
+            연결됨 · 수정
+          </span>
+          <span v-else-if="status" class="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground">
+            <CircleX class="h-3.5 w-3.5" />
+            연결안됨 · 추가
+          </span>
         </div>
       </template>
       <p class="-mt-1 mb-3 text-[11px] leading-relaxed text-muted-foreground">
@@ -190,7 +200,15 @@ async function pollRestart() {
       <template #header>
         <div class="flex items-center gap-2">
           <Flame class="h-4 w-4 text-down" />
-          <h2 class="text-sm font-bold tracking-tight">KIS 실전</h2>
+          <h2 class="flex-1 text-sm font-bold tracking-tight">KIS 실전</h2>
+          <span v-if="status?.realKeys" class="flex items-center gap-1 text-[11px] font-semibold text-up">
+            <CircleCheck class="h-3.5 w-3.5" />
+            연결됨 · 수정
+          </span>
+          <span v-else-if="status" class="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground">
+            <CircleX class="h-3.5 w-3.5" />
+            연결안됨 · 추가
+          </span>
         </div>
       </template>
       <p class="-mt-1 mb-3 text-[11px] leading-relaxed text-muted-foreground">
