@@ -6,6 +6,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/stocks', name: 'stocks', component: () => import('@/pages/Stocks.vue') },
   { path: '/stocks/:code', name: 'stock-detail', component: () => import('@/pages/StockDetail.vue') },
   { path: '/orders', name: 'orders', component: () => import('@/pages/Orders.vue') },
+  { path: '/holdings', name: 'holdings', component: () => import('@/pages/Holdings.vue') },
   { path: '/settings', name: 'settings', component: () => import('@/pages/Settings.vue') },
   { path: '/onboarding', name: 'onboarding', component: () => import('@/pages/Onboarding.vue') },
 
@@ -36,7 +37,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/sell', redirect: (to) => ({ path: `/stocks/${(to.query.code as string) ?? ''}`, query: { tab: 'sell' } }) },
 
   // 구 경로 호환
-  { path: '/balance', redirect: '/' },
+  { path: '/balance', redirect: '/holdings' },
   { path: '/watchlist', redirect: '/stocks' },
   { path: '/quote', redirect: (to) => `/stocks/${(to.query.code as string) ?? ''}` },
   { path: '/chart', redirect: (to) => `/stocks/${(to.query.code as string) ?? ''}` },
