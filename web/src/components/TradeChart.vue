@@ -14,6 +14,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue';
 import {
   CandlestickSeries,
   HistogramSeries,
+  LineSeries,
   LineStyle,
   createChart,
   type CandlestickData,
@@ -21,6 +22,7 @@ import {
   type IChartApi,
   type IPriceLine,
   type ISeriesApi,
+  type LineData,
   type UTCTimestamp,
 } from 'lightweight-charts';
 
@@ -34,8 +36,10 @@ const props = withDefaults(
     takeProfit?: number | null;
     /** 처음 보이는 바 개수 (이후엔 pinch zoom으로 조절) */
     visibleBars?: number | null;
+    /** 이동평균선 기간 list — 예: [5, 20, 60, 120]. KIS 차트와 동일 색상 매핑. */
+    movingAverages?: number[];
   }>(),
-  { height: 360, showVolume: true, entry: null, stopLoss: null, takeProfit: null, visibleBars: null },
+  { height: 360, showVolume: true, entry: null, stopLoss: null, takeProfit: null, visibleBars: null, movingAverages: () => [] },
 );
 
 function readCssColor(name: string, fallback: string) {
@@ -48,12 +52,32 @@ const THEME = {
   candle: { up: '#e23744', down: '#1e88e5' },
   volume: { up: 'rgba(226, 55, 68, 0.45)', down: 'rgba(30, 136, 229, 0.45)' },
   lines: { entry: '#f59e0b', sl: '#3b82f6', tp: '#22c55e' },
+  // 이동평균선 색상 — KIS 차트 동일 매핑.
+  ma: { 5: '#e23744', 20: '#a855f7', 60: '#1e88e5', 120: '#22c55e', default: '#94a3b8' } as Record<number, string>,
 };
+
+function smaSeries(candles: TradeCandle[], period: number): LineData[] {
+  if (period <= 1 || candles.length < period) return [];
+  const out: LineData[] = [];
+  let sum = 0;
+  for (let i = 0; i < candles.length; i++) {
+    sum += candles[i]!.close;
+    if (i >= period) sum -= candles[i - period]!.close;
+    if (i >= period - 1) {
+      out.push({
+        time: Math.floor(candles[i]!.ts / 1000) as UTCTimestamp,
+        value: sum / period,
+      });
+    }
+  }
+  return out;
+}
 
 const containerRef = ref<HTMLDivElement | null>(null);
 let chart: IChartApi | null = null;
 let candleSeries: ISeriesApi<'Candlestick'> | null = null;
 let volumeSeries: ISeriesApi<'Histogram'> | null = null;
+let maSeries: { period: number; series: ISeriesApi<'Line'> }[] = [];
 let priceLines: IPriceLine[] = [];
 let ro: ResizeObserver | null = null;
 
@@ -166,6 +190,9 @@ function setData() {
   candleSeries.setData(cdata);
   volumeSeries.setData(vdata);
 
+  // 이동평균선 갱신
+  rebuildMaSeries(dedup);
+
   const ts = chart?.timeScale();
   if (!ts) return;
   if (props.visibleBars && dedup.length > props.visibleBars) {
@@ -173,6 +200,29 @@ function setData() {
     ts.setVisibleLogicalRange({ from: total - props.visibleBars, to: total - 0.5 });
   } else {
     ts.fitContent();
+  }
+}
+
+function rebuildMaSeries(candles: TradeCandle[]) {
+  if (!chart || !candleSeries) return;
+  // 기존 series 정리
+  for (const { series } of maSeries) {
+    try { chart.removeSeries(series); } catch { /* ignore */ }
+  }
+  maSeries = [];
+  // periods prop 으로 새로 생성
+  for (const p of props.movingAverages) {
+    if (!Number.isFinite(p) || p <= 1) continue;
+    const color = THEME.ma[p] ?? THEME.ma.default!;
+    const s = chart.addSeries(LineSeries, {
+      color,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    s.setData(smaSeries(candles, p));
+    maSeries.push({ period: p, series: s });
   }
 }
 
@@ -209,10 +259,12 @@ onUnmounted(() => {
   chart = null;
   candleSeries = null;
   volumeSeries = null;
+  maSeries = [];
   priceLines = [];
 });
 
 watch(() => props.candles, () => setData(), { deep: false });
+watch(() => props.movingAverages, () => rebuildMaSeries(props.candles), { deep: false });
 watch(() => [props.entry, props.stopLoss, props.takeProfit], () => refreshLines());
 watch(() => props.height, (h) => chart?.applyOptions({ height: h }));
 watch(() => props.showVolume, (sv) => {
