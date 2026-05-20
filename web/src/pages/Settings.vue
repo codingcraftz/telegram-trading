@@ -331,7 +331,7 @@ onUnmounted(() => {
       />
     </Card>
 
-    <!-- 연결 상태 — 단순 표시만. 수정/추가는 'KIS 키 다시 입력' 메뉴에서. -->
+    <!-- 연결 상태 — 아이콘만. 연결됨=초록 체크, 안 됨=회색 X. -->
     <Card v-if="keys">
       <template #header>
         <h3 class="text-sm font-bold tracking-tight">연결 상태</h3>
@@ -339,27 +339,18 @@ onUnmounted(() => {
       <ul class="space-y-2 text-sm">
         <li class="flex items-center justify-between">
           <span class="text-muted-foreground">모의투자</span>
-          <span class="flex items-center gap-1 font-semibold" :class="keys.paperKeys ? 'text-up' : 'text-muted-foreground'">
-            <CircleCheck v-if="keys.paperKeys" class="h-4 w-4" />
-            <CircleX v-else class="h-4 w-4" />
-            {{ keys.paperKeys ? '연결됨' : '연결안됨' }}
-          </span>
+          <CircleCheck v-if="keys.paperKeys" class="h-4 w-4 text-emerald-500" />
+          <CircleX v-else class="h-4 w-4 text-muted-foreground/60" />
         </li>
         <li class="flex items-center justify-between">
           <span class="text-muted-foreground">실전투자</span>
-          <span class="flex items-center gap-1 font-semibold" :class="keys.realKeys ? 'text-up' : 'text-muted-foreground'">
-            <CircleCheck v-if="keys.realKeys" class="h-4 w-4" />
-            <CircleX v-else class="h-4 w-4" />
-            {{ keys.realKeys ? '연결됨' : '연결안됨' }}
-          </span>
+          <CircleCheck v-if="keys.realKeys" class="h-4 w-4 text-emerald-500" />
+          <CircleX v-else class="h-4 w-4 text-muted-foreground/60" />
         </li>
         <li class="flex items-center justify-between">
           <span class="text-muted-foreground">시세 / 차트</span>
-          <span class="flex items-center gap-1 font-semibold" :class="keys.realMarketKeys ? 'text-up' : 'text-destructive'">
-            <CircleCheck v-if="keys.realMarketKeys" class="h-4 w-4" />
-            <CircleX v-else class="h-4 w-4" />
-            {{ keys.realMarketKeys ? '연결됨' : '사용 불가' }}
-          </span>
+          <CircleCheck v-if="keys.realMarketKeys" class="h-4 w-4 text-emerald-500" />
+          <CircleX v-else class="h-4 w-4 text-muted-foreground/60" />
         </li>
       </ul>
 
