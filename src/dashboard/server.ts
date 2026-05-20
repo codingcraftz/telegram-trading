@@ -271,6 +271,24 @@ export function startDashboard(port = 8080): void {
   });
 
   // GitHub API로 latest main commit 확인 → 현재 GIT_SHA와 비교
+  // conventional commit prefix → 사용자 친화 라벨. 우리 PR 단위 commit 메시지가 그대로
+  // 노출되면 너무 디테일 → '기능 추가' / '버그 수정' / '디자인 다듬기' 같이 카테고리만.
+  function friendlyChangeLabel(rawMsg: string): string {
+    const m = rawMsg.match(/^(\w+)(\([^)]+\))?:/);
+    const prefix = m?.[1]?.toLowerCase() ?? '';
+    switch (prefix) {
+      case 'feat': return '기능 추가';
+      case 'fix': return '버그 수정';
+      case 'polish': return '디자인 다듬기';
+      case 'perf': return '속도 개선';
+      case 'refactor':
+      case 'chore': return '내부 정리';
+      case 'docs': return '안내 보강';
+      case 'security': return '보안 강화';
+      default: return '업데이트';
+    }
+  }
+
   app.get('/api/check-update', async (c) => {
     try {
       const res = await fetch(REPO_API, {
@@ -282,7 +300,9 @@ export function startDashboard(port = 8080): void {
       }
       const data = (await res.json()) as { sha?: string; commit?: { message?: string } };
       const latest = data.sha ?? '';
-      const latestMessage = (data.commit?.message ?? '').split('\n')[0]?.slice(0, 200) ?? '';
+      const rawMsg = (data.commit?.message ?? '').split('\n')[0] ?? '';
+      // 옛 클라이언트 호환 위해 latestMessage 키 유지하되 friendly 라벨로 채움.
+      const latestMessage = friendlyChangeLabel(rawMsg);
       const current = GIT_SHA === 'dev' ? '' : GIT_SHA;
       const updateAvailable = !!current && !!latest && shortSha(latest) !== shortSha(current);
       return c.json({

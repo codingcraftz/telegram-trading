@@ -163,7 +163,7 @@ onMounted(() => {
           <span class="text-[10px] text-muted-foreground">버전</span>
           <span class="text-sm font-bold tabular-nums">v{{ version?.version ?? '—' }}</span>
           <span v-if="updateInfo?.updateAvailable" class="text-[10px] font-semibold text-primary">
-            · 새 버전 있음
+            · 새 버전 ({{ updateInfo.latestMessage || '업데이트' }})
           </span>
         </div>
         <div class="flex items-center gap-1.5">
