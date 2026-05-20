@@ -331,8 +331,11 @@ export type OrdersResponse = {
     strategyId: string;
     strategyName: string;
     code: string;
+    name: string;
     appliedAt: number;
     budgetAmount: number | null;
+    heldQty: number;
+    avgPrice: number;
     phase: string;
   }[];
 };

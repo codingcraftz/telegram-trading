@@ -25,6 +25,9 @@ export type EditableOrder = {
   strategyName?: string;
   phaseLabel?: string;
   budgetAmount?: number | null;
+  heldQty?: number;
+  avgPrice?: number;
+  phase?: string;
 };
 
 const props = defineProps<{

@@ -98,13 +98,16 @@ const pending = computed<PendingItem[]>(() => {
       data: {
         kind: 'strategy',
         code: s.code,
-        name: s.code, // 종목명은 quote 로 fetch 안 함 — 코드만. 추후 종목 마스터 join.
+        name: s.name || s.code,
         side: 'buy',
         applicationId: s.id,
         strategyId: s.strategyId,
         strategyName: s.strategyName,
         phaseLabel,
         budgetAmount: s.budgetAmount,
+        heldQty: s.heldQty,
+        avgPrice: s.avgPrice,
+        phase: s.phase,
       },
     });
   }
@@ -188,6 +191,16 @@ const editOpen = ref(false);
 const editMode = ref<'edit' | 'cancel'>('cancel');
 const editOrder = ref<EditableOrder | null>(null);
 
+// strategy 카드 — 보유 있으면 수량/평단, 없으면 예산/phase 표시
+function strategyMiddle(d: EditableOrder): string {
+  const held = d.heldQty ?? 0;
+  const avg = d.avgPrice ?? 0;
+  const phase = d.phaseLabel ?? '대기';
+  if (held > 0 && avg > 0) return `${held}주 보유 · 평단 ${fmtKrw(avg)}원 · ${phase}`;
+  if (d.budgetAmount && d.budgetAmount > 0) return `자금 ${fmtKrw(d.budgetAmount)}원 · ${phase}`;
+  return phase;
+}
+
 function openDetailPending(p: PendingItem) { detailFilled.value = null; detailPending.value = p.data; detailOpen.value = true; }
 function openDetailFilled(f: FilledOrder) { detailPending.value = null; detailFilled.value = f; detailOpen.value = true; }
 function closeDetail() { detailOpen.value = false; }
@@ -248,7 +261,7 @@ watch(seg, (v) => { if (v === 'filled' && filledItems.value.length === 0) loadFi
               ? `${p.data.orderPrice === 0 ? '시장가' : fmtKrw(p.data.orderPrice) + '원'} × ${p.data.remaining}주 잔여`
               : p.type === 'morning'
                 ? `다음 영업일 09:00 / ${p.data.qtyDesc}`
-                : p.data.phaseLabel ?? '감시 중'
+                : strategyMiddle(p.data)
           "
           :action1-label="p.type === 'unfilled' ? '정정' : '수정'"
           :action2-label="p.type === 'unfilled' || p.type === 'morning' ? '취소' : '중지'"

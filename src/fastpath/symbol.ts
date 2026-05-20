@@ -31,6 +31,11 @@ export function reloadKrxMaster(): void {
   loadMaster();
 }
 
+// 6자리 코드 → 종목명. 마스터에 없으면 코드 그대로 반환.
+export function nameByCode(code: string): string {
+  return _masterByCode.get(code)?.name ?? code;
+}
+
 const ALIASES: Record<string, { code: string; name: string }> = {
   // 시총 상위 + 자주 거래
   삼성전자: { code: '005930', name: '삼성전자' },

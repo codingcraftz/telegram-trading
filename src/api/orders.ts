@@ -15,6 +15,7 @@ import { getDefaultChatId } from './_auth.js';
 import { getDb } from '../db/client.js';
 import { strategyApplications, strategies as strategiesTable } from '../db/schema.js';
 import { and, eq } from 'drizzle-orm';
+import { nameByCode } from '../fastpath/symbol.js';
 
 function parseSpec(json: string): OrderSpec | null {
   try {
@@ -109,17 +110,39 @@ export async function handleOrders(c: Context) {
       : { ok: false, error: kis.error, items: [] },
     strategies: apps.map((a) => {
       let phase = 'pending';
+      let stage1Qty = 0;
+      let stage1Avg = 0;
+      let stage2Qty = 0;
+      let stage2Avg = 0;
+      let tp1SoldQty = 0;
       try {
-        const rt = a.runtimeJson ? (JSON.parse(a.runtimeJson) as { phase?: string }) : null;
+        const rt = a.runtimeJson
+          ? (JSON.parse(a.runtimeJson) as {
+              phase?: string;
+              stage1?: { qty?: number; avgPrice?: number };
+              stage2?: { qty?: number; avgPrice?: number };
+              tp1Sell?: { qty?: number };
+            })
+          : null;
         if (rt?.phase) phase = rt.phase;
+        if (rt?.stage1) { stage1Qty = rt.stage1.qty ?? 0; stage1Avg = rt.stage1.avgPrice ?? 0; }
+        if (rt?.stage2) { stage2Qty = rt.stage2.qty ?? 0; stage2Avg = rt.stage2.avgPrice ?? 0; }
+        if (rt?.tp1Sell?.qty) tp1SoldQty = rt.tp1Sell.qty;
       } catch { /* ignore */ }
+      const heldStage1Qty = Math.max(0, stage1Qty - tp1SoldQty);
+      const heldQty = heldStage1Qty + stage2Qty;
+      const costBasis = heldStage1Qty * stage1Avg + stage2Qty * stage2Avg;
+      const avgPrice = heldQty > 0 ? Math.round(costBasis / heldQty) : 0;
       return {
         id: a.id,
         strategyId: a.strategyId,
         strategyName: a.strategyName ?? '전략',
         code: a.stockCode,
+        name: nameByCode(a.stockCode),
         appliedAt: a.appliedAt,
         budgetAmount: a.budgetAmount,
+        heldQty,
+        avgPrice,
         phase,
       };
     }),
