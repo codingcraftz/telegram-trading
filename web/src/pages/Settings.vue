@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { CircleCheck, CircleX, Info, ExternalLink, Smartphone, Sparkles, Plus, ChevronRight, KeyRound, Bell, Download, X, RefreshCw, Rocket } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
@@ -88,8 +88,18 @@ const updateInfo = ref<{
   updateAvailable: boolean;
 } | null>(null);
 const updateChecking = ref(false);
-const updateRunning = ref(false);
 const updateCheckedAt = ref<number | null>(null);
+
+// 업데이트 phase — 풀스크린 오버레이 상태 관리.
+//   'idle'        : 진행 없음 (오버레이 hidden)
+//   'requesting'  : sentinel 파일 만드는 중
+//   'building'    : 호스트가 새 이미지 받는 중 (polling sha)
+//   'done'        : sha 변경 감지 — 사용자가 앱 끄고 다시 켜야 함
+//   'failed'      : 일정 시간 안에 변경 감지 못함 또는 에러
+const updatePhase = ref<'idle' | 'requesting' | 'building' | 'done' | 'failed'>('idle');
+const updateError = ref<string>('');
+let updatePollTimer: ReturnType<typeof setInterval> | null = null;
+let updateTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function checkForUpdate(silent = false) {
   updateChecking.value = true;
@@ -98,7 +108,7 @@ async function checkForUpdate(silent = false) {
     updateInfo.value = r;
     updateCheckedAt.value = Date.now();
     if (!silent) {
-      if (r.updateAvailable) toast.success(`새 버전 ${r.latest} 가 있어요`);
+      if (r.updateAvailable) toast.success(`새 버전이 있어요 (${r.latestMessage})`);
       else toast.info('최신 버전이에요');
     }
   } catch (err) {
@@ -106,20 +116,52 @@ async function checkForUpdate(silent = false) {
   } finally { updateChecking.value = false; }
 }
 
+function stopUpdateTimers() {
+  if (updatePollTimer) { clearInterval(updatePollTimer); updatePollTimer = null; }
+  if (updateTimeoutTimer) { clearTimeout(updateTimeoutTimer); updateTimeoutTimer = null; }
+}
+
+function closeUpdateOverlay() {
+  stopUpdateTimers();
+  updatePhase.value = 'idle';
+  updateError.value = '';
+}
+
 async function runUpdate() {
-  if (updateRunning.value) return;
-  if (!window.confirm('업데이트를 시작할까요?\n1~2분 정도 다운로드 후 자동으로 새로 시작돼요.')) return;
-  updateRunning.value = true;
+  if (updatePhase.value !== 'idle') return;
+  updateError.value = '';
+  updatePhase.value = 'requesting';
   try {
     const r = await api.triggerUpdate();
-    if (r.ok) {
-      toast.success(r.message || '업데이트 요청됨. 1~2분 후 갱신 완료.');
-    } else {
-      toast.error(r.message || '업데이트 실패');
+    if (!r.ok) {
+      updateError.value = r.message || '업데이트 요청 실패';
+      updatePhase.value = 'failed';
+      return;
     }
+    // 요청 성공 — 봇 컨테이너가 곧 재시작. 현재 sha 기억 후 변경 감지까지 폴링.
+    updatePhase.value = 'building';
+    const startSha = version.value?.sha ?? null;
+    updatePollTimer = setInterval(async () => {
+      try {
+        const v = await api.version();
+        if (startSha && v.sha !== startSha) {
+          stopUpdateTimers();
+          updatePhase.value = 'done';
+        }
+      } catch { /* 컨테이너 재시작 중엔 일시 unreachable — 다음 폴링에서 다시 */ }
+    }, 3000);
+    // 5분 timeout — 그동안 변경 감지 못 하면 failed (사용자가 직접 확인 권유).
+    updateTimeoutTimer = setTimeout(() => {
+      if (updatePhase.value === 'building') {
+        stopUpdateTimers();
+        updateError.value = '업데이트 확인 시간이 초과됐어요. 잠시 후 앱을 끄고 다시 열어보세요.';
+        updatePhase.value = 'failed';
+      }
+    }, 5 * 60 * 1000);
   } catch (err) {
-    toast.error((err as Error).message);
-  } finally { updateRunning.value = false; }
+    updateError.value = (err as Error).message;
+    updatePhase.value = 'failed';
+  }
 }
 
 const updateCheckedLabel = computed(() => {
@@ -147,6 +189,9 @@ onMounted(() => {
   loadAll();
   // 진입 시 백그라운드로 업데이트 확인 (silent — 토스트 없음, 결과만 카드에 표시)
   checkForUpdate(true);
+});
+onUnmounted(() => {
+  stopUpdateTimers();
 });
 </script>
 
@@ -178,10 +223,10 @@ onMounted(() => {
           <button
             v-if="updateInfo?.updateAvailable"
             class="rounded-md bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground transition disabled:opacity-40"
-            :disabled="updateRunning"
+            :disabled="updatePhase !== 'idle'"
             @click="runUpdate"
           >
-            {{ updateRunning ? '요청 중…' : '업데이트' }}
+            업데이트
           </button>
         </div>
       </div>
@@ -346,6 +391,59 @@ onMounted(() => {
         <ExternalLink class="h-4 w-4 shrink-0 text-muted-foreground" />
       </button>
     </Card>
+
+    <!-- 업데이트 진행 풀스크린 오버레이 — phase 별 분기 -->
+    <div
+      v-if="updatePhase !== 'idle'"
+      class="fixed inset-0 z-[300] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4"
+    >
+      <div class="w-full max-w-sm rounded-2xl bg-card p-6 text-center shadow-xl">
+        <!-- requesting / building : 로딩 -->
+        <template v-if="updatePhase === 'requesting' || updatePhase === 'building'">
+          <div class="mx-auto mb-4 h-12 w-12 rounded-full border-4 border-primary/30 border-t-primary animate-spin" />
+          <p class="text-base font-bold">
+            {{ updatePhase === 'requesting' ? '업데이트 요청 중…' : '업데이트 다운로드 중…' }}
+          </p>
+          <p class="mt-2 text-[12px] leading-relaxed text-muted-foreground">
+            보통 1~3분 정도 걸려요. 이 화면을 닫지 말고 잠시 기다려주세요.
+          </p>
+        </template>
+
+        <!-- done : 완료 안내 -->
+        <template v-else-if="updatePhase === 'done'">
+          <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/15 text-3xl">
+            ✅
+          </div>
+          <p class="text-base font-bold text-emerald-500">업데이트 완료</p>
+          <p class="mt-2 text-[13px] leading-relaxed">
+            새 버전이 준비됐어요.<br>
+            <b>앱을 끄고 다시 열어주세요.</b>
+          </p>
+          <p class="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+            홈 화면 아이콘을 위로 쓸어 닫은 뒤 다시 탭하면 최신 화면으로 시작됩니다.
+          </p>
+          <button
+            class="mt-4 w-full rounded-lg bg-muted px-3 py-2 text-xs font-semibold transition hover:bg-accent"
+            @click="closeUpdateOverlay"
+          >닫기</button>
+        </template>
+
+        <!-- failed : 에러 안내 -->
+        <template v-else-if="updatePhase === 'failed'">
+          <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-500/15 text-3xl">
+            ⚠️
+          </div>
+          <p class="text-base font-bold">업데이트 진행 확인 안 됨</p>
+          <p class="mt-2 text-[13px] leading-relaxed text-muted-foreground">
+            {{ updateError || '잠시 후 다시 시도해주세요.' }}
+          </p>
+          <button
+            class="mt-4 w-full rounded-lg bg-primary px-3 py-2 text-xs font-bold text-primary-foreground"
+            @click="closeUpdateOverlay"
+          >닫기</button>
+        </template>
+      </div>
+    </div>
 
     <!-- 텔레그램 알림 시트 -->
     <BottomSheet :open="telegramSheetOpen" title="텔레그램 알림 설정" @close="telegramSheetOpen = false">
