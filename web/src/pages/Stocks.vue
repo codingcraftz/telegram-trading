@@ -508,71 +508,46 @@ onUnmounted(() => {
           />
         </div>
 
-        <div v-if="filteredWatchlist.length > 0" class="space-y-1.5">
+        <div v-if="filteredWatchlist.length > 0" class="divide-y divide-border/60 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0">
           <div
             v-for="item in filteredWatchlist"
             :key="item.id"
-            class="select-none rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-4 py-3.5 transition active:scale-[0.99]"
+            class="flex select-none items-center gap-3 px-3 py-2.5 transition active:bg-accent/30"
             role="button"
             tabindex="0"
-            @pointerdown="onPressDown(item.id, item.code, item.name, watchlist.quotes.get(item.code)?.price ?? 0)"
-            @pointerup="onPressUp(item.id, item.code)"
-            @pointerleave="clearPress(item.id)"
-            @pointercancel="clearPress(item.id)"
+            @click="!editing ? go(item.code) : toggleSelect(item.id)"
           >
-            <div class="flex items-center gap-3">
-              <div
-                v-if="editing"
-                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
-                :class="selectedIds.has(item.id) ? 'border-destructive bg-destructive text-destructive-foreground' : 'border-border'"
-              >
-                <Check v-if="selectedIds.has(item.id)" class="h-3 w-3" />
-              </div>
-
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-base font-bold tracking-tight">{{ item.name }}</p>
-                <p class="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
-                  {{ item.code }}
-                  <span v-if="holdingFor(item.code)" class="ml-1 text-foreground">· 보유 {{ holdingFor(item.code)!.qty }}주</span>
-                </p>
-              </div>
-
-              <div v-if="watchlist.quotes.get(item.code)?.ok" class="shrink-0 text-right tabular-nums">
-                <p class="text-base font-bold">{{ fmtKrw(watchlist.quotes.get(item.code)!.price) }}</p>
-                <p class="flex items-center justify-end gap-0.5 text-xs font-medium" :class="pflsColor(watchlist.quotes.get(item.code)!.changePct)">
-                  <ArrowUpRight v-if="watchlist.quotes.get(item.code)!.changePct > 0" class="h-3 w-3" />
-                  <ArrowDownRight v-else-if="watchlist.quotes.get(item.code)!.changePct < 0" class="h-3 w-3" />
-                  {{ fmtPct(watchlist.quotes.get(item.code)!.changePct) }}
-                </p>
-              </div>
-              <span v-else class="shrink-0 text-[11px] text-muted-foreground">—</span>
-
-              <button
-                v-if="!editing"
-                class="rounded-full p-1.5 text-amber-400 transition hover:bg-accent"
-                aria-label="관심 제거"
-                @click.stop="watchlist.removeByCode(item.code)"
-              >
-                <Star class="h-4 w-4 fill-amber-400" />
-              </button>
-            </div>
-
             <div
-              v-if="!editing"
-              class="mt-3 flex items-center justify-end gap-1 border-t border-border/60 pt-2.5"
-              @click.stop
+              v-if="editing"
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
+              :class="selectedIds.has(item.id) ? 'border-destructive bg-destructive text-destructive-foreground' : 'border-border'"
             >
-              <button
-                type="button"
-                class="rounded-md bg-up px-3.5 py-1 text-[11px] font-bold text-white transition hover:brightness-110"
-                @click.stop="goTrade(item.code, 'buy')"
-              >매수</button>
-              <button
-                type="button"
-                class="rounded-md bg-down px-3.5 py-1 text-[11px] font-bold text-white transition hover:brightness-110"
-                @click.stop="goTrade(item.code, 'sell')"
-              >매도</button>
+              <Check v-if="selectedIds.has(item.id)" class="h-3 w-3" />
             </div>
+
+            <button
+              v-if="!editing"
+              class="-ml-1 p-1 text-amber-400 transition hover:bg-accent rounded"
+              aria-label="관심 제거"
+              @click.stop="watchlist.removeByCode(item.code)"
+            >
+              <Star class="h-3.5 w-3.5 fill-amber-400" />
+            </button>
+
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-semibold tracking-tight">{{ item.name }}</p>
+              <p class="text-[10px] text-muted-foreground tabular-nums">{{ item.code }}</p>
+            </div>
+
+            <div v-if="watchlist.quotes.get(item.code)?.ok" class="shrink-0 text-right tabular-nums">
+              <p class="text-sm font-bold leading-tight" :class="pflsColor(watchlist.quotes.get(item.code)!.changePct)">
+                {{ fmtKrw(watchlist.quotes.get(item.code)!.price) }}
+              </p>
+              <p class="text-[10px] font-semibold leading-tight" :class="pflsColor(watchlist.quotes.get(item.code)!.changePct)">
+                {{ fmtPct(watchlist.quotes.get(item.code)!.changePct) }}
+              </p>
+            </div>
+            <span v-else class="shrink-0 text-[10px] text-muted-foreground">—</span>
           </div>
         </div>
 
@@ -633,43 +608,40 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div v-if="rankItems.length > 0" class="space-y-1.5">
+        <div v-if="rankItems.length > 0" class="divide-y divide-border/60 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0">
           <div
             v-for="r in rankItems"
             :key="r.code"
-            class="select-none rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-4 py-3.5 transition active:scale-[0.99]"
+            class="flex select-none items-center gap-3 px-3 py-2.5 transition active:bg-accent/30"
             role="button"
             tabindex="0"
             @click="go(r.code)"
           >
-            <div class="flex items-center gap-3">
-              <span class="w-5 shrink-0 text-center text-[11px] font-bold text-muted-foreground tabular-nums">{{ r.rank }}</span>
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-base font-bold tracking-tight">{{ r.name }}</p>
-                <p class="mt-0.5 text-[11px] text-muted-foreground tabular-nums">{{ r.code }}</p>
-              </div>
-              <div class="shrink-0 text-right tabular-nums">
-                <p class="text-base font-bold">{{ fmtKrw(r.price) }}</p>
-                <p class="text-xs font-medium" :class="pflsColor(r.changePct)">
-                  {{ fmtPct(r.changePct) }}
-                </p>
-              </div>
-            </div>
-            <div
-              class="mt-3 flex items-center justify-end gap-1 border-t border-border/60 pt-2.5"
-              @click.stop
+            <span
+              class="w-5 shrink-0 text-center text-[11px] font-bold tabular-nums"
+              :class="r.rank <= 3 ? 'text-primary' : 'text-muted-foreground'"
+            >{{ r.rank }}</span>
+            <button
+              class="-ml-0.5 p-1 transition hover:bg-accent rounded"
+              :aria-label="watchlist.has(r.code) ? '관심 제거' : '관심 추가'"
+              @click.stop="toggleWatch(r.code)"
             >
-              <button
-                type="button"
-                class="rounded-md bg-up px-3 py-1 text-[11px] font-semibold text-white transition hover:brightness-110"
-                @click.stop="openQuick(r.code, r.name, 'buy', r.price)"
-              >매수</button>
-              <button
-                type="button"
-                class="rounded-md bg-down px-3 py-1 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
-                :disabled="!isHolding(r.code)"
-                @click.stop="openQuick(r.code, r.name, 'sell', r.price)"
-              >매도</button>
+              <Star
+                class="h-3.5 w-3.5"
+                :class="watchlist.has(r.code) ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground'"
+              />
+            </button>
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-semibold tracking-tight">{{ r.name }}</p>
+              <p class="text-[10px] text-muted-foreground tabular-nums">{{ r.code }}</p>
+            </div>
+            <div class="shrink-0 text-right tabular-nums">
+              <p class="text-sm font-bold leading-tight" :class="pflsColor(r.changePct)">
+                {{ fmtKrw(r.price) }}
+              </p>
+              <p class="text-[10px] font-semibold leading-tight" :class="pflsColor(r.changePct)">
+                {{ fmtPct(r.changePct) }}
+              </p>
             </div>
           </div>
         </div>
