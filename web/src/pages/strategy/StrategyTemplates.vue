@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 전략 템플릿 — placeholder. 추후 본격 구성.
 import { useRouter } from 'vue-router';
-import { ChevronLeft, Sparkles, Plus } from 'lucide-vue-next';
+import { ChevronLeft, NotebookPen, Plus } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import { RouterLink } from 'vue-router';
 
@@ -88,7 +88,7 @@ const templates: Template[] = [
         class="block cursor-pointer rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-4 py-3.5 transition active:scale-[0.99]"
       >
         <div class="flex items-start gap-2.5">
-          <Sparkles class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <NotebookPen class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-bold">{{ t.name }}</p>
             <p class="mt-0.5 text-[11px] text-muted-foreground">{{ t.desc }}</p>

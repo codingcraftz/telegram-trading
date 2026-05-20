@@ -17,7 +17,8 @@ export const useOrdersStore = defineStore('orders', () => {
       count.value =
         o.intents.length +
         o.reservations.length +
-        (o.kis.ok ? o.kis.items.length : 0);
+        (o.kis.ok ? o.kis.items.length : 0) +
+        (o.strategies?.length ?? 0);
     } catch {
       /* silent */
     } finally {

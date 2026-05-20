@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
-import { CircleCheck, CircleX, Info, ExternalLink, Smartphone, Sparkles, Plus, ChevronRight, KeyRound, Bell, Download, X, RefreshCw, Rocket } from 'lucide-vue-next';
+import { CircleCheck, CircleX, Info, ExternalLink, Smartphone, NotebookPen, Plus, ChevronRight, KeyRound, Bell, Download, X, RefreshCw, Rocket } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
@@ -166,6 +166,10 @@ async function runUpdate() {
         if (startSha && v.sha !== startSha) {
           stopUpdateTimers();
           updatePhase.value = 'done';
+          // 3초 후 자동 reload — 사용자가 안내 메시지 읽을 시간.
+          setTimeout(() => {
+            try { location.reload(); } catch {}
+          }, 3000);
         }
       } catch { /* 컨테이너 재시작 중엔 일시 unreachable — 다음 폴링에서 다시 */ }
     }, 3000);
@@ -301,7 +305,7 @@ onUnmounted(() => {
         class="-mx-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-accent"
       >
         <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-          <Sparkles class="h-5 w-5 text-primary" />
+          <NotebookPen class="h-5 w-5 text-primary" />
         </div>
         <div class="min-w-0 flex-1">
           <p class="text-sm font-semibold">내 전략</p>
@@ -443,23 +447,15 @@ onUnmounted(() => {
           </p>
         </template>
 
-        <!-- done : 완료 안내 -->
+        <!-- done : 완료 — 자동 reload 안내 -->
         <template v-else-if="updatePhase === 'done'">
           <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/15 text-3xl">
             ✅
           </div>
           <p class="text-base font-bold text-emerald-500">업데이트 완료</p>
           <p class="mt-2 text-[13px] leading-relaxed">
-            새 버전이 준비됐어요.<br>
-            <b>앱을 끄고 다시 열어주세요.</b>
+            잠시 후 새로고침할게요.
           </p>
-          <p class="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-            홈 화면 아이콘을 위로 쓸어 닫은 뒤 다시 탭하면 최신 화면으로 시작됩니다.
-          </p>
-          <button
-            class="mt-4 w-full rounded-lg bg-muted px-3 py-2 text-xs font-semibold transition hover:bg-accent"
-            @click="closeUpdateOverlay"
-          >닫기</button>
         </template>
 
         <!-- failed : 에러 안내 -->

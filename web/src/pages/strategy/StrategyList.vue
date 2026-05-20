@@ -2,7 +2,7 @@
 // 전략 목록. 옛 톤.
 import { ref, onMounted } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
-import { ChevronLeft, Plus, Sparkles, AlertTriangle } from 'lucide-vue-next';
+import { ChevronLeft, Plus, NotebookPen, AlertTriangle } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import EmptyState from '@/components/EmptyState.vue';
 import { api, type StrategyItem, type StrategyDefinition } from '@/api/client';
@@ -136,7 +136,7 @@ async function toggleActive(s: StrategyItem) {
 
     <EmptyState
       v-else-if="!loading"
-      :icon="Sparkles"
+      :icon="NotebookPen"
       title="아직 만든 전략이 없어요"
       description="자주 쓰는 매수 패턴을 전략으로 만들어두면 종목에 적용해 자동으로 발동시킬 수 있어요."
     >

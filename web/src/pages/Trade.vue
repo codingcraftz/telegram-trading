@@ -5,7 +5,7 @@
 
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
-import { Search, Clock, X, Sparkles, Plus } from 'lucide-vue-next';
+import { Search, Clock, X, NotebookPen, Plus } from 'lucide-vue-next';
 import OrderBook from '@/components/OrderBook.vue';
 import PriceStepper from '@/components/PriceStepper.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
@@ -496,7 +496,7 @@ onUnmounted(() => {
     <!-- 전략 주문 — 시가매매(morning) 전략만 노출. immediate 전략은 매수 폼 안 dropdown 으로. -->
     <section v-if="hasCode && strategiesLoaded" class="space-y-2">
       <div class="flex items-center gap-1.5 px-1">
-        <Sparkles class="h-3.5 w-3.5 text-primary" />
+        <NotebookPen class="h-3.5 w-3.5 text-primary" />
         <h3 class="text-xs font-bold tracking-tight">시가매매 전략</h3>
       </div>
       <div v-if="morningStrategies.length > 0" class="space-y-1.5">

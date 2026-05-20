@@ -20,6 +20,11 @@ export type EditableOrder = {
   remaining?: number;
   reservationId?: string;
   qtyDesc?: string;
+  applicationId?: string;
+  strategyId?: string;
+  strategyName?: string;
+  phaseLabel?: string;
+  budgetAmount?: number | null;
 };
 
 const props = defineProps<{

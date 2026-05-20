@@ -12,6 +12,9 @@ import { callKisApi } from '../mcp/kis.js';
 import { cached, invalidate } from '../fastpath/cache.js';
 import { checkKisOk, findOutput, num, parseMcpResult } from '../fastpath/extract.js';
 import { getDefaultChatId } from './_auth.js';
+import { getDb } from '../db/client.js';
+import { strategyApplications, strategies as strategiesTable } from '../db/schema.js';
+import { and, eq } from 'drizzle-orm';
 
 function parseSpec(json: string): OrderSpec | null {
   try {
@@ -26,6 +29,27 @@ export async function handleOrders(c: Context) {
   const now = Date.now();
   const intents = listChatPendingIntents(chatId);
   const reservations = listChatReservations(chatId, ['awaiting_confirm', 'pending']);
+
+  // 전략 감시 중 (active strategy_applications) — 시가매매 대기 + immediate 감시 모두.
+  const apps = getDb()
+    .select({
+      id: strategyApplications.id,
+      strategyId: strategyApplications.strategyId,
+      strategyName: strategiesTable.name,
+      stockCode: strategyApplications.stockCode,
+      appliedAt: strategyApplications.appliedAt,
+      runtimeJson: strategyApplications.runtimeJson,
+      budgetAmount: strategyApplications.budgetAmount,
+    })
+    .from(strategyApplications)
+    .leftJoin(strategiesTable, eq(strategyApplications.strategyId, strategiesTable.id))
+    .where(
+      and(
+        eq(strategyApplications.chatId, chatId),
+        eq(strategyApplications.status, 'active'),
+      ),
+    )
+    .all();
 
   let kis: Awaited<ReturnType<typeof fetchPendingOrders>> = { ok: false, items: [] };
   try {
@@ -83,6 +107,22 @@ export async function handleOrders(c: Context) {
           })),
         }
       : { ok: false, error: kis.error, items: [] },
+    strategies: apps.map((a) => {
+      let phase = 'pending';
+      try {
+        const rt = a.runtimeJson ? (JSON.parse(a.runtimeJson) as { phase?: string }) : null;
+        if (rt?.phase) phase = rt.phase;
+      } catch { /* ignore */ }
+      return {
+        id: a.id,
+        strategyId: a.strategyId,
+        strategyName: a.strategyName ?? '전략',
+        code: a.stockCode,
+        appliedAt: a.appliedAt,
+        budgetAmount: a.budgetAmount,
+        phase,
+      };
+    }),
   });
 }
 

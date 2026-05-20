@@ -326,6 +326,15 @@ export type OrdersResponse = {
       ordDvsn: string;
     }[];
   };
+  strategies?: {
+    id: string;
+    strategyId: string;
+    strategyName: string;
+    code: string;
+    appliedAt: number;
+    budgetAmount: number | null;
+    phase: string;
+  }[];
 };
 
 export type StrategyResponse = {

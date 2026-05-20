@@ -77,6 +77,34 @@ const pending = computed<PendingItem[]>(() => {
       },
     });
   }
+  // 전략 감시 중
+  for (const s of o.strategies ?? []) {
+    const phaseLabel =
+      s.phase === 'pending' ? '시가매매 대기'
+      : s.phase === 'stage1_firing' ? '1차 발주 중'
+      : s.phase === 'stage1_filled' ? '1차 체결 · 감시 중'
+      : s.phase === 'stage2_firing' ? '2차 발주 중'
+      : s.phase === 'stage2_filled' ? '2차 체결 · 감시 중'
+      : s.phase === 'tp1_done' ? '1차 익절 · 잔량 감시'
+      : s.phase === 'completed' ? '완료'
+      : '대기';
+    out.push({
+      type: 'strategy',
+      key: `s-${s.id}`,
+      createdAt: s.appliedAt,
+      data: {
+        kind: 'strategy',
+        code: s.code,
+        name: s.code, // 종목명은 quote 로 fetch 안 함 — 코드만. 추후 종목 마스터 join.
+        side: 'buy',
+        applicationId: s.id,
+        strategyId: s.strategyId,
+        strategyName: s.strategyName,
+        phaseLabel,
+        budgetAmount: s.budgetAmount,
+      },
+    });
+  }
   out.sort((a, b) => b.createdAt - a.createdAt);
   return out;
 });
@@ -207,13 +235,17 @@ watch(seg, (v) => { if (v === 'filled' && filledItems.value.length === 0) loadFi
           :side="p.data.side"
           :name="p.data.name"
           :code="p.data.code"
-          :type-label="p.type === 'unfilled' ? '미체결' : p.type === 'morning' ? '내일 09:00 시가매매' : '전략 발동 대기'"
+          :type-label="
+            p.type === 'unfilled' ? '미체결' :
+            p.type === 'morning' ? '내일 09:00 시가매매' :
+            p.data.strategyName ? `전략 · ${p.data.strategyName}` : '전략 감시'
+          "
           :middle-line="
             p.type === 'unfilled'
               ? `${p.data.orderPrice === 0 ? '시장가' : fmtKrw(p.data.orderPrice) + '원'} × ${p.data.remaining}주 잔여`
               : p.type === 'morning'
                 ? `다음 영업일 09:00 / ${p.data.qtyDesc}`
-                : '조건 대기 중'
+                : p.data.phaseLabel ?? '감시 중'
           "
           :action1-label="p.type === 'unfilled' ? '정정' : '수정'"
           :action2-label="p.type === 'unfilled' || p.type === 'morning' ? '취소' : '중지'"
