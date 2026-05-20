@@ -117,11 +117,13 @@ watch(() => route.query.q, (newQ) => {
 });
 
 // ===== 세그먼트 =====
+// 관심 페이지로 단순화 — 보유/순위 세그먼트 제거. seg='watch' 고정.
+// 매수/매도는 /trade 페이지로 분리되어 QuickTradeSheet 사용 안 함.
 type Seg = 'holding' | 'watch' | 'rank';
 function parseSeg(v: unknown): Seg {
-  if (v === 'rank') return 'rank';
-  if (v === 'watch') return 'watch';
-  return 'holding'; // 기본 보유
+  // URL ?seg= 무시. 항상 관심.
+  void v;
+  return 'watch';
 }
 const seg = ref<Seg>(parseSeg(route.query.seg));
 watch(seg, (v) => {
@@ -237,6 +239,11 @@ function openQuick(code: string, name: string, side: 'buy' | 'sell', price: numb
   };
 }
 function closeQuick() { quick.value.open = false; }
+
+// 관심 카드의 매수/매도 → 통합 /trade 페이지로 이동
+function goTrade(code: string, side: 'buy' | 'sell') {
+  router.push({ path: '/trade', query: { code, side } });
+}
 
 // ===== 관심 편집 모드 =====
 const editing = ref(false);
@@ -423,7 +430,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <SegmentedControl v-model="seg" :options="segOptions" />
+      <SegmentedControl v-if="false" v-model="seg" :options="segOptions" />
 
       <!-- 보유 -->
       <section v-if="seg === 'holding'" class="space-y-2">
@@ -562,14 +569,13 @@ onUnmounted(() => {
             >
               <button
                 type="button"
-                class="rounded-md bg-up px-3 py-1 text-[11px] font-semibold text-white transition hover:brightness-110"
-                @click.stop="openQuick(item.code, item.name, 'buy', watchlist.quotes.get(item.code)?.price ?? 0)"
+                class="rounded-md bg-up px-3.5 py-1 text-[11px] font-bold text-white transition hover:brightness-110"
+                @click.stop="goTrade(item.code, 'buy')"
               >매수</button>
               <button
                 type="button"
-                class="rounded-md bg-down px-3 py-1 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
-                :disabled="!isHolding(item.code)"
-                @click.stop="openQuick(item.code, item.name, 'sell', watchlist.quotes.get(item.code)?.price ?? 0)"
+                class="rounded-md bg-down px-3.5 py-1 text-[11px] font-bold text-white transition hover:brightness-110"
+                @click.stop="goTrade(item.code, 'sell')"
               >매도</button>
             </div>
           </div>

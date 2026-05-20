@@ -5,6 +5,20 @@ const routes: RouteRecordRaw[] = [
   { path: '/', name: 'home', component: () => import('@/pages/Home.vue') },
   { path: '/stocks', name: 'stocks', component: () => import('@/pages/Stocks.vue') },
   { path: '/stocks/:code', name: 'stock-detail', component: () => import('@/pages/StockDetail.vue') },
+  // 차트 탭 — 마지막 본 종목 (localStorage 'owlim:last-chart-code') 자동 진입.
+  // 없으면 관심 페이지로 안내. 코드 직접 지정 시 /stocks/CODE 로 redirect.
+  {
+    path: '/chart',
+    name: 'chart',
+    redirect: () => {
+      try {
+        const last = localStorage.getItem('owlim:last-chart-code');
+        if (last && /^\d{6}$/.test(last)) return `/stocks/${last}`;
+      } catch {}
+      return '/stocks';
+    },
+  },
+  { path: '/chart/:code', redirect: (to) => `/stocks/${to.params.code as string}` },
   { path: '/trade', name: 'trade', component: () => import('@/pages/Trade.vue') },
   { path: '/orders', name: 'orders', component: () => import('@/pages/Orders.vue') },
   { path: '/holdings', name: 'holdings', component: () => import('@/pages/Holdings.vue') },

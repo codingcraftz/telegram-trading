@@ -85,8 +85,11 @@ watch(code, () => {
   if (hasCode.value) quoteTimer = setInterval(loadQuote, 5000);
 }, { immediate: true });
 
-// 폼 상태
-const side = ref<'buy' | 'sell'>('buy');
+// 폼 상태 — URL ?side= 로 초기 결정 (관심 페이지의 매수/매도 버튼이 전달).
+const side = ref<'buy' | 'sell'>((route.query.side as string) === 'sell' ? 'sell' : 'buy');
+watch(() => route.query.side, (v) => {
+  if (v === 'sell' || v === 'buy') side.value = v;
+});
 const priceMode = ref<'limit' | 'market'>('market');
 const limitPrice = ref<number>(0);
 const qty = ref<number>(0);
