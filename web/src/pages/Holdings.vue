@@ -76,6 +76,9 @@ onUnmounted(() => {
 });
 
 const holdings = computed(() => balance.value?.holdings ?? []);
+const totalCost = computed(() =>
+  holdings.value.reduce((sum, h) => sum + Math.round(h.avg * h.qty), 0),
+);
 </script>
 
 <template>
@@ -107,12 +110,20 @@ const holdings = computed(() => balance.value?.holdings ?? []);
           {{ fmtPct(balance.totalPflsRt) }}
         </p>
       </div>
-      <p v-if="balance" class="mt-2 text-xs text-muted-foreground">
-        평가액
-        <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(balance.totalEvlu) }}</span>
-        · 예수금
-        <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(balance.cash) }}</span>
-      </p>
+      <div v-if="balance" class="mt-2 grid grid-cols-3 gap-2 text-[11px]">
+        <div class="flex flex-col">
+          <span class="text-muted-foreground">매입금액</span>
+          <span class="mt-0.5 font-semibold tabular-nums">{{ fmtKrw(totalCost) }}</span>
+        </div>
+        <div class="flex flex-col">
+          <span class="text-muted-foreground">평가액</span>
+          <span class="mt-0.5 font-semibold tabular-nums">{{ fmtKrw(balance.totalEvlu) }}</span>
+        </div>
+        <div class="flex flex-col">
+          <span class="text-muted-foreground">예수금</span>
+          <span class="mt-0.5 font-semibold tabular-nums">{{ fmtKrw(balance.cash) }}</span>
+        </div>
+      </div>
       <div v-else-if="loading" class="mt-2">
         <LoadingState
           :compact="true"
