@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.0.2",
+    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.3",

@@ -103,7 +103,7 @@ cd $INSTALL_DIR
 curl -fsSL $RAW_BASE/docker-compose.yml -o docker-compose.yml
 curl -fsSL $RAW_BASE/infra/Caddyfile -o infra/Caddyfile
 
-# ---------- 4) IP + sslip.io 도메인 + bcrypt ----------
+# ---------- 4) IP + sslip.io 도메인 + PIN bcrypt + 세션 secret ----------
 report 4 "도메인/HTTPS 설정 중"
 PUBLIC_IP=$(curl -fsS https://api.ipify.org 2>/dev/null || curl -fsS https://ifconfig.me 2>/dev/null || echo "")
 if [ -z "$PUBLIC_IP" ]; then
@@ -112,26 +112,30 @@ if [ -z "$PUBLIC_IP" ]; then
 fi
 DASHBOARD_DOMAIN="${PUBLIC_IP//./-}.sslip.io"
 
-# 대시보드 ID / 비밀번호.
-# owlim 등록 페이지가 cloud-init env 로 DASHBOARD_USER + DASHBOARD_PASSWORD 를 미리 주입한다.
-# 둘 다 없으면 (수동 설치 등) 'admin' + 난수 fallback — 기존 동작 유지.
-DASHBOARD_USER="${DASHBOARD_USER:-admin}"
-DASHBOARD_PASSWORD="${DASHBOARD_PASSWORD:-$(openssl rand -base64 18 | tr -d '=+/' | cut -c1-20)}"
-say "caddy 이미지로 bcrypt hash 생성 중 (user=$DASHBOARD_USER)"
-DASHBOARD_PASSWORD_HASH=$(timeout 120 docker run --rm caddy:2-alpine caddy hash-password --plaintext "$DASHBOARD_PASSWORD" 2>/dev/null) || {
-  warn "caddy hash-password 실패 — 평문 fallback"
-  DASHBOARD_PASSWORD_HASH=""
+# 대시보드 PIN — owlim 등록 페이지가 cloud-init env 로 DASHBOARD_PIN 6자리 숫자를 주입.
+# 수동 설치 등 누락 시 6자리 난수 fallback (사용자가 콘솔에서 확인해야 함).
+DASHBOARD_PIN="${DASHBOARD_PIN:-$(printf '%06d' $((RANDOM * 32768 + RANDOM)) | tail -c 7 | head -c 6)}"
+if ! [[ "$DASHBOARD_PIN" =~ ^[0-9]{6}$ ]]; then
+  error "DASHBOARD_PIN 형식 오류 (6자리 숫자 필요): $DASHBOARD_PIN"
+  exit 1
+fi
+say "PIN bcrypt hash 생성 중"
+DASHBOARD_PIN_HASH=$(timeout 120 docker run --rm caddy:2-alpine caddy hash-password --plaintext "$DASHBOARD_PIN" 2>/dev/null) || {
+  error "bcrypt hash 생성 실패 (caddy 이미지 pull 또는 실행 실패)"
+  exit 1
 }
-# bcrypt hash는 $2a$14$... 형태로 $ 문자 다수 포함. docker-compose는 .env의 ${VAR}/$VAR을
-# 변수 expansion하려고 해서 깨짐. $ → $$ escape하면 docker-compose가 unescape해서 컨테이너에 정상 전달.
-DASHBOARD_PASSWORD_HASH_ENV="${DASHBOARD_PASSWORD_HASH//\$/\$\$}"
+# bcrypt hash 는 $2a$14$... 형태로 $ 문자 다수 포함. docker-compose 는 .env 의 ${VAR}/$VAR 을
+# expansion 하려고 해서 깨짐. $ → $$ escape 하면 docker-compose 가 unescape 해서 컨테이너에 정상 전달.
+DASHBOARD_PIN_HASH_ENV="${DASHBOARD_PIN_HASH//\$/\$\$}"
+# 쿠키 서명용 32바이트 hex secret (HMAC key)
+DASHBOARD_SESSION_SECRET=$(openssl rand -hex 32)
 
 # .env (봇 키는 비워두고 대시보드에서 입력)
-# CADDY_EMAIL은 빈값이면 Caddy 'email' 지시문이 syntax error → 도메인 기반 dummy 자동 채움.
+# CADDY_EMAIL 은 빈값이면 Caddy 'email' 지시문이 syntax error → 도메인 기반 dummy 자동 채움.
 cat > $INSTALL_DIR/.env <<EOF
 DASHBOARD_DOMAIN=$DASHBOARD_DOMAIN
-DASHBOARD_USER=$DASHBOARD_USER
-DASHBOARD_PASSWORD_HASH=$DASHBOARD_PASSWORD_HASH_ENV
+DASHBOARD_PIN_HASH=$DASHBOARD_PIN_HASH_ENV
+DASHBOARD_SESSION_SECRET=$DASHBOARD_SESSION_SECRET
 CADDY_EMAIL=admin@$DASHBOARD_DOMAIN
 
 # ALLOWED_CHAT_IDS=1은 placeholder. 대시보드에서 본인 chat_id로 덮어쓰기 전엔 어떤 chat도 통과 안 함.
@@ -183,7 +187,8 @@ sleep 15
 # ---------- 6) 완료 callback (어떤 일이 있어도 보냄) ----------
 DASHBOARD_URL="https://$DASHBOARD_DOMAIN"
 DIAG=$(collect_diagnostics)
-report 6 "준비 완료" ",\"ip\":\"$PUBLIC_IP\",\"dashboard_url\":\"$DASHBOARD_URL\",\"username\":\"$DASHBOARD_USER\",\"password\":\"$DASHBOARD_PASSWORD\",\"diagnostics\":$DIAG"
+# DB 컬럼은 'password' 그대로 재사용 (의미는 PIN). owlim 의 status route 가 pin 으로 rename 해서 클라이언트에 반환.
+report 6 "준비 완료" ",\"ip\":\"$PUBLIC_IP\",\"dashboard_url\":\"$DASHBOARD_URL\",\"password\":\"$DASHBOARD_PIN\",\"diagnostics\":$DIAG"
 
 # 정상 종료 — trap이 종료 시 false alarm 안 보내도록
 trap - ERR EXIT

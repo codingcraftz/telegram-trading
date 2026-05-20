@@ -1,17 +1,31 @@
 // 봇 서버 REST API 래퍼. dev에서는 vite proxy → http://localhost:8080.
 // 배포에서는 same-origin (Caddy + Hono).
 
+// 세션 만료 등으로 한 번 401 받으면 모든 후속 호출 자동 redirect (중복 redirect 방지).
+let redirectingToLogin = false;
+function redirectToLogin(): void {
+  if (redirectingToLogin) return;
+  redirectingToLogin = true;
+  const next = encodeURIComponent(location.pathname + location.search);
+  location.replace(`/login?next=${next}`);
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
   const res = await fetch(path, {
     ...init,
+    credentials: 'same-origin',
     headers: {
       'content-type': 'application/json',
       ...(init?.headers ?? {}),
     },
   });
+  if (res.status === 401) {
+    redirectToLogin();
+    throw new Error('세션이 만료되었습니다. 로그인 화면으로 이동합니다.');
+  }
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
     try {

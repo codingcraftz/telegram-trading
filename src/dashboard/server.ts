@@ -45,6 +45,17 @@ import {
 } from '../api/watchlist.js';
 import { handleStrategyGet, handleStrategyPost } from '../api/strategy.js';
 import { handleKeysStatus, handleSession } from '../api/session.js';
+import {
+  authEnabled,
+  isBlocked,
+  issueSession,
+  LOGIN_HTML,
+  recordFailure,
+  recordSuccess,
+  SESSION_COOKIE,
+  verifyPin,
+  verifySession,
+} from './auth.js';
 
 const ENV_PATH = process.env.ENV_PATH ?? '/app/data/runtime.env';
 const UPDATE_SENTINEL = '/app/data/.update-now';
@@ -110,6 +121,83 @@ export function startDashboard(port = 8080): void {
     console.error('[api] error:', err.message);
     return c.json({ error: err.message }, 500);
   });
+
+  // ===== 인증 미들웨어 =====
+  // DASHBOARD_PIN_HASH + DASHBOARD_SESSION_SECRET 가 설정된 경우에만 활성.
+  // 미설정 시(구버전 .env, 수동 설치 등)는 통과 — Caddy basic_auth 또는 무인증 fallback.
+  if (authEnabled()) {
+    console.log('[dashboard] PIN auth enabled');
+    app.use('*', async (c, next) => {
+      const path = c.req.path;
+      // 통과 경로 — 로그인 UI, 로그인/로그아웃 액션, 헬스체크
+      if (
+        path === '/login' ||
+        path === '/api/login' ||
+        path === '/api/logout' ||
+        path === '/health'
+      ) {
+        return next();
+      }
+      // 정적 자산은 인증 불필요 (민감 정보 없음). 확장자 기반 매칭.
+      if (/\.(?:js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|woff2?|ttf|webmanifest|json|txt)$/i.test(path)) {
+        return next();
+      }
+      // 세션 쿠키 검증
+      const cookieHeader = c.req.header('cookie') ?? '';
+      const m = cookieHeader.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
+      const token = m?.[1];
+      if (verifySession(token)) {
+        return next();
+      }
+      // 미인증 처리 — API 는 401 JSON, 페이지는 /login 으로 redirect
+      if (path.startsWith('/api/')) {
+        return c.json({ error: 'unauthorized' }, 401);
+      }
+      const nextPath = path === '/' ? '' : `?next=${encodeURIComponent(path)}`;
+      return c.redirect(`/login${nextPath}`, 302);
+    });
+
+    // 로그인 페이지
+    app.get('/login', (c) => c.html(LOGIN_HTML));
+
+    // PIN 검증 → 세션 쿠키 발급. 브라우저 세션 쿠키 (Max-Age 미설정 → 창 닫으면 만료).
+    app.post('/api/login', async (c) => {
+      const ip =
+        c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+        c.req.header('x-real-ip') ||
+        'unknown';
+      if (isBlocked(ip)) {
+        return c.json({ error: '시도가 너무 많습니다. 5분 후 다시 시도해주세요.' }, 429);
+      }
+      let pin = '';
+      try {
+        const body = (await c.req.json()) as { pin?: unknown };
+        pin = typeof body.pin === 'string' ? body.pin : '';
+      } catch {
+        return c.json({ error: '잘못된 요청 형식' }, 400);
+      }
+      const ok = await verifyPin(pin);
+      if (!ok) {
+        recordFailure(ip);
+        return c.json({ error: 'PIN 이 일치하지 않습니다.' }, 401);
+      }
+      recordSuccess(ip);
+      const token = issueSession();
+      c.header(
+        'Set-Cookie',
+        `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/`,
+      );
+      return c.json({ ok: true });
+    });
+
+    app.post('/api/logout', (c) => {
+      c.header(
+        'Set-Cookie',
+        `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`,
+      );
+      return c.json({ ok: true });
+    });
+  }
 
   app.get('/health', (c) => c.text('ok'));
 
