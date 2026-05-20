@@ -20,7 +20,7 @@ onMounted(() => {
 <template>
   <div class="mx-auto flex min-h-screen max-w-md flex-col bg-background">
     <AppHeader />
-    <main class="flex-1 pb-28 px-4 pt-3">
+    <main class="flex-1 pb-24 px-4 pt-3">
       <RouterView v-slot="{ Component }">
         <component :is="Component" />
       </RouterView>
