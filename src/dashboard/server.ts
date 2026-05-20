@@ -295,11 +295,11 @@ export function startDashboard(port = 8080): void {
     switch (prefix) {
       case 'feat': return '기능 추가';
       case 'fix': return '버그 수정';
-      case 'polish': return '디자인 다듬기';
+      case 'polish': return '디자인 수정';
       case 'perf': return '속도 개선';
       case 'refactor':
-      case 'chore': return '내부 정리';
-      case 'docs': return '안내 보강';
+      case 'chore': return '코드 정리';
+      case 'docs': return '안내 수정';
       case 'security': return '보안 강화';
       default: return '업데이트';
     }

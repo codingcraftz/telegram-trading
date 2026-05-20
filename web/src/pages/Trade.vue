@@ -318,7 +318,7 @@ onUnmounted(() => {
     class="space-y-3 pt-2"
     style="overscroll-behavior: contain;"
   >
-    <!-- 종목 헤더 + 돋보기 (검색은 시트로) -->
+    <!-- 종목 헤더 + 돋보기 + 대기 N 배지 (대기/전략 통합 진입) -->
     <div v-if="quote" class="flex items-center gap-2 px-1">
       <div class="min-w-0">
         <div class="flex items-center gap-1.5">
@@ -330,6 +330,15 @@ onUnmounted(() => {
           >
             <Search class="h-4 w-4" />
           </button>
+          <RouterLink
+            v-if="ordersStore.count > 0"
+            to="/orders"
+            class="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary transition hover:bg-primary/25"
+            aria-label="대기 주문 보기"
+          >
+            <Clock class="h-3 w-3" />
+            대기 {{ ordersStore.count }}
+          </RouterLink>
         </div>
         <p class="text-[10px] text-muted-foreground tabular-nums">{{ code }}</p>
       </div>
