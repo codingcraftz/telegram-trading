@@ -110,20 +110,12 @@ const totalCost = computed(() =>
           {{ fmtPct(balance.totalPflsRt) }}
         </p>
       </div>
-      <div v-if="balance" class="mt-2 grid grid-cols-3 gap-2 text-[11px]">
-        <div class="flex flex-col">
-          <span class="text-muted-foreground">매입금액</span>
-          <span class="mt-0.5 font-semibold tabular-nums">{{ fmtKrw(totalCost) }}</span>
-        </div>
-        <div class="flex flex-col">
-          <span class="text-muted-foreground">평가액</span>
-          <span class="mt-0.5 font-semibold tabular-nums">{{ fmtKrw(balance.totalEvlu) }}</span>
-        </div>
-        <div class="flex flex-col">
-          <span class="text-muted-foreground">예수금</span>
-          <span class="mt-0.5 font-semibold tabular-nums">{{ fmtKrw(balance.cash) }}</span>
-        </div>
-      </div>
+      <p v-if="balance" class="mt-2 text-xs text-muted-foreground">
+        평가액
+        <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(balance.totalEvlu) }}</span>
+        · 거래가능금액
+        <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(balance.cash) }}</span>
+      </p>
       <div v-else-if="loading" class="mt-2">
         <LoadingState
           :compact="true"
@@ -179,7 +171,7 @@ const totalCost = computed(() =>
               </p>
             </div>
           </div>
-          <div class="mt-2.5 grid grid-cols-2 gap-2 text-[11px]">
+          <div class="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
             <div class="flex justify-between text-muted-foreground">
               <span>평균매입</span>
               <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(h.avg) }}</span>
@@ -187,6 +179,14 @@ const totalCost = computed(() =>
             <div class="flex justify-between text-muted-foreground">
               <span>현재가</span>
               <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(h.cur) }}</span>
+            </div>
+            <div class="flex justify-between text-muted-foreground">
+              <span>매입금액</span>
+              <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(Math.round(h.avg * h.qty)) }}</span>
+            </div>
+            <div class="flex justify-between text-muted-foreground">
+              <span>평가액</span>
+              <span class="font-semibold text-foreground tabular-nums">{{ fmtKrw(Math.round(h.cur * h.qty)) }}</span>
             </div>
           </div>
         </button>
