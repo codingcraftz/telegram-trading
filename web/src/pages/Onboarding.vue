@@ -14,12 +14,22 @@ const router = useRouter();
 // 이미 키가 있는 사용자 (= 설정에서 들어옴) 면 뒤로가기 노출. 첫 셋업이면 숨김.
 const hasExistingKeys = ref(false);
 const status = ref<{ paperKeys: boolean; realKeys: boolean } | null>(null);
+// 연결됨 = input 숨김 + '수정' 버튼만. 클릭 시 펼침. 미연결이면 기본 펼침.
+const editingPaper = ref(false);
+const editingReal = ref(false);
 onMounted(async () => {
   try {
     const k = await api.keysStatus();
     status.value = { paperKeys: k.paperKeys, realKeys: k.realKeys };
     hasExistingKeys.value = k.paperKeys || k.realKeys || k.realMarketKeys;
-  } catch { hasExistingKeys.value = false; }
+    // 연결 안 된 카드는 자동으로 펼침 — 첫 셋업 사용자는 둘 다 펼침.
+    editingPaper.value = !k.paperKeys;
+    editingReal.value = !k.realKeys;
+  } catch {
+    hasExistingKeys.value = false;
+    editingPaper.value = true;
+    editingReal.value = true;
+  }
 });
 
 function goBack() {
@@ -146,21 +156,20 @@ async function pollRestart() {
         <div class="flex items-center gap-2">
           <TestTube2 class="h-4 w-4 text-primary" />
           <h2 class="flex-1 text-sm font-bold tracking-tight">KIS 모의투자</h2>
-          <span v-if="status?.paperKeys" class="flex items-center gap-1 text-[11px] font-semibold text-up">
-            <CircleCheck class="h-3.5 w-3.5" />
-            연결됨 · 수정
-          </span>
-          <span v-else-if="status" class="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground">
-            <CircleX class="h-3.5 w-3.5" />
-            연결안됨 · 추가
-          </span>
+          <CircleCheck v-if="status?.paperKeys" class="h-4 w-4 text-emerald-500" />
+          <CircleX v-else-if="status" class="h-4 w-4 text-muted-foreground/60" />
+          <button
+            v-if="status?.paperKeys && !editingPaper"
+            class="rounded-md px-2 py-1 text-[11px] font-semibold text-primary transition hover:bg-accent"
+            @click="editingPaper = true"
+          >수정</button>
         </div>
       </template>
-      <p class="-mt-1 mb-3 text-[11px] text-muted-foreground">
+      <p v-if="editingPaper" class="-mt-1 mb-3 text-[11px] text-muted-foreground">
         <a href="https://apiportal.koreainvestment.com" target="_blank" rel="noreferrer" class="text-primary underline">KIS 개발자센터</a>
         에서 발급
       </p>
-      <div class="space-y-2.5">
+      <div v-if="editingPaper" class="space-y-2.5">
         <label class="block">
           <span class="text-[11px] font-semibold text-muted-foreground">APP_KEY</span>
           <input
@@ -197,20 +206,16 @@ async function pollRestart() {
         <div class="flex items-center gap-2">
           <Flame class="h-4 w-4 text-down" />
           <h2 class="flex-1 text-sm font-bold tracking-tight">KIS 실전</h2>
-          <span v-if="status?.realKeys" class="flex items-center gap-1 text-[11px] font-semibold text-up">
-            <CircleCheck class="h-3.5 w-3.5" />
-            연결됨 · 수정
-          </span>
-          <span v-else-if="status" class="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground">
-            <CircleX class="h-3.5 w-3.5" />
-            연결안됨 · 추가
-          </span>
+          <CircleCheck v-if="status?.realKeys" class="h-4 w-4 text-emerald-500" />
+          <CircleX v-else-if="status" class="h-4 w-4 text-muted-foreground/60" />
+          <button
+            v-if="status?.realKeys && !editingReal"
+            class="rounded-md px-2 py-1 text-[11px] font-semibold text-primary transition hover:bg-accent"
+            @click="editingReal = true"
+          >수정</button>
         </div>
       </template>
-      <p class="-mt-1 mb-3 text-[11px] text-muted-foreground">
-        ⚠️ 실제 자금 — 출금 권한 없는 키만 사용하세요.
-      </p>
-      <div class="space-y-2.5">
+      <div v-if="editingReal" class="space-y-2.5">
         <label class="block">
           <span class="text-[11px] font-semibold text-muted-foreground">APP_KEY</span>
           <input
