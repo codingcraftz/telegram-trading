@@ -71,6 +71,10 @@ async function switchTradingMode(next: 'paper' | 'real') {
     toast.error('실전 키/계좌가 연결돼 있어야 실전 모드로 전환 가능합니다.');
     return;
   }
+  // 실전 전환은 자금이 실제로 움직이므로 한번 더 확인.
+  if (next === 'real') {
+    if (!window.confirm('실전투자로 전환합니다.\n실제 자금으로 매매가 진행됩니다. 정말 진행하시겠습니까?')) return;
+  }
   modeSwitching.value = true;
   try {
     await api.setTradingMode(next);
@@ -327,34 +331,60 @@ onUnmounted(() => {
       </RouterLink>
     </Card>
 
-    <!-- 연결 상태 — 모의/실전 키 연결 유무. KIS 키 입력은 별도 카드로 분리. -->
+    <!-- 연결 상태 — 모의/실전 키 연결 유무. 키 옆에 수정/추가 진입 버튼. -->
     <Card v-if="keys">
       <template #header>
         <h3 class="text-sm font-bold tracking-tight">연결 상태</h3>
       </template>
-      <ul class="space-y-2 text-sm">
+      <ul class="space-y-2.5 text-sm">
+        <li class="flex items-center justify-between gap-2">
+          <span class="text-muted-foreground">모의투자</span>
+          <button
+            v-if="keys.paperKeys"
+            class="flex items-center gap-2 rounded-md px-2 py-1 text-up hover:bg-accent transition"
+            @click="gotoOnboarding"
+          >
+            <CircleCheck class="h-4 w-4" />
+            <span class="font-semibold">연결됨</span>
+            <span class="text-[10px] text-muted-foreground">· 수정</span>
+          </button>
+          <button
+            v-else
+            class="flex items-center gap-2 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent transition"
+            @click="gotoOnboarding"
+          >
+            <CircleX class="h-4 w-4" />
+            <span class="font-semibold">연결안됨</span>
+            <span class="text-[10px] text-primary">· 추가하기</span>
+          </button>
+        </li>
+        <li class="flex items-center justify-between gap-2">
+          <span class="text-muted-foreground">실전투자</span>
+          <button
+            v-if="keys.realKeys"
+            class="flex items-center gap-2 rounded-md px-2 py-1 text-up hover:bg-accent transition"
+            @click="gotoOnboarding"
+          >
+            <CircleCheck class="h-4 w-4" />
+            <span class="font-semibold">연결됨</span>
+            <span class="text-[10px] text-muted-foreground">· 수정</span>
+          </button>
+          <button
+            v-else
+            class="flex items-center gap-2 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent transition"
+            @click="gotoOnboarding"
+          >
+            <CircleX class="h-4 w-4" />
+            <span class="font-semibold">연결안됨</span>
+            <span class="text-[10px] text-primary">· 추가하기</span>
+          </button>
+        </li>
         <li class="flex items-center justify-between">
           <span class="text-muted-foreground">시세 / 차트</span>
           <span class="flex items-center gap-1 font-semibold" :class="keys.realMarketKeys ? 'text-up' : 'text-destructive'">
             <CircleCheck v-if="keys.realMarketKeys" class="h-4 w-4" />
             <CircleX v-else class="h-4 w-4" />
             {{ keys.realMarketKeys ? '연결됨' : '사용 불가' }}
-          </span>
-        </li>
-        <li class="flex items-center justify-between">
-          <span class="text-muted-foreground">모의투자 키</span>
-          <span class="flex items-center gap-1 font-semibold" :class="keys.paperKeys ? 'text-up' : 'text-muted-foreground'">
-            <CircleCheck v-if="keys.paperKeys" class="h-4 w-4" />
-            <CircleX v-else class="h-4 w-4" />
-            {{ keys.paperKeys ? '연결됨' : '없음' }}
-          </span>
-        </li>
-        <li class="flex items-center justify-between">
-          <span class="text-muted-foreground">실전투자 키</span>
-          <span class="flex items-center gap-1 font-semibold" :class="keys.realKeys ? 'text-up' : 'text-muted-foreground'">
-            <CircleCheck v-if="keys.realKeys" class="h-4 w-4" />
-            <CircleX v-else class="h-4 w-4" />
-            {{ keys.realKeys ? '연결됨' : '없음' }}
           </span>
         </li>
       </ul>

@@ -1,15 +1,29 @@
 <script setup lang="ts">
 // 첫 진입 온보딩 — KIS 모의/실전 키 + 거래 모드만.
 // 텔레그램·UI 옵션은 Settings 페이지에서. router 가드가 /api/keys-status 로 키 미입력 감지 시 redirect.
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { TestTube2, Flame, Settings as SettingsIcon, Info } from 'lucide-vue-next';
+import { TestTube2, Flame, Info, ChevronLeft } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
-import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import { toast } from '@/lib/toast';
+import { api } from '@/api/client';
 
 const router = useRouter();
+
+// 이미 키가 있는 사용자 (= 설정에서 들어옴) 면 뒤로가기 노출. 첫 셋업이면 숨김.
+const hasExistingKeys = ref(false);
+onMounted(async () => {
+  try {
+    const k = await api.keysStatus();
+    hasExistingKeys.value = k.paperKeys || k.realKeys || k.realMarketKeys;
+  } catch { hasExistingKeys.value = false; }
+});
+
+function goBack() {
+  if (window.history.length > 1) router.back();
+  else router.push('/settings');
+}
 
 type Form = {
   KIS_PAPER_APP_KEY: string;
@@ -47,10 +61,17 @@ async function submit() {
   if (!canSubmit.value) return;
   submitting.value = true;
   try {
+    // 거래 모드 (MODE) 는 이 페이지에서 안 다룸 — 설정 페이지의 매매 모드 전환에서.
+    // 빈 값 필드는 제외해서 .env 의 기존 값을 보존.
+    const payload: Record<string, string> = {};
+    for (const [k, v] of Object.entries(form.value)) {
+      if (k === 'MODE') continue;
+      if (typeof v === 'string' && v.trim()) payload[k] = v;
+    }
     const res = await fetch('/api/settings', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(form.value),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const t = await res.text();
@@ -99,11 +120,24 @@ async function pollRestart() {
 
 <template>
   <div class="mx-auto max-w-xl space-y-4 p-4 pb-28">
-    <div>
-      <h1 class="text-xl font-bold tracking-tight">처음 설정</h1>
-      <p class="mt-1 text-[12px] text-muted-foreground">
-        한국투자증권(KIS) API 키를 입력하면 매매가 활성화돼요. <b>모의</b> 또는 <b>실전</b> 중 하나만 입력해도 시작 가능합니다.
-      </p>
+    <!-- 뒤로가기 — 이미 키 있는 사용자(설정에서 들어옴) 만 노출. 첫 셋업엔 숨김. -->
+    <div class="flex items-center gap-2">
+      <button
+        v-if="hasExistingKeys"
+        class="-ml-2 rounded-md p-2 text-muted-foreground transition hover:bg-accent"
+        aria-label="뒤로가기"
+        @click="goBack"
+      >
+        <ChevronLeft class="h-5 w-5" />
+      </button>
+      <div class="flex-1">
+        <h1 class="text-xl font-bold tracking-tight">
+          {{ hasExistingKeys ? 'KIS 키 / 계좌' : '처음 설정' }}
+        </h1>
+        <p v-if="!hasExistingKeys" class="mt-1 text-[12px] text-muted-foreground">
+          한국투자증권(KIS) API 키를 입력하면 매매가 활성화돼요. <b>모의</b> 또는 <b>실전</b> 중 하나만 입력해도 시작 가능합니다.
+        </p>
+      </div>
     </div>
 
     <!-- 모의투자 -->
@@ -195,26 +229,8 @@ async function pollRestart() {
       </div>
     </Card>
 
-    <!-- 모드 -->
-    <Card>
-      <template #header>
-        <div class="flex items-center gap-2">
-          <SettingsIcon class="h-4 w-4 text-muted-foreground" />
-          <h2 class="text-sm font-bold tracking-tight">거래 모드</h2>
-        </div>
-      </template>
-      <SegmentedControl
-        :model-value="form.MODE"
-        :options="[
-          { value: 'paper', label: '🧪 모의' },
-          { value: 'real', label: '🔥 실전' },
-        ]"
-        @update:model-value="(v) => (form.MODE = v as 'paper' | 'real')"
-      />
-      <p class="mt-2 text-[11px] text-muted-foreground">
-        모의 모드는 KIS 모의 계좌, 실전 모드는 실전 계좌로 발주합니다.
-      </p>
-    </Card>
+    <!-- 거래 모드 카드 — 이 페이지에선 제거. 매매 모드 전환은 설정 → 연결 상태에서. -->
+
 
     <div class="flex items-start gap-2 rounded-xl bg-muted/40 px-3 py-2.5 text-[11px] text-muted-foreground">
       <Info class="mt-0.5 h-3.5 w-3.5 shrink-0" />
