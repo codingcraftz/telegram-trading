@@ -5,10 +5,11 @@
 
 import { ref, computed, onMounted, onUnmounted, onActivated, watch, nextTick } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
-import { Search, Clock, X, NotebookPen, Plus } from 'lucide-vue-next';
+import { Search, Clock, X, NotebookPen, Plus, Loader2 } from 'lucide-vue-next';
 import OrderBook from '@/components/OrderBook.vue';
 import PriceStepper from '@/components/PriceStepper.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
+import Modal from '@/components/ui/Modal.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import OrdersView from './Orders.vue';
 import { api, type SearchItem, type QuoteResponse, type BalanceResponse, type StrategyItem } from '@/api/client';
@@ -330,12 +331,14 @@ async function ensureAutoCode() {
   if (auto) pickStock(auto);
 }
 
-onMounted(async () => {
-  await loadBalance();
+onMounted(() => {
+  // 빈 화면 단축 — KIS balance 응답 안 기다리고 종목부터 즉시 선택.
+  // localStorage 의 마지막 본 종목으로 router.replace → grid 곧바로 마운트.
+  ensureAutoCode();
+  loadBalance();
   loadStrategies();
   ordersStore.subscribe(8000);
   watchlist.subscribe();
-  await ensureAutoCode();
 });
 
 // KeepAlive 로 캐시된 페이지가 재진입할 때 — onMounted 안 불림. ?code 비어있으면
@@ -414,8 +417,23 @@ onUnmounted(() => {
       </div>
     </Transition>
 
+    <!-- 종목 선택 전 skeleton — ensureAutoCode 호출 직후 router.replace 까지의
+         아주 짧은 빈 화면 방지. -->
+    <div v-if="!hasCode" class="grid grid-cols-[5fr_6fr] gap-3">
+      <div class="rounded-xl bg-card ring-1 ring-border/60 dark:ring-0 p-2 space-y-1">
+        <div v-for="n in 10" :key="n" class="h-[26px] animate-pulse rounded bg-muted/30" />
+      </div>
+      <div class="rounded-xl bg-card ring-1 ring-border/60 dark:ring-0 p-3 space-y-3">
+        <div class="h-7 w-full animate-pulse rounded bg-muted/40" />
+        <div class="h-6 w-full animate-pulse rounded bg-muted/30" />
+        <div class="h-10 w-full animate-pulse rounded bg-muted/30" />
+        <div class="h-10 w-full animate-pulse rounded bg-muted/30" />
+        <div class="h-10 w-full animate-pulse rounded bg-muted/40" />
+      </div>
+    </div>
+
     <!-- 2-col: 좌 호가 / 우 매매 폼 -->
-    <div v-if="hasCode" class="grid grid-cols-[5fr_6fr] gap-3">
+    <div v-else class="grid grid-cols-[5fr_6fr] gap-3">
       <!-- 좌: 호가 (잔량 합계 숨김) -->
       <div class="rounded-xl bg-card ring-1 ring-border/60 dark:ring-0 p-2">
         <OrderBook
@@ -630,6 +648,25 @@ onUnmounted(() => {
 
     </template>
     <!-- ↑ '주문' 탭 콘텐츠 끝 -->
+
+    <!-- 발주 중 — 사용자 확인용 fullscreen overlay -->
+    <Modal :open="submitting" :title="side === 'buy' ? '매수 발주 중' : '매도 발주 중'">
+      <div class="flex items-center gap-3 py-2">
+        <Loader2 class="h-6 w-6 animate-spin text-primary" />
+        <div class="text-sm text-muted-foreground">
+          증권사에 주문을 보내고 있어요.<br />잠시만 기다려 주세요.
+        </div>
+      </div>
+    </Modal>
+
+    <Modal :open="strategyApplying" title="전략 적용 중">
+      <div class="flex items-center gap-3 py-2">
+        <Loader2 class="h-6 w-6 animate-spin text-primary" />
+        <div class="text-sm text-muted-foreground">
+          매수 발주 + 감시 등록을 진행하고 있어요.
+        </div>
+      </div>
+    </Modal>
 
     <!-- 전략 적용 — 자금 입력 시트 -->
     <BottomSheet
