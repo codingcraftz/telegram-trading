@@ -10,7 +10,7 @@
 // 동시성: runner는 단일 worker 루프에서 직렬 호출되므로 락 불필요.
 
 import { callKisApi } from '../mcp/kis.js';
-import { firstOutput, num, parseMcpResult, checkKisOk } from '../fastpath/extract.js';
+import { firstOutput, num, outputList, parseMcpResult, checkKisOk } from '../fastpath/extract.js';
 import { invalidate as invalidateCache } from '../fastpath/cache.js';
 import { placeBuyOrder, pollFill } from '../execution/order.js';
 import { placeOrder } from '../mcp/kis.js';
@@ -188,7 +188,12 @@ async function fireStage1(
   // 매수가능금액 → 예산 → 1차 비율 적용 → 수량
   const cash = (await fetchOrderableCash(app.stockCode, price.current)) ?? 0;
   if (cash <= 0) {
-    updateApplicationStatus(app.id, app.chatId, 'failed');
+    // KIS 가 09:00 직후 ord_psbl_cash 를 일시적으로 0 으로 답하는 경우가 있어
+    // 윈도우 안에서는 failed 로 못박지 않고 다음 5초 tick 에 재시도. 윈도우(30초)
+    // 가 끝나면 inMorningWindow 가 false 라 fireStage1 호출 자체가 안 됨 → active
+    // 로 남아 다음 영업일 09:00 에 다시 시도. 사용자 정의 자금이 있어도 KIS 가
+    // 자금 0 이라고 답한 거니 다음 영업일 시도가 합리적.
+    console.warn(`[staged] fireStage1 cash=0 (transient?) — skip tick`, app.id, app.stockCode);
     return;
   }
   const budget = Math.min(resolveBudget(entry, cash, app.budgetAmount), cash);
@@ -196,6 +201,12 @@ async function fireStage1(
   const stage1Budget = (budget * stage1Pct) / 100;
   const qty = Math.floor(stage1Budget / price.current);
   if (qty < 1) {
+    createExecution({
+      strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
+      stockCode: app.stockCode, action: 'buy', result: 'failure',
+      errorMessage: `1차 수량 < 1주 (budget=${Math.round(budget)} stage1Pct=${stage1Pct} price=${price.current} cash=${cash})`,
+      payload: { stage: 1, phase: 'pre_order', budget, stage1Budget, price: price.current, cash },
+    });
     updateApplicationStatus(app.id, app.chatId, 'failed');
     return;
   }
@@ -272,6 +283,28 @@ async function fireStage1(
     .catch((err) => console.error('[staged] pollFill stage1 failed', err));
 }
 
+// KIS 가 매도 거절 시 "잔고 없음" 류 메시지를 돌려주면 application 이 phantom
+// (예: immediate 전략 매수가 미체결로 끝났는데 클라가 보낸 stage1Snapshot 으로
+// runtime 에 stage1_filled 가 새겨진 케이스) — 무한 SL 재시도 방지용 판정.
+function isPhantomHoldingError(err: string): boolean {
+  return /잔고.*없|보유.*없|미보유|hldg.*qty.*0|매도.*가능.*수량.*없/i.test(err);
+}
+
+// 종목 보유 수량을 KIS inquire_balance 로 직접 확인 — phantom 검출용.
+async function fetchActualHoldingQty(code: string): Promise<number | null> {
+  try {
+    const r = await callKisApi('domestic_stock', 'inquire_balance', {});
+    const parsed = parseMcpResult(r);
+    if (!parsed.success) return null;
+    const list = outputList(parsed, 'output1');
+    const hit = list.find((it) => String(it.pdno ?? '') === code);
+    if (!hit) return 0;
+    return num(hit.hldg_qty) ?? 0;
+  } catch {
+    return null;
+  }
+}
+
 // ====== 매도 발주 (시장가 단일 helper) ======
 // 시장가 매도는 99% 즉시 체결되므로 체결 폴링 생략, 발주 성공만 확인.
 async function placeMarketSell(code: string, qty: number): Promise<{ ok: true; orderId: string } | { ok: false; error: string }> {
@@ -306,6 +339,23 @@ async function monitorStage1(
   if (!runtime.stage1) return;
   const s1 = runtime.stage1;
 
+  // phantom 검출 — 외부에서 들어온 stage1Snapshot(immediate 흐름) 이 실제 KIS
+  // 잔고와 불일치하면 application 정리. monitorStage1 진입마다 한 번씩 확인.
+  if (s1.orderId === 'external' || s1.positionId === 'external') {
+    const actualQty = await fetchActualHoldingQty(app.stockCode);
+    if (actualQty !== null && actualQty < 1) {
+      createExecution({
+        strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
+        stockCode: app.stockCode, action: 'sell', result: 'failure',
+        errorMessage: `phantom_holding: KIS 잔고에 ${app.stockCode} 보유 없음 (snapshot qty=${s1.qty}). 매수가 미체결로 끝났을 가능성.`,
+        payload: { reason: 'phantom_holding', snapshotQty: s1.qty, actualQty },
+      });
+      setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
+      updateApplicationStatus(app.id, app.chatId, 'completed');
+      return;
+    }
+  }
+
   const price = await fetchPrice(app.stockCode);
   if (!price) return;
   const cur = price.current;
@@ -315,6 +365,17 @@ async function monitorStage1(
   if (entry.stopLoss?.enabled && cur <= avg1 * (1 - entry.stopLoss.atPct / 100)) {
     const r = await placeMarketSell(app.stockCode, s1.qty);
     if (!r.ok) {
+      if (isPhantomHoldingError(r.error)) {
+        createExecution({
+          strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
+          stockCode: app.stockCode, action: 'sell', result: 'failure',
+          errorMessage: `phantom_holding (SL): ${r.error}`,
+          payload: { reason: 'phantom_holding_on_sell', stage: 'SL' },
+        });
+        setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
+        updateApplicationStatus(app.id, app.chatId, 'completed');
+        return;
+      }
       console.warn('[staged] SL sell failed', r.error);
       return;
     }
@@ -338,6 +399,17 @@ async function monitorStage1(
     const sellQty = Math.max(1, Math.floor((s1.qty * tp1.sellPct) / 100));
     const r = await placeMarketSell(app.stockCode, sellQty);
     if (!r.ok) {
+      if (isPhantomHoldingError(r.error)) {
+        createExecution({
+          strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
+          stockCode: app.stockCode, action: 'sell', result: 'failure',
+          errorMessage: `phantom_holding (TP1): ${r.error}`,
+          payload: { reason: 'phantom_holding_on_sell', stage: 'TP1' },
+        });
+        setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
+        updateApplicationStatus(app.id, app.chatId, 'completed');
+        return;
+      }
       console.warn('[staged] TP1 sell failed', r.error);
       return;
     }
@@ -478,7 +550,21 @@ async function monitorExit(
   // SL — 평단 기준
   if (entry.stopLoss?.enabled && cur <= avg * (1 - entry.stopLoss.atPct / 100)) {
     const r = await placeMarketSell(app.stockCode, remaining);
-    if (!r.ok) { console.warn('[staged] SL exit fail', r.error); return; }
+    if (!r.ok) {
+      if (isPhantomHoldingError(r.error)) {
+        createExecution({
+          strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
+          stockCode: app.stockCode, action: 'sell', result: 'failure',
+          errorMessage: `phantom_holding (SL exit): ${r.error}`,
+          payload: { reason: 'phantom_holding_on_sell', stage: 'SL_exit' },
+        });
+        setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
+        updateApplicationStatus(app.id, app.chatId, 'completed');
+        return;
+      }
+      console.warn('[staged] SL exit fail', r.error);
+      return;
+    }
     createExecution({
       strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
       stockCode: app.stockCode, action: 'sell', result: 'success',
@@ -497,7 +583,21 @@ async function monitorExit(
   const tp2 = entry.takeProfit?.tp2;
   if (tp2?.enabled && cur >= avg * (1 + tp2.atPct / 100)) {
     const r = await placeMarketSell(app.stockCode, remaining);
-    if (!r.ok) { console.warn('[staged] TP2 sell fail', r.error); return; }
+    if (!r.ok) {
+      if (isPhantomHoldingError(r.error)) {
+        createExecution({
+          strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
+          stockCode: app.stockCode, action: 'sell', result: 'failure',
+          errorMessage: `phantom_holding (TP2): ${r.error}`,
+          payload: { reason: 'phantom_holding_on_sell', stage: 'TP2' },
+        });
+        setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
+        updateApplicationStatus(app.id, app.chatId, 'completed');
+        return;
+      }
+      console.warn('[staged] TP2 sell fail', r.error);
+      return;
+    }
     createExecution({
       strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
       stockCode: app.stockCode, action: 'sell', result: 'success',

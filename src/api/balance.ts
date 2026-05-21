@@ -11,6 +11,12 @@ import {
   parseMcpResult,
 } from '../fastpath/extract.js';
 import { getMarketSession, sessionLabel } from '../scheduler/calendar.js';
+import { fetchPendingOrders } from '../fastpath/pending.js';
+import { listChatPendingIntents } from '../db/repo.js';
+import { getDb } from '../db/client.js';
+import { strategyApplications } from '../db/schema.js';
+import { and, eq } from 'drizzle-orm';
+import { getDefaultChatId } from './_auth.js';
 
 export async function handleBalance(c: Context) {
   // 잔고 raw 응답 60초 캐싱 — warmup worker가 30s마다 갱신해 항상 fresh 유지.
@@ -41,9 +47,64 @@ export async function handleBalance(c: Context) {
     num(summary?.dnca_tot_amt) ??
     0;
 
+  // KIS 가 ord_psbl_cash 에 대기 중 매수 주문 금액을 즉시 반영하지 않는 경우가
+  // 있어서, 백엔드에서 직접 차감해야 사용자가 보는 "거래가능금액" 이 진짜
+  // 사용 가능한 금액과 일치. 차감 대상:
+  //   1) KIS 미체결 매수 주문 (price × remaining)
+  //   2) pendingIntents (사용자 확인 대기 매수)
+  //   3) morning_staged 의 status='active' && phase='pending' 인 application
+  //      → 다음 09:00 에 발사될 예약. budgetAmount 만큼 사전 차감.
+  const chatId = getDefaultChatId();
+  let pendingBuyAmount = 0;
+  try {
+    const kis = await fetchPendingOrders();
+    if (kis.ok) {
+      for (const it of kis.items) {
+        const isBuy = String(it.side).includes('매수') || String(it.side) === '02';
+        if (isBuy) pendingBuyAmount += it.price * it.remaining;
+      }
+    }
+  } catch { /* ignore */ }
+  try {
+    for (const i of listChatPendingIntents(chatId)) {
+      try {
+        const spec = JSON.parse(i.orderSpecJson) as { action?: string; price?: number; quantity?: number };
+        if (spec.action === 'buy') {
+          pendingBuyAmount += (spec.price ?? 0) * (spec.quantity ?? 0);
+        }
+      } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+  try {
+    const apps = getDb()
+      .select({
+        runtimeJson: strategyApplications.runtimeJson,
+        budgetAmount: strategyApplications.budgetAmount,
+      })
+      .from(strategyApplications)
+      .where(
+        and(
+          eq(strategyApplications.chatId, chatId),
+          eq(strategyApplications.status, 'active'),
+        ),
+      )
+      .all();
+    for (const a of apps) {
+      let phase = 'pending';
+      try { phase = JSON.parse(a.runtimeJson ?? '{}').phase ?? 'pending'; } catch { /* keep pending */ }
+      if (phase === 'pending' && a.budgetAmount && a.budgetAmount > 0) {
+        pendingBuyAmount += a.budgetAmount;
+      }
+    }
+  } catch { /* ignore */ }
+
+  const adjustedCash = Math.max(0, cashOrderable - pendingBuyAmount);
+
   return c.json({
     totalEvlu: num(summary?.tot_evlu_amt) ?? 0,
-    cash: cashOrderable,
+    cash: adjustedCash,
+    cashRaw: cashOrderable,
+    cashReservedForPending: pendingBuyAmount,
     totalPfls: num(summary?.evlu_pfls_smtl_amt) ?? 0,
     totalPflsRt: num(summary?.asst_icdc_erng_rt) ?? 0,
     nextDaySettlement: num(summary?.nxdy_excc_amt) ?? 0,
