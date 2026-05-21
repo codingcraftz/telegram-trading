@@ -241,9 +241,13 @@ watch(seg, (v) => { if (v === 'filled' && filledItems.value.length === 0) loadFi
       ]"
     />
 
-    <!-- 대기 -->
+    <!-- 대기 — store.data 가 null 이면 첫 fetch 안 됐다는 뜻 → skeleton.
+         이후엔 pending.length 기준으로 카드/EmptyState 정적 전환. -->
     <template v-if="seg === 'pending'">
-      <div v-if="pending.length > 0" class="space-y-2">
+      <div v-if="store.data === null" class="space-y-2">
+        <div v-for="n in 3" :key="n" class="h-[96px] animate-pulse rounded-2xl bg-card" />
+      </div>
+      <div v-else-if="pending.length > 0" class="space-y-2">
         <OrderCard
           v-for="p in visiblePending"
           :key="p.key"
@@ -272,7 +276,7 @@ watch(seg, (v) => { if (v === 'filled' && filledItems.value.length === 0) loadFi
         <div v-if="pendingHasMore" ref="pendingSentinel" class="h-2" />
       </div>
       <EmptyState
-        v-else-if="!store.loading"
+        v-else
         :icon="Inbox"
         title="대기 중인 주문이 없어요"
         description="종목을 골라 매수해보세요."
@@ -283,9 +287,6 @@ watch(seg, (v) => { if (v === 'filled' && filledItems.value.length === 0) loadFi
           </RouterLink>
         </template>
       </EmptyState>
-      <div v-else class="space-y-2">
-        <div v-for="n in 3" :key="n" class="h-[96px] animate-pulse rounded-2xl bg-card" />
-      </div>
     </template>
 
     <!-- 체결 -->

@@ -337,7 +337,7 @@ onMounted(() => {
   ensureAutoCode();
   loadBalance();
   loadStrategies();
-  ordersStore.subscribe(8000);
+  ordersStore.subscribe(4000);
   watchlist.subscribe();
 });
 
@@ -369,11 +369,12 @@ onUnmounted(() => {
       ]"
     />
 
-    <!-- 내역 탭 — 대기+체결 통합 -->
-    <OrdersView v-if="tab === 'history'" :embedded="true" />
+    <!-- 내역 탭 — 대기+체결 통합. v-show 로 항상 mount: 첫 진입 시 미리
+         store 가 fetch 해두고, 탭 클릭 시 즉시 카드 표시 (mount latency 0). -->
+    <OrdersView v-show="tab === 'history'" :embedded="true" />
 
     <!-- 주문 탭 — 매수/매도 폼 -->
-    <template v-else>
+    <template v-if="tab === 'order'">
     <!-- 종목 헤더 — skeleton ↔ 실데이터 fade transition -->
     <Transition
       mode="out-in"
