@@ -4,7 +4,7 @@
 // 디스크 캐시: data/.kis-token-{mode}.json — 봇 재시작·tsx watch reload에도 유지.
 // 1분당 1회 발급 제한(EGW00133) 회피.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { envDv } from '../runtime.js';
 import { getKisCredentials } from './config.js';
@@ -109,6 +109,15 @@ export async function getAccessToken(mode?: KisMode): Promise<string> {
   } finally {
     _inflight.delete(m);
   }
+}
+
+// KIS 서버가 "기간이 만료된 token" 응답하면 callKisApi 에서 이걸 호출.
+// 메모리 + 디스크 캐시 모두 비우고, 다음 getAccessToken() 이 새로 발급하게 함.
+export function invalidateToken(mode?: KisMode): void {
+  const m: KisMode = mode ?? envDv();
+  _cache.delete(m);
+  const path = tokenFilePath(m);
+  try { if (existsSync(path)) unlinkSync(path); } catch { /* ignore */ }
 }
 
 export function getKisBaseUrlFor(mode: KisMode): string {

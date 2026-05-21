@@ -7,7 +7,7 @@
 // 응답은 KIS 직접 응답을 MCP-스타일로 wrap → parseMcpResult가 그대로 동작.
 
 import { envDv } from '../runtime.js';
-import { getAccessToken, getKisBaseUrlFor, type KisMode } from './auth.js';
+import { getAccessToken, getKisBaseUrlFor, invalidateToken, type KisMode } from './auth.js';
 import { getKisAccount, getKisCredentials } from './config.js';
 
 // 시장 데이터 API — 계좌 무관, read-only. 항상 실전 키 사용 (분당 1080건).
@@ -187,42 +187,60 @@ export async function callKisApi(
   }
 
   const finalParams = meta.needsAccount ? injectAccount(params, mode) : params;
-  const accessToken = await getAccessToken(mode);
-  const headers = buildHeaders(trId, accessToken, mode);
   const url = `${getKisBaseUrlFor(mode)}${meta.path}`;
 
-  let res: Response;
-  if (meta.method === 'GET') {
-    const qs = new URLSearchParams();
-    for (const [k, v] of Object.entries(finalParams)) {
-      if (v === undefined || v === null) continue;
-      qs.set(k, String(v));
+  // KIS 토큰 만료 응답 받으면 cache 비우고 새 토큰으로 1회 재시도.
+  // KIS demo 토큰은 명목상 24h 인데 외부 요인 (같은 키로 다른 인스턴스 발급,
+  // 서버 측 invalidate 등) 으로 일찍 만료될 수 있음.
+  const doRequest = async (token: string): Promise<{ res: Response; body: unknown }> => {
+    const headers = buildHeaders(trId, token, mode);
+    let r: Response;
+    if (meta.method === 'GET') {
+      const qs = new URLSearchParams();
+      for (const [k, v] of Object.entries(finalParams)) {
+        if (v === undefined || v === null) continue;
+        qs.set(k, String(v));
+      }
+      const fullUrl = qs.toString() ? `${url}?${qs.toString()}` : url;
+      r = await fetch(fullUrl, { method: 'GET', headers });
+    } else {
+      const cleaned: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(finalParams)) {
+        const lower = k.toLowerCase();
+        if (lower === 'ord_dv' || lower === 'env_dv') continue;
+        if (v === undefined || v === null) continue;
+        cleaned[k.toUpperCase()] = v;
+      }
+      r = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(cleaned),
+      });
     }
-    const fullUrl = qs.toString() ? `${url}?${qs.toString()}` : url;
-    res = await fetch(fullUrl, { method: 'GET', headers });
-  } else {
-    // POST body — KIS REST는 POST 시 필드명을 대문자(CANO/PDNO/ORD_QTY 등)로 요구.
-    // GET은 case-insensitive(query) 통과하지만 POST는 lowercase 거부 → IGW00017 "상품번호 확인".
-    // 의사 키(ord_dv: tr_id 결정용, env_dv: 내부 분기용)는 KIS body에서 제거.
-    const cleaned: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(finalParams)) {
-      const lower = k.toLowerCase();
-      if (lower === 'ord_dv' || lower === 'env_dv') continue;
-      if (v === undefined || v === null) continue;
-      cleaned[k.toUpperCase()] = v;
-    }
-    res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(cleaned),
-    });
-  }
+    let body: unknown;
+    try { body = await r.json(); } catch { body = { rt_cd: '1', msg1: `응답 파싱 실패 (${r.status})` }; }
+    return { res: r, body };
+  };
 
-  let kisResponse: unknown;
-  try {
-    kisResponse = await res.json();
-  } catch {
-    kisResponse = { rt_cd: '1', msg1: `응답 파싱 실패 (${res.status})` };
+  const isTokenExpired = (body: unknown): boolean => {
+    if (!body || typeof body !== 'object') return false;
+    const b = body as Record<string, unknown>;
+    const msg = String(b.msg1 ?? b.message ?? '');
+    const code = String(b.msg_cd ?? '');
+    return (
+      /기간이 만료된 token|만료된 token|token.*expired|EGW00121|EGW00123/i.test(msg) ||
+      code === 'EGW00121' || code === 'EGW00123'
+    );
+  };
+
+  let accessToken = await getAccessToken(mode);
+  let { res, body: kisResponse } = await doRequest(accessToken);
+
+  if (isTokenExpired(kisResponse)) {
+    console.warn('[kis] token 만료 감지 — invalidate + 재발급 + 재시도');
+    invalidateToken(mode);
+    accessToken = await getAccessToken(mode);
+    ({ res, body: kisResponse } = await doRequest(accessToken));
   }
 
   if (!res.ok) {
