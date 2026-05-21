@@ -373,8 +373,9 @@ onUnmounted(() => {
          store 가 fetch 해두고, 탭 클릭 시 즉시 카드 표시 (mount latency 0). -->
     <OrdersView v-show="tab === 'history'" :embedded="true" />
 
-    <!-- 주문 탭 — 매수/매도 폼 -->
-    <template v-if="tab === 'order'">
+    <!-- 주문 탭 — 매수/매도 폼. v-show 로 항상 mount, tab 전환 시 즉시 노출.
+         (v-if 로 두면 query 동기화 일시 상태에서 둘 다 false → 빈 화면 가능) -->
+    <div v-show="tab === 'order'" class="space-y-3">
     <!-- 종목 헤더 — skeleton ↔ 실데이터 fade transition -->
     <Transition
       mode="out-in"
@@ -647,7 +648,7 @@ onUnmounted(() => {
       <span class="font-semibold">전략 추가 ›</span>
     </RouterLink>
 
-    </template>
+    </div>
     <!-- ↑ '주문' 탭 콘텐츠 끝 -->
 
     <!-- 발주 중 — 사용자 확인용 fullscreen overlay -->
