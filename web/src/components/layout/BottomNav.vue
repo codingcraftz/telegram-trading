@@ -10,6 +10,14 @@ import { useOrdersStore } from '@/stores/orders';
 const route = useRoute();
 const ordersStore = useOrdersStore();
 
+// 활성 탭 재클릭 시 navigation 막기 — 같은 path 라도 query 가 reset 되면서
+// Trade.vue 의 tab ref 가 'order' default 로 강제 변경 → 일시 빈 화면 발생.
+function onTabClick(e: MouseEvent, item: typeof items[number]) {
+  if (item.match.includes(activeName.value)) {
+    e.preventDefault();
+  }
+}
+
 const items = [
   { key: 'home', to: '/', label: '홈', icon: Home, match: ['home'] },
   { key: 'watchlist', to: '/stocks', label: '관심', icon: Star, match: ['stocks'] },
@@ -40,6 +48,7 @@ onUnmounted(() => ordersStore.unsubscribe());
               ? 'text-foreground font-semibold'
               : 'text-muted-foreground/80 hover:text-foreground'
           "
+          @click="onTabClick($event, item)"
         >
           <div class="relative">
             <component
