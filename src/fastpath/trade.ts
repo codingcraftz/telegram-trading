@@ -23,47 +23,7 @@ import { getConfig } from '../config.js';
 import { cached, invalidate as invalidateCache } from './cache.js';
 import { getMode } from '../runtime.js';
 import { fetchTopAskPrice } from './price.js';
-import { listChatPendingIntents } from '../db/repo.js';
-import { fetchPendingOrders } from './pending.js';
-import { getDb } from '../db/client.js';
-import { strategyApplications } from '../db/schema.js';
-import { and, eq } from 'drizzle-orm';
-
-// 대기 매수 금액 합계 — KIS 미체결 매수 + pendingIntents + morning_staged pending app.
-// percent 매수 cash 계산에서 raw cash 에서 빼야 over-buy 방지.
-async function fetchPendingBuyAmount(chatId: number): Promise<number> {
-  let total = 0;
-  try {
-    const k = await fetchPendingOrders();
-    if (k.ok) {
-      for (const it of k.items) {
-        const isBuy = String(it.side).includes('매수') || String(it.side) === '02';
-        if (isBuy) total += it.price * it.remaining;
-      }
-    }
-  } catch { /* ignore */ }
-  try {
-    for (const i of listChatPendingIntents(chatId)) {
-      try {
-        const spec = JSON.parse(i.orderSpecJson) as { action?: string; price?: number; quantity?: number };
-        if (spec.action === 'buy') total += (spec.price ?? 0) * (spec.quantity ?? 0);
-      } catch { /* ignore */ }
-    }
-  } catch { /* ignore */ }
-  try {
-    const apps = getDb()
-      .select({ runtimeJson: strategyApplications.runtimeJson, budgetAmount: strategyApplications.budgetAmount })
-      .from(strategyApplications)
-      .where(and(eq(strategyApplications.chatId, chatId), eq(strategyApplications.status, 'active')))
-      .all();
-    for (const a of apps) {
-      let phase = 'pending';
-      try { phase = JSON.parse(a.runtimeJson ?? '{}').phase ?? 'pending'; } catch { /* keep */ }
-      if (phase === 'pending' && a.budgetAmount && a.budgetAmount > 0) total += a.budgetAmount;
-    }
-  } catch { /* ignore */ }
-  return total;
-}
+import { fetchPendingBuyAmount } from './pending_cash.js';
 
 // ============================================================
 // 메인 메뉴
