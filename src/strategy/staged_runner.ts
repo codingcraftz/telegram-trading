@@ -345,6 +345,60 @@ async function fetchActualHoldingQty(code: string): Promise<number | null> {
 // 보호 — 단일 누락 응답으로 false positive 발생하지 않게. tick 5s × 5 = 25s
 // 동안 일관되게 종목 누락이 있어야 진짜 phantom 으로 판정.
 const PHANTOM_CONFIRM_THRESHOLD = 5;
+const PHANTOM_GRACE_MS = 60_000;
+
+// monitorStage1/monitorExit 공통 phantom 처리.
+// 반환값:
+//   true  → application 처리 종료 (skip 또는 completed). 호출자는 즉시 return.
+//   false → phantom 의심 없음. 호출자는 normal monitor 진행.
+async function handlePhantomCheck(
+  app: StrategyApplication,
+  strat: { id: string; name: string },
+  runtime: StagedRuntime,
+  now: number,
+): Promise<boolean> {
+  const s1 = runtime.stage1;
+  if (!s1) return false;
+  // stage1 이 외부 매수 (immediate 흐름) 인 경우만 검사. 봇이 직접 발주한 경우는
+  // pollFill 결과로 stage1.qty 가 정확.
+  if (s1.orderId !== 'external' && s1.positionId !== 'external') return false;
+
+  // grace baseline — stage2 체결됐으면 그 시점, 아니면 stage1 시점.
+  const baselineFilledAt = runtime.stage2?.filledAt ?? s1.filledAt ?? 0;
+  if (now - baselineFilledAt < PHANTOM_GRACE_MS) return false;
+
+  const actualQty = await fetchActualHoldingQty(app.stockCode);
+  if (actualQty === null) return false; // KIS 응답 누락/오류 → 검사 skip
+
+  if (actualQty < 1) {
+    const misses = (runtime.phantomMisses ?? 0) + 1;
+    if (misses < PHANTOM_CONFIRM_THRESHOLD) {
+      setApplicationRuntime(
+        app.id, app.chatId,
+        { ...runtime, phantomMisses: misses } satisfies StagedRuntime,
+      );
+      return true; // 아직 확정 안 함, 다음 tick 까지 대기
+    }
+    createExecution({
+      strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
+      stockCode: app.stockCode, action: 'sell', result: 'failure',
+      errorMessage: `phantom_holding: KIS 잔고에 ${app.stockCode} 보유 없음 (snapshot qty=${s1.qty}, ${PHANTOM_CONFIRM_THRESHOLD}회 연속 누락).`,
+      payload: { reason: 'phantom_holding', snapshotQty: s1.qty, actualQty, misses, phase: runtime.phase },
+    });
+    setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
+    updateApplicationStatus(app.id, app.chatId, 'completed');
+    return true;
+  }
+
+  // 정상 보유 — 카운터 리셋
+  if ((runtime.phantomMisses ?? 0) > 0) {
+    setApplicationRuntime(
+      app.id, app.chatId,
+      { ...runtime, phantomMisses: 0 } satisfies StagedRuntime,
+    );
+  }
+  return false;
+}
 
 // ====== 매도 발주 (시장가 단일 helper) ======
 // 시장가 매도는 99% 즉시 체결되므로 체결 폴링 생략, 발주 성공만 확인.
@@ -380,44 +434,8 @@ async function monitorStage1(
   if (!runtime.stage1) return;
   const s1 = runtime.stage1;
 
-  // phantom 검출 — 외부에서 들어온 stage1Snapshot(immediate 흐름) 이 실제 KIS
-  // 잔고와 불일치하면 application 정리. KIS 가 체결 즉시 inquire_balance 에
-  // 반영 안 하므로 filledAt 후 60초 grace period 안에는 검사 안 함.
-  // 또 KIS paper 응답 변동성 보호 — N회 연속 0 받았을 때만 진짜 phantom 확정.
-  if (s1.orderId === 'external' || s1.positionId === 'external') {
-    const elapsedMs = now - (s1.filledAt ?? 0);
-    if (elapsedMs >= 60_000) {
-      const actualQty = await fetchActualHoldingQty(app.stockCode);
-      if (actualQty !== null && actualQty < 1) {
-        const misses = (runtime.phantomMisses ?? 0) + 1;
-        if (misses < PHANTOM_CONFIRM_THRESHOLD) {
-          // 누적만 — 아직 확정 안 함. 다음 tick 에 다시 검사.
-          setApplicationRuntime(
-            app.id, app.chatId,
-            { ...runtime, phantomMisses: misses } satisfies StagedRuntime,
-          );
-          return;
-        }
-        // 임계치 도달 — 진짜 phantom 으로 확정.
-        createExecution({
-          strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
-          stockCode: app.stockCode, action: 'sell', result: 'failure',
-          errorMessage: `phantom_holding: KIS 잔고에 ${app.stockCode} 보유 없음 (snapshot qty=${s1.qty}, ${PHANTOM_CONFIRM_THRESHOLD}회 연속 누락). 매수가 미체결로 끝났을 가능성.`,
-          payload: { reason: 'phantom_holding', snapshotQty: s1.qty, actualQty, misses },
-        });
-        setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
-        updateApplicationStatus(app.id, app.chatId, 'completed');
-        return;
-      }
-      // 잔고 보임 (>=1) → 누적 카운터 리셋.
-      if ((runtime.phantomMisses ?? 0) > 0) {
-        setApplicationRuntime(
-          app.id, app.chatId,
-          { ...runtime, phantomMisses: 0 } satisfies StagedRuntime,
-        );
-      }
-    }
-  }
+  // phantom 검사 (immediate 외부 매수 흐름 보호용)
+  if (await handlePhantomCheck(app, strat, runtime, now)) return;
 
   const price = await fetchPrice(app.stockCode);
   if (!price) return;
@@ -593,6 +611,8 @@ async function monitorExit(
   now: number,
 ): Promise<void> {
   if (!runtime.stage1) return;
+  // phantom 검사 (stage2_filled/tp1_done 단계에서도 KIS 응답 누락 보호)
+  if (await handlePhantomCheck(app, strat, runtime, now)) return;
   const s1 = runtime.stage1;
   const s2 = runtime.stage2;
   const totalBoughtQty = s1.qty + (s2?.qty ?? 0);
