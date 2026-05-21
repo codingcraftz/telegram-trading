@@ -29,22 +29,8 @@ services:
       DASHBOARD_SESSION_SECRET: ${DASHBOARD_SESSION_SECRET:-}
     volumes:
       - ./data:/app/data
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
 
-  # 자동 업데이트 — 5분마다 GHCR 새 이미지 체크 → 발견 시 pull + bot 재시작.
-  watchtower:
-    image: containrrr/watchtower:latest
-    container_name: telegram-trading-watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    command:
-      - --label-enable
-      - --interval
-      - "300"
-      - --cleanup
-      - --include-restarting
+  # 업데이트는 self-update.sh sentinel cron 으로 처리 (대시보드 업데이트 버튼).
 
   # Caddy — sslip.io 도메인으로 자동 HTTPS, 봇 대시보드 reverse-proxy.
   caddy:
