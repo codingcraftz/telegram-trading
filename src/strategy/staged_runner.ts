@@ -10,7 +10,7 @@
 // 동시성: runner는 단일 worker 루프에서 직렬 호출되므로 락 불필요.
 
 import { callKisApi } from '../mcp/kis.js';
-import { firstOutput, num, outputList, parseMcpResult, checkKisOk } from '../fastpath/extract.js';
+import { firstOutput, num, outputDict, outputList, parseMcpResult, checkKisOk } from '../fastpath/extract.js';
 import { invalidate as invalidateCache } from '../fastpath/cache.js';
 import { placeBuyOrder, pollFill } from '../execution/order.js';
 import { placeOrder } from '../mcp/kis.js';
@@ -113,6 +113,7 @@ async function fetchPrice(code: string): Promise<{ current: number } | null> {
 }
 
 async function fetchOrderableCash(code: string, refPrice: number): Promise<number | null> {
+  // 1차: 종목+가격 기준 inquire_psbl_order. paper 모드에서는 종종 0/누락.
   try {
     const r = await callKisApi('domestic_stock', 'inquire_psbl_order', {
       pdno: code,
@@ -120,10 +121,20 @@ async function fetchOrderableCash(code: string, refPrice: number): Promise<numbe
       ord_dvsn: '00',
     });
     const parsed = parseMcpResult(r);
+    if (parsed.success) {
+      const o = firstOutput(parsed);
+      const cash = num(o?.ord_psbl_cash);
+      if (cash && cash > 0) return cash;
+    }
+  } catch { /* fall through to balance fallback */ }
+  // 2차 fallback: inquire_balance 의 가수도정산금액(prvs_rcdl_excc_amt) / 예수금총액.
+  // 종목 무관 잔고라 정확치 아니지만 cash=0 으로 silent fail 보단 발사 시도.
+  try {
+    const r = await callKisApi('domestic_stock', 'inquire_balance', {});
+    const parsed = parseMcpResult(r);
     if (!parsed.success) return null;
-    const o = firstOutput(parsed);
-    if (!o) return null;
-    const cash = num(o.ord_psbl_cash);
+    const summary = outputDict(parsed, 'output2');
+    const cash = num(summary?.prvs_rcdl_excc_amt) ?? num(summary?.dnca_tot_amt);
     return cash && cash > 0 ? cash : null;
   } catch {
     return null;
