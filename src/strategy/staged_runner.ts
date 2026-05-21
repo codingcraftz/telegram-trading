@@ -362,19 +362,24 @@ async function monitorStage1(
   const s1 = runtime.stage1;
 
   // phantom 검출 — 외부에서 들어온 stage1Snapshot(immediate 흐름) 이 실제 KIS
-  // 잔고와 불일치하면 application 정리. monitorStage1 진입마다 한 번씩 확인.
+  // 잔고와 불일치하면 application 정리. KIS 가 체결 즉시 inquire_balance 에
+  // 반영 안 하므로 filledAt 후 60초 grace period 안에는 검사 안 함
+  // (false positive 방지).
   if (s1.orderId === 'external' || s1.positionId === 'external') {
-    const actualQty = await fetchActualHoldingQty(app.stockCode);
-    if (actualQty !== null && actualQty < 1) {
-      createExecution({
-        strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
-        stockCode: app.stockCode, action: 'sell', result: 'failure',
-        errorMessage: `phantom_holding: KIS 잔고에 ${app.stockCode} 보유 없음 (snapshot qty=${s1.qty}). 매수가 미체결로 끝났을 가능성.`,
-        payload: { reason: 'phantom_holding', snapshotQty: s1.qty, actualQty },
-      });
-      setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
-      updateApplicationStatus(app.id, app.chatId, 'completed');
-      return;
+    const elapsedMs = now - (s1.filledAt ?? 0);
+    if (elapsedMs >= 60_000) {
+      const actualQty = await fetchActualHoldingQty(app.stockCode);
+      if (actualQty !== null && actualQty < 1) {
+        createExecution({
+          strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
+          stockCode: app.stockCode, action: 'sell', result: 'failure',
+          errorMessage: `phantom_holding: KIS 잔고에 ${app.stockCode} 보유 없음 (snapshot qty=${s1.qty}). 매수가 미체결로 끝났을 가능성.`,
+          payload: { reason: 'phantom_holding', snapshotQty: s1.qty, actualQty },
+        });
+        setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
+        updateApplicationStatus(app.id, app.chatId, 'completed');
+        return;
+      }
     }
   }
 
