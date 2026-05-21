@@ -20,9 +20,50 @@ import { resolveSymbol, type ResolvedSymbol } from './symbol.js';
 import { formatKst, getMarketSession, nextMarketOpen, sessionLabel } from '../scheduler/calendar.js';
 import type { OrderType } from '../mcp/kis.js';
 import { getConfig } from '../config.js';
-import { cached } from './cache.js';
+import { cached, invalidate as invalidateCache } from './cache.js';
 import { getMode } from '../runtime.js';
 import { fetchTopAskPrice } from './price.js';
+import { listChatPendingIntents } from '../db/repo.js';
+import { fetchPendingOrders } from './pending.js';
+import { getDb } from '../db/client.js';
+import { strategyApplications } from '../db/schema.js';
+import { and, eq } from 'drizzle-orm';
+
+// 대기 매수 금액 합계 — KIS 미체결 매수 + pendingIntents + morning_staged pending app.
+// percent 매수 cash 계산에서 raw cash 에서 빼야 over-buy 방지.
+async function fetchPendingBuyAmount(chatId: number): Promise<number> {
+  let total = 0;
+  try {
+    const k = await fetchPendingOrders();
+    if (k.ok) {
+      for (const it of k.items) {
+        const isBuy = String(it.side).includes('매수') || String(it.side) === '02';
+        if (isBuy) total += it.price * it.remaining;
+      }
+    }
+  } catch { /* ignore */ }
+  try {
+    for (const i of listChatPendingIntents(chatId)) {
+      try {
+        const spec = JSON.parse(i.orderSpecJson) as { action?: string; price?: number; quantity?: number };
+        if (spec.action === 'buy') total += (spec.price ?? 0) * (spec.quantity ?? 0);
+      } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+  try {
+    const apps = getDb()
+      .select({ runtimeJson: strategyApplications.runtimeJson, budgetAmount: strategyApplications.budgetAmount })
+      .from(strategyApplications)
+      .where(and(eq(strategyApplications.chatId, chatId), eq(strategyApplications.status, 'active')))
+      .all();
+    for (const a of apps) {
+      let phase = 'pending';
+      try { phase = JSON.parse(a.runtimeJson ?? '{}').phase ?? 'pending'; } catch { /* keep */ }
+      if (phase === 'pending' && a.budgetAmount && a.budgetAmount > 0) total += a.budgetAmount;
+    }
+  } catch { /* ignore */ }
+  return total;
+}
 
 // ============================================================
 // 메인 메뉴
@@ -468,13 +509,17 @@ export async function buildBuyNowConfirmAndRegister(args: {
   } else {
     // percent 모드만 매수가능금액 필요
     const cashResult = await fetchOrderableCash(args.code, curPrice);
-    const cash = cashResult.cash ?? 0;
+    const rawCash = cashResult.cash ?? 0;
+    // KIS dnca_tot_amt 는 대기 매수 주문 금액을 즉시 차감하지 않음. 사용자가 짧은
+    // 시간에 percent 매수를 연속 시도하면 over-buy 발생. raw cash 에서 대기 매수
+    // 합계를 추가 차감해서 진짜 사용 가능한 cash 로 계산.
+    const reserved = await fetchPendingBuyAmount(args.chatId);
+    const cash = Math.max(0, rawCash - reserved);
     if (cash <= 0) {
       return {
         error:
-          '💵 매수가능금액 조회 실패. [✏️ 직접 입력]으로 진행하세요.\n' +
-          `<code>진단: ${cashResult.diag}</code>\n` +
-          '예: <code>10주</code> · <code>50만원</code> · <code>500000원</code> · <code>20%</code>',
+          '💵 매수가능금액 부족 (대기 매수 차감 후 0). 대기 주문을 정리하거나 [✏️ 직접 입력]으로 진행하세요.\n' +
+          `<code>raw=${rawCash.toLocaleString()} reserved=${reserved.toLocaleString()} ${cashResult.diag}</code>`,
       };
     }
     const budget = (cash * args.amount.value) / 100;

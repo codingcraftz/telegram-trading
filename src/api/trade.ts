@@ -197,6 +197,7 @@ async function executeConfirm(
       invalidateCache('balance:raw');
       invalidateCache('pending:raw');
       invalidateCache('filled:'); // 모든 days 키 무효화 (prefix)
+      invalidateCache('psbl:'); // percent 매수 캐시도 무효화 — 연속 매수 stale 방지
       return {
         ok: true,
         message: `📨 매수 주문 접수 #${orderId}`,
