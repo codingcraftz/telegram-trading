@@ -71,8 +71,14 @@ async function doCancel() {
       toast.info(r.message || '예약을 취소했어요');
       emit('success');
     } else {
-      toast.info('전략 발동 대기 취소는 곧 지원됩니다');
-      emit('close');
+      // strategy 전략 발동 대기 — application 삭제 (서버가 status='canceled' 처리)
+      if (!props.order.strategyId || !props.order.applicationId) {
+        toast.error('전략 식별 정보가 없어요');
+        return;
+      }
+      const r = await api.removeApplication(props.order.strategyId, props.order.applicationId);
+      if (r.ok) { toast.success('전략 발동 대기가 취소됐어요'); emit('success'); }
+      else { toast.error('취소 실패'); confirmStage.value = false; }
     }
   } catch (err) {
     toast.error((err as Error).message);
