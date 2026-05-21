@@ -314,10 +314,13 @@ function isPhantomHoldingError(err: string): boolean {
   return /잔고.*없|보유.*없|미보유|hldg.*qty.*0|매도.*가능.*수량.*없/i.test(err);
 }
 
-// 종목 보유 수량을 KIS inquire_balance 로 직접 확인 — phantom 검출용.
+// 종목 보유 수량을 KIS inquire_balance 로 확인 — phantom 검출용.
 // balance.ts 와 동일한 'balance:raw' 캐시(60s) 활용 — warmup worker 가 30s
-// 마다 갱신해 정상 응답을 보존. fetchActualHoldingQty 가 매 tick 직접 KIS
-// 호출하면 KIS paper 의 변동성(누락/페이징) 노출돼 false positive 가능.
+// 마다 갱신.
+// 반환값:
+//   null  → 검사 불가 (KIS 응답 누락/페이지 없음 등). phantom 검사 skip.
+//   0     → 응답 list 에 종목이 있어야 정상이지만 빠짐. 진짜 미보유 후보.
+//   N>=1  → 정상 보유.
 async function fetchActualHoldingQty(code: string): Promise<number | null> {
   try {
     const r = await cached('balance:raw', 60_000, () =>
@@ -326,6 +329,10 @@ async function fetchActualHoldingQty(code: string): Promise<number | null> {
     const parsed = parseMcpResult(r);
     if (!parsed.success) return null;
     const list = outputList(parsed, 'output1');
+    // KIS paper 가 종종 output1 을 빈 list 로 답함. 이 경우는 KIS 응답 이상으로
+    // 보고 검사 skip (null). 사용자가 실제로 보유 0건이면 application 자체가
+    // 안 만들어졌을 것이므로 빈 list 는 거의 항상 KIS 측 일시 누락.
+    if (list.length === 0) return null;
     const hit = list.find((it) => String(it.pdno ?? '') === code);
     if (!hit) return 0;
     return num(hit.hldg_qty) ?? 0;
@@ -335,8 +342,9 @@ async function fetchActualHoldingQty(code: string): Promise<number | null> {
 }
 
 // phantom 으로 확정 마킹하기 전 필요한 연속 0 응답 횟수. KIS 응답 변동성
-// 보호 — 단일 누락 응답으로 false positive 발생하지 않게.
-const PHANTOM_CONFIRM_THRESHOLD = 3;
+// 보호 — 단일 누락 응답으로 false positive 발생하지 않게. tick 5s × 5 = 25s
+// 동안 일관되게 종목 누락이 있어야 진짜 phantom 으로 판정.
+const PHANTOM_CONFIRM_THRESHOLD = 5;
 
 // ====== 매도 발주 (시장가 단일 helper) ======
 // 시장가 매도는 99% 즉시 체결되므로 체결 폴링 생략, 발주 성공만 확인.
