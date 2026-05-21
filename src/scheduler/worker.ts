@@ -282,11 +282,33 @@ async function tick() {
 
 // tick 마다 reservation 처리 후 추가로 strategy_applications 평가.
 // runner 가 실패해도 reservation 흐름은 영향 없음.
+// MUTEX: 이전 tick 이 끝나기 전(KIS API 지연 등) 다음 tick 이 시작하면
+// 같은 application 의 fireStage1 가 동시 진입해 매수 중복 발주가 가능.
+// 한 번에 하나만 실행되도록 in-flight flag 로 락.
+let _strategyTickInFlight = false;
 async function tickStrategies() {
+  if (_strategyTickInFlight) return;
+  _strategyTickInFlight = true;
   try {
     await evaluateAndFireStrategies();
   } catch (err) {
     console.error('[scheduler] strategy runner error', err);
+  } finally {
+    _strategyTickInFlight = false;
+  }
+}
+
+// reservation tick 도 동일 락 적용.
+let _reservationTickInFlight = false;
+async function tickReservationsLocked() {
+  if (_reservationTickInFlight) return;
+  _reservationTickInFlight = true;
+  try {
+    await tick();
+  } catch (err) {
+    console.error('[scheduler] reservation tick failed', err);
+  } finally {
+    _reservationTickInFlight = false;
   }
 }
 
@@ -295,8 +317,8 @@ export function startScheduler() {
   _running = true;
   console.log('[scheduler] starting polling every', INTERVAL_MS / 1000, 's');
   _timer = setInterval(() => {
-    tick().catch((err) => console.error('[scheduler] tick failed', err));
-    tickStrategies().catch((err) => console.error('[scheduler] strategy tick failed', err));
+    tickReservationsLocked();
+    tickStrategies();
   }, INTERVAL_MS);
 }
 
