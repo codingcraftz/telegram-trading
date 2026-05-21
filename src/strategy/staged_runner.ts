@@ -11,7 +11,7 @@
 
 import { callKisApi } from '../mcp/kis.js';
 import { firstOutput, num, outputDict, outputList, parseMcpResult, checkKisOk } from '../fastpath/extract.js';
-import { invalidate as invalidateCache } from '../fastpath/cache.js';
+import { cached, invalidate as invalidateCache } from '../fastpath/cache.js';
 import { placeBuyOrder, pollFill } from '../execution/order.js';
 import { placeOrder } from '../mcp/kis.js';
 import { notify } from '../notify/telegram.js';
@@ -46,6 +46,8 @@ export type StagedRuntime = {
   stage2?: { qty: number; avgPrice: number; orderId: string; positionId: string; filledAt: number };
   /** TP1 부분 매도 정보 */
   tp1Sell?: { qty: number; orderId: string; soldAt: number };
+  /** phantom holding 검사에서 KIS 가 0 답한 연속 횟수. N회 누적 시 진짜 phantom. */
+  phantomMisses?: number;
 };
 
 function parseRuntime(json: string | null): StagedRuntime {
@@ -313,9 +315,14 @@ function isPhantomHoldingError(err: string): boolean {
 }
 
 // 종목 보유 수량을 KIS inquire_balance 로 직접 확인 — phantom 검출용.
+// balance.ts 와 동일한 'balance:raw' 캐시(60s) 활용 — warmup worker 가 30s
+// 마다 갱신해 정상 응답을 보존. fetchActualHoldingQty 가 매 tick 직접 KIS
+// 호출하면 KIS paper 의 변동성(누락/페이징) 노출돼 false positive 가능.
 async function fetchActualHoldingQty(code: string): Promise<number | null> {
   try {
-    const r = await callKisApi('domestic_stock', 'inquire_balance', {});
+    const r = await cached('balance:raw', 60_000, () =>
+      callKisApi('domestic_stock', 'inquire_balance', {}),
+    );
     const parsed = parseMcpResult(r);
     if (!parsed.success) return null;
     const list = outputList(parsed, 'output1');
@@ -326,6 +333,10 @@ async function fetchActualHoldingQty(code: string): Promise<number | null> {
     return null;
   }
 }
+
+// phantom 으로 확정 마킹하기 전 필요한 연속 0 응답 횟수. KIS 응답 변동성
+// 보호 — 단일 누락 응답으로 false positive 발생하지 않게.
+const PHANTOM_CONFIRM_THRESHOLD = 3;
 
 // ====== 매도 발주 (시장가 단일 helper) ======
 // 시장가 매도는 99% 즉시 체결되므로 체결 폴링 생략, 발주 성공만 확인.
@@ -363,22 +374,39 @@ async function monitorStage1(
 
   // phantom 검출 — 외부에서 들어온 stage1Snapshot(immediate 흐름) 이 실제 KIS
   // 잔고와 불일치하면 application 정리. KIS 가 체결 즉시 inquire_balance 에
-  // 반영 안 하므로 filledAt 후 60초 grace period 안에는 검사 안 함
-  // (false positive 방지).
+  // 반영 안 하므로 filledAt 후 60초 grace period 안에는 검사 안 함.
+  // 또 KIS paper 응답 변동성 보호 — N회 연속 0 받았을 때만 진짜 phantom 확정.
   if (s1.orderId === 'external' || s1.positionId === 'external') {
     const elapsedMs = now - (s1.filledAt ?? 0);
     if (elapsedMs >= 60_000) {
       const actualQty = await fetchActualHoldingQty(app.stockCode);
       if (actualQty !== null && actualQty < 1) {
+        const misses = (runtime.phantomMisses ?? 0) + 1;
+        if (misses < PHANTOM_CONFIRM_THRESHOLD) {
+          // 누적만 — 아직 확정 안 함. 다음 tick 에 다시 검사.
+          setApplicationRuntime(
+            app.id, app.chatId,
+            { ...runtime, phantomMisses: misses } satisfies StagedRuntime,
+          );
+          return;
+        }
+        // 임계치 도달 — 진짜 phantom 으로 확정.
         createExecution({
           strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
           stockCode: app.stockCode, action: 'sell', result: 'failure',
-          errorMessage: `phantom_holding: KIS 잔고에 ${app.stockCode} 보유 없음 (snapshot qty=${s1.qty}). 매수가 미체결로 끝났을 가능성.`,
-          payload: { reason: 'phantom_holding', snapshotQty: s1.qty, actualQty },
+          errorMessage: `phantom_holding: KIS 잔고에 ${app.stockCode} 보유 없음 (snapshot qty=${s1.qty}, ${PHANTOM_CONFIRM_THRESHOLD}회 연속 누락). 매수가 미체결로 끝났을 가능성.`,
+          payload: { reason: 'phantom_holding', snapshotQty: s1.qty, actualQty, misses },
         });
         setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
         updateApplicationStatus(app.id, app.chatId, 'completed');
         return;
+      }
+      // 잔고 보임 (>=1) → 누적 카운터 리셋.
+      if ((runtime.phantomMisses ?? 0) > 0) {
+        setApplicationRuntime(
+          app.id, app.chatId,
+          { ...runtime, phantomMisses: 0 } satisfies StagedRuntime,
+        );
       }
     }
   }
@@ -645,7 +673,21 @@ async function monitorExit(
     if (cur >= avg * (1 + tp1.atPct / 100)) {
       const sellQty = Math.max(1, Math.floor((remaining * tp1.sellPct) / 100));
       const r = await placeMarketSell(app.stockCode, sellQty);
-      if (!r.ok) { console.warn('[staged] TP1 (post-stage2) sell fail', r.error); return; }
+      if (!r.ok) {
+        if (isPhantomHoldingError(r.error)) {
+          createExecution({
+            strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
+            stockCode: app.stockCode, action: 'sell', result: 'failure',
+            errorMessage: `phantom_holding (TP1 post-stage2): ${r.error}`,
+            payload: { reason: 'phantom_holding_on_sell', stage: 'TP1_post_stage2' },
+          });
+          setApplicationRuntime(app.id, app.chatId, { ...runtime, phase: 'completed' } satisfies StagedRuntime);
+          updateApplicationStatus(app.id, app.chatId, 'completed');
+          return;
+        }
+        console.warn('[staged] TP1 (post-stage2) sell fail', r.error);
+        return;
+      }
       createExecution({
         strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
         stockCode: app.stockCode, action: 'sell', result: 'success',
