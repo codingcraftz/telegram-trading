@@ -80,6 +80,17 @@ function kstHMS(ts: number): { h: number; m: number; s: number } {
 
 function inMorningWindow(ts: number): boolean {
   const t = kstHMS(ts);
+  // QA/리허설 용 — STAGED_WINDOW_OVERRIDE=HH:MM 설정 시 그 시각 ±30초 사용.
+  // 평소엔 09:00:00 ~ 09:00:30 (정규 시가 윈도우).
+  const override = process.env.STAGED_WINDOW_OVERRIDE;
+  if (override) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(override.trim());
+    if (m) {
+      const oh = Number(m[1]);
+      const om = Number(m[2]);
+      return t.h === oh && t.m === om && t.s <= 30;
+    }
+  }
   return t.h === 9 && t.m === 0 && t.s <= 30;
 }
 
