@@ -303,7 +303,8 @@ function parseTickPayload(payload: string): TickSnapshot | null {
   const sign = f[3] ?? '3'; // 1:상한 2:상승 3:보합 4:하한 5:하락
   const absChange = Number(f[4]) || 0;
   const change = sign === '4' || sign === '5' ? -absChange : absChange;
-  const changePct = Number(f[5]) || 0;
+  const absRate = Number(f[5]) || 0;
+  const changePct = sign === '4' || sign === '5' ? -absRate : absRate;
   const volume = Number(f[12]) || 0;
   const cumVolume = Number(f[13]) || 0;
   return { code, price, change, changePct, volume, cumVolume, ts: Date.now() };

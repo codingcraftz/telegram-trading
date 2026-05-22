@@ -213,11 +213,10 @@ async function onEditSuccess() { editOpen.value = false; await store.refresh(); 
 
 onMounted(() => {
   store.subscribe(4000);
-  if (seg.value === 'filled' && !filledLoaded.value) loadFilled(filledDays.value);
+  // 체결 데이터를 미리 로드 — 탭 전환 시 즉시 표시되도록.
+  if (!filledLoaded.value) loadFilled(filledDays.value);
 });
 onUnmounted(() => store.unsubscribe());
-
-watch(seg, (v) => { if (v === 'filled' && !filledLoaded.value) loadFilled(filledDays.value); });
 </script>
 
 <template>

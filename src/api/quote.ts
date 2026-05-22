@@ -30,6 +30,11 @@ export async function handleQuote(c: Context) {
   const sign = String(d.prdy_vrss_sign ?? '3');
   const signLabel =
     sign === '1' || sign === '2' ? '▲' : sign === '4' || sign === '5' ? '▼' : '–';
+  // KIS prdy_vrss 는 절대값 — 부호는 prdy_vrss_sign 으로 판단.
+  const absChange = num(d.prdy_vrss) ?? 0;
+  const change = sign === '4' || sign === '5' ? -absChange : absChange;
+  const absRate = num(d.prdy_ctrt) ?? 0;
+  const changeRate = sign === '4' || sign === '5' ? -absRate : absRate;
 
   return c.json({
     code,
@@ -39,8 +44,8 @@ export async function handleQuote(c: Context) {
     open: num(d.stck_oprc) ?? 0,
     high: num(d.stck_hgpr) ?? 0,
     low: num(d.stck_lwpr) ?? 0,
-    change: num(d.prdy_vrss) ?? 0,
-    changeRate: num(d.prdy_ctrt) ?? 0,
+    change,
+    changeRate,
     signLabel,
     volume: num(d.acml_vol) ?? 0,
     tradeAmount: num(d.acml_tr_pbmn) ?? 0,
