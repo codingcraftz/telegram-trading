@@ -34,14 +34,12 @@ const props = withDefaults(
     entry?: number | null;
     stopLoss?: number | null;
     takeProfit?: number | null;
-    /** 처음 보이는 바 개수 (이후엔 pinch zoom으로 조절) */
     visibleBars?: number | null;
-    /** 이동평균선 기간 list — 예: [5, 20, 60, 120]. KIS 차트와 동일 색상 매핑. */
     movingAverages?: number[];
-    /** true 면 거래량을 별도 chart 인스턴스로 분리해서 차트 아래에 표시. 시간축 sync. */
     splitVolume?: boolean;
-    /** 분리 모드에서 거래량 패널 높이 (px) */
     volumeHeight?: number;
+    /** 분봉 모드 — 시간축에 시각 표시 + 크로스헤어 날짜/시간 */
+    isMinute?: boolean;
   }>(),
   {
     height: 360,
@@ -53,6 +51,7 @@ const props = withDefaults(
     movingAverages: () => [],
     splitVolume: false,
     volumeHeight: 80,
+    isMinute: false,
   },
 );
 
@@ -90,6 +89,9 @@ function smaSeries(candles: TradeCandle[], period: number): LineData[] {
 
 const containerRef = ref<HTMLDivElement | null>(null);
 const volumeContainerRef = ref<HTMLDivElement | null>(null);
+const tooltipData = ref<{
+  label: string; open: number; high: number; low: number; close: number; volume: number; up: boolean;
+} | null>(null);
 let chart: IChartApi | null = null;
 let volChart: IChartApi | null = null;
 let candleSeries: ISeriesApi<'Candlestick'> | null = null;
@@ -137,13 +139,12 @@ function buildChart() {
     timeScale: {
       borderColor: t.border,
       borderVisible: false,
-      timeVisible: false,
+      timeVisible: props.isMinute,
       secondsVisible: false,
       rightOffset: 4,
       barSpacing: 8,
       fixLeftEdge: false,
       fixRightEdge: false,
-      // split 모드의 가격 차트엔 timeAxis 숨김 (거래량 차트가 표시)
       visible: !isSplit,
     },
     crosshair: {
@@ -193,7 +194,7 @@ function buildChart() {
         timeScale: {
           borderColor: t.border,
           borderVisible: false,
-          timeVisible: false,
+          timeVisible: props.isMinute,
           secondsVisible: false,
           rightOffset: 4,
           barSpacing: 8,
@@ -233,6 +234,36 @@ function buildChart() {
       scaleMargins: props.showVolume ? { top: 0.82, bottom: 0 } : { top: 1, bottom: 0 },
     });
   }
+
+  // 크로스헤어 OHLCV 툴팁
+  chart.subscribeCrosshairMove((param) => {
+    if (!param.time || !candleSeries) {
+      tooltipData.value = null;
+      return;
+    }
+    const cd = param.seriesData.get(candleSeries) as CandlestickData | undefined;
+    if (!cd) { tooltipData.value = null; return; }
+    const ts = (param.time as number) * 1000;
+    const kst = new Date(ts + 9 * 3600 * 1000);
+    const mm = String(kst.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(kst.getUTCDate()).padStart(2, '0');
+    let label = `${mm}/${dd}`;
+    if (props.isMinute) {
+      const hh = String(kst.getUTCHours()).padStart(2, '0');
+      const mn = String(kst.getUTCMinutes()).padStart(2, '0');
+      label += ` ${hh}:${mn}`;
+    }
+    const vol = volumeSeries ? (param.seriesData.get(volumeSeries) as HistogramData | undefined)?.value : undefined;
+    tooltipData.value = {
+      label,
+      open: cd.open,
+      high: cd.high,
+      low: cd.low,
+      close: cd.close,
+      volume: vol ?? 0,
+      up: cd.close >= cd.open,
+    };
+  });
 
   ro = new ResizeObserver((entries) => {
     for (const e of entries) {
@@ -361,7 +392,23 @@ watch(() => props.showVolume, (sv) => {
 </script>
 
 <template>
-  <div>
+  <div class="relative">
+    <!-- OHLCV 크로스헤어 툴팁 -->
+    <div
+      v-if="tooltipData"
+      class="pointer-events-none absolute left-1.5 top-1 z-10 flex items-center gap-2 text-[10px] font-semibold tabular-nums leading-tight"
+    >
+      <span class="text-muted-foreground">{{ tooltipData.label }}</span>
+      <span :class="tooltipData.up ? 'text-up' : 'text-down'">
+        O {{ tooltipData.open.toLocaleString() }}
+        H {{ tooltipData.high.toLocaleString() }}
+        L {{ tooltipData.low.toLocaleString() }}
+        C {{ tooltipData.close.toLocaleString() }}
+      </span>
+      <span v-if="tooltipData.volume" class="text-muted-foreground">
+        V {{ tooltipData.volume >= 1_000_000 ? (tooltipData.volume / 1_000_000).toFixed(1) + 'M' : tooltipData.volume >= 1_000 ? (tooltipData.volume / 1_000).toFixed(0) + 'K' : tooltipData.volume.toLocaleString() }}
+      </span>
+    </div>
     <div ref="containerRef" class="w-full select-none overflow-hidden rounded-t-lg" :style="{ height: `${height}px` }" />
     <div
       v-if="splitVolume && showVolume"

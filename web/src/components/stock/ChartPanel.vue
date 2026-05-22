@@ -156,6 +156,7 @@ onMounted(load);
       :volume-height="80"
       :visible-bars="visibleBars"
       :moving-averages="MA_PERIODS"
+      :is-minute="bucket === 'min'"
     />
   </Card>
 </template>
