@@ -331,7 +331,8 @@ async function confirmAndSubmit() {
         toast.error(r.result?.message || '매도 거절');
       }
     }
-    await loadBalance();
+    // 잔고 갱신은 백그라운드 — 발주 모달 즉시 닫기 우선
+    loadBalance();
   } catch (err) {
     toast.error((err as Error).message);
   } finally { submitting.value = false; }

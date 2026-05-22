@@ -21,11 +21,14 @@ import {
   buildSellConfirmAndRegister,
   type BuyAmountSpec,
 } from '../fastpath/trade.js';
-import { cancelKrxOrder, placeOrder, type Market } from '../mcp/kis.js';
+import { cancelKrxOrder, placeOrder, type Market, type OrderType } from '../mcp/kis.js';
 import { placeBuyOrder, pollFill } from '../execution/order.js';
 import { invalidate as invalidateCache } from '../fastpath/cache.js';
 import { checkKisOk, parseMcpResult } from '../fastpath/extract.js';
-import { fetchQuickQuote } from '../fastpath/price.js';
+import { fetchQuickQuote, fetchTopAskPrice } from '../fastpath/price.js';
+import { getMarketSession, sessionLabel } from '../scheduler/calendar.js';
+import { getMode } from '../runtime.js';
+import { resolveSymbol } from '../fastpath/symbol.js';
 import { getDefaultChatId } from './_auth.js';
 
 type BuyBody = {
@@ -81,6 +84,18 @@ export async function handleTradeBuy(c: Context) {
   }
 
   // 즉시매수
+  const limitPrice = typeof body.limitPrice === 'number' && body.limitPrice > 0 ? body.limitPrice : undefined;
+
+  // ⚡ fast path: execute + shares 모드 → intent/시세조회 skip, 바로 발주
+  if (body.execute && amount.mode === 'shares' && amount.value > 0) {
+    const result = await executeBuyDirect(chatId, code, Math.floor(amount.value), {
+      tp: body.tp ?? null,
+      sl: body.sl ?? null,
+      limitPrice,
+    });
+    return c.json({ kind: 'direct', executed: true, result });
+  }
+
   const tp = body.tp === null ? 'off' : body.tp !== undefined ? String(body.tp) : 'off';
   const sl = body.sl === null ? 'off' : body.sl !== undefined ? String(body.sl) : 'off';
   const r = await buildBuyNowConfirmAndRegister({
@@ -89,11 +104,10 @@ export async function handleTradeBuy(c: Context) {
     tp,
     sl,
     amount: amount as BuyAmountSpec,
-    limitPrice: typeof body.limitPrice === 'number' && body.limitPrice > 0 ? body.limitPrice : undefined,
+    limitPrice,
   });
   if ('error' in r) return c.json({ error: r.error }, 400);
 
-  // execute 옵션: intent 등록 + 즉시 발주 한 번에 (1 round-trip)
   if (body.execute) {
     const result = await executeConfirm(chatId, r.intentId);
     return c.json({
@@ -127,6 +141,12 @@ export async function handleTradeSell(c: Context) {
   const qtyMode = body.qtyMode ?? 'all';
   if (!code || !/^\d{6}$/.test(code)) return c.json({ error: 'invalid code' }, 400);
 
+  // ⚡ fast path: execute + shares 모드 → intent 생략, 바로 발주
+  if (body.execute && qtyMode === 'shares' && body.qtyValue && body.qtyValue > 0) {
+    const result = await executeSellDirect(chatId, code, Math.floor(body.qtyValue));
+    return c.json({ kind: 'direct', executed: true, result });
+  }
+
   const r = await buildSellConfirmAndRegister({
     chatId,
     code,
@@ -145,6 +165,136 @@ export async function handleTradeSell(c: Context) {
     });
   }
   return c.json({ kind: 'pending_intent', id: r.intentId, text: r.text });
+}
+
+// ⚡ 즉시 발주 fast path — intent/시세조회 생략. shares 모드 + execute:true 전용.
+// KIS API 1회(발주)만 호출. paper 모드면 ask1 가격으로 limit 변환(캐시 hit 시 0ms).
+async function executeBuyDirect(
+  chatId: number,
+  code: string,
+  qty: number,
+  opts: { tp: number | null; sl: number | null; limitPrice?: number },
+): Promise<{ ok: boolean; message: string; positionId?: string; orderId?: string }> {
+  const session = getMarketSession();
+  if (session === 'closed' || session === 'holiday') {
+    return { ok: false, message: '🔴 장 외/휴장 시간 — 즉시매수 불가' };
+  }
+
+  const sym = await resolveSymbol(code);
+  const name = sym?.name ?? code;
+
+  let orderType: OrderType = 'market';
+  let price: number | undefined = undefined;
+
+  if (session === 'pre_extended') orderType = 'pre_extended';
+  else if (session === 'post_extended') orderType = 'post_extended';
+  else if (session === 'after_single') {
+    orderType = 'after_single';
+    const q = await fetchQuickQuote(code);
+    price = q?.price;
+  }
+
+  if (opts.limitPrice && opts.limitPrice > 0 && session === 'regular') {
+    orderType = 'limit';
+    price = opts.limitPrice;
+  }
+
+  if (orderType === 'market' && session === 'regular' && getMode() === 'paper') {
+    const ask1 = await fetchTopAskPrice(code);
+    if (ask1 && ask1 > 0) {
+      orderType = 'limit';
+      price = ask1;
+    }
+  }
+
+  const spec: OrderSpec = {
+    action: 'buy',
+    market: 'KRX',
+    symbol_code: code,
+    symbol_name: name,
+    order_type: orderType,
+    price,
+    quantity: qty,
+    tp_pct: opts.tp,
+    sl_pct: opts.sl,
+  };
+
+  try {
+    const { positionId, orderId } = await placeBuyOrder({ chatId, spec });
+    pollFill({
+      chatId,
+      positionId,
+      market: 'KRX',
+      orderId,
+      expectedQty: qty,
+      tpPct: opts.tp,
+      slPct: opts.sl,
+    }).catch((err) => console.error('[pollFill]', err));
+    invalidateCache('holdings');
+    invalidateCache('balance:raw');
+    invalidateCache('pending:raw');
+    invalidateCache('filled:');
+    return { ok: true, message: `📨 매수 주문 접수 #${orderId}`, positionId, orderId };
+  } catch (err) {
+    logTrade({ chatId, kind: 'order_error', payload: { error: (err as Error).message } });
+    return { ok: false, message: `❌ 매수 실패: ${(err as Error).message}` };
+  }
+}
+
+// ⚡ 즉시 매도 fast path
+async function executeSellDirect(
+  chatId: number,
+  code: string,
+  qty: number,
+): Promise<{ ok: boolean; message: string; orderId?: string }> {
+  const session = getMarketSession();
+  if (session === 'closed' || session === 'holiday') {
+    return { ok: false, message: '🔴 장 외/휴장 시간 — 즉시매도 불가' };
+  }
+
+  const sym = await resolveSymbol(code);
+  const name = sym?.name ?? code;
+
+  let orderType: OrderType = 'market';
+  let price: number | undefined = undefined;
+
+  if (session === 'pre_extended') orderType = 'pre_extended';
+  else if (session === 'post_extended') orderType = 'post_extended';
+  else if (session === 'after_single') {
+    orderType = 'after_single';
+    const q = await fetchQuickQuote(code);
+    price = q?.price;
+  }
+
+  try {
+    let result = await placeOrder({ market: 'KRX', side: 'sell', code, quantity: qty, orderType, price });
+    let parsed = parseMcpResult(result);
+    let kisOk = checkKisOk(parsed);
+
+    if (!kisOk.ok && orderType === 'market') {
+      const q = await fetchQuickQuote(code);
+      if (q?.price && q.price > 0) {
+        result = await placeOrder({ market: 'KRX', side: 'sell', code, quantity: qty, orderType: 'limit', price: q.price });
+        parsed = parseMcpResult(result);
+        kisOk = checkKisOk(parsed);
+      }
+    }
+
+    if (!kisOk.ok) {
+      return { ok: false, message: kisOk.message ?? '매도 거절' };
+    }
+
+    const raw = parsed.raw as Record<string, unknown>;
+    const out = raw?.output as Record<string, unknown> | undefined;
+    const orderId = String(out?.ODNO ?? out?.odno ?? `sell-${Date.now()}`);
+    logTrade({ chatId, kind: 'sell_submitted', payload: { orderId, code, name, qty } });
+    invalidateCache('holdings');
+    invalidateCache('balance:raw');
+    return { ok: true, message: `📤 매도 주문 접수 #${orderId}`, orderId };
+  } catch (err) {
+    logTrade({ chatId, kind: 'order_error', payload: { error: (err as Error).message } });
+    return { ok: false, message: `❌ 매도 실패: ${(err as Error).message}` };
+  }
 }
 
 // 발주 핵심 로직 — handlers.ts의 runConfirm을 API용으로 추출.
