@@ -2,20 +2,21 @@
 // 하단 6탭 네비게이션 — 홈 / 관심 / 차트 / 주문 / 잔고 / 메뉴.
 // KIS MTS 스타일.
 
-import { RouterLink, useRoute } from 'vue-router';
+import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router';
 import { Home, Star, LineChart, ArrowLeftRight, Briefcase, Menu } from 'lucide-vue-next';
 import { computed, onMounted, onUnmounted } from 'vue';
 import { useOrdersStore } from '@/stores/orders';
 
 const route = useRoute();
+const router = useRouter();
 const ordersStore = useOrdersStore();
 
-// 활성 탭 재클릭 시 navigation 막기 — 같은 path 라도 query 가 reset 되면서
-// Trade.vue 의 tab ref 가 'order' default 로 강제 변경 → 일시 빈 화면 발생.
+// 활성 탭 재클릭 시 navigation 완전 차단.
+// RouterLink 의 preventDefault 가 Vue Router 4에서 불안정 → 프로그래밍 방식으로 전환.
 function onTabClick(e: MouseEvent, item: typeof items[number]) {
-  if (item.match.includes(activeName.value)) {
-    e.preventDefault();
-  }
+  e.preventDefault();
+  if (item.match.includes(activeName.value)) return;
+  router.push(item.to);
 }
 
 const items = [
@@ -40,8 +41,8 @@ onUnmounted(() => ordersStore.unsubscribe());
   >
     <ul class="grid grid-cols-6">
       <li v-for="item in items" :key="item.to">
-        <RouterLink
-          :to="item.to"
+        <a
+          href="#"
           class="relative flex flex-col items-center justify-center gap-0.5 py-2 text-[9.5px] tracking-tight transition-colors"
           :class="
             item.match.includes(activeName)
@@ -65,7 +66,7 @@ onUnmounted(() => ordersStore.unsubscribe());
             </span>
           </div>
           <span>{{ item.label }}</span>
-        </RouterLink>
+        </a>
       </li>
     </ul>
   </nav>

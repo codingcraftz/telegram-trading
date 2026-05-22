@@ -263,10 +263,20 @@ async function confirmApplyStrategy() {
       });
       toast.success(`'${s.name}' 매수 + 감시 시작`);
     } else {
-      // 시가매매 — applyStrategy 만. 다음 영업일 09:00 자동 발동.
+      // 시가매매 — applyStrategy + 수량 사전계산. 09:00에 API 호출 없이 즉시 발주.
+      const price = quote.value.price;
+      const budgetAmt = Math.floor(strategyBudget.value);
+      const stages = s.definition.entry.type === 'morning_staged' ? s.definition.entry.stages : [];
+      const s1Pct = stages[0]?.entryPct ?? 100;
+      const s2Pct = stages[1]?.entryPct ?? 0;
+      const precomputedQty = {
+        stage1: Math.floor((budgetAmt * s1Pct) / 100 / price),
+        ...(s2Pct > 0 ? { stage2: Math.floor((budgetAmt * s2Pct) / 100 / price) } : {}),
+      };
       await api.applyStrategy(s.id, {
         stockCode: code.value,
-        budgetAmount: Math.floor(strategyBudget.value),
+        budgetAmount: budgetAmt,
+        precomputedQty,
       });
       toast.success(`'${s.name}' 전략이 적용되었습니다`);
     }
@@ -278,8 +288,17 @@ async function confirmApplyStrategy() {
   } finally { strategyApplying.value = false; }
 }
 
-async function submit() {
+// 주문 확인 모달
+const confirmOpen = ref(false);
+function requestSubmit() {
   if (!canSubmit.value) return;
+  confirmOpen.value = true;
+}
+function cancelConfirm() {
+  confirmOpen.value = false;
+}
+async function confirmAndSubmit() {
+  confirmOpen.value = false;
   submitting.value = true;
   try {
     if (side.value === 'buy') {
@@ -574,7 +593,7 @@ onUnmounted(() => {
             'w-full rounded-lg py-2.5 text-sm font-bold text-white transition disabled:opacity-40',
             side === 'buy' ? 'bg-up' : 'bg-down',
           ]"
-          @click="submit"
+          @click="requestSubmit"
         >
           {{ submitting ? '발주 중…' : (side === 'buy' ? '매수 주문' : '매도 주문') }}
         </button>
@@ -650,6 +669,53 @@ onUnmounted(() => {
 
     </div>
     <!-- ↑ '주문' 탭 콘텐츠 끝 -->
+
+    <!-- 주문 확인 모달 -->
+    <Modal :open="confirmOpen" :title="side === 'buy' ? '매수 주문 확인' : '매도 주문 확인'">
+      <div class="space-y-3 py-1">
+        <div class="space-y-1.5 rounded-lg bg-muted/40 px-3 py-2.5 text-sm">
+          <div class="flex justify-between">
+            <span class="text-muted-foreground">종목</span>
+            <span class="font-semibold">{{ quote?.name ?? code }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-muted-foreground">구분</span>
+            <span class="font-bold" :class="side === 'buy' ? 'text-up' : 'text-down'">
+              {{ side === 'buy' ? '매수' : '매도' }}
+            </span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-muted-foreground">가격</span>
+            <span class="font-semibold tabular-nums">
+              {{ priceMode === 'market' ? '시장가' : fmtKrw(limitPrice) }}
+            </span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-muted-foreground">수량</span>
+            <span class="font-semibold tabular-nums">{{ qty.toLocaleString() }}주</span>
+          </div>
+          <div class="flex justify-between border-t border-border pt-1.5">
+            <span class="text-muted-foreground">주문금액</span>
+            <span class="font-bold tabular-nums">{{ orderAmount > 0 ? fmtKrw(orderAmount) : '시장가' }}</span>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            class="rounded-lg bg-muted py-2.5 text-sm font-semibold transition active:scale-[0.98]"
+            @click="cancelConfirm"
+          >취소</button>
+          <button
+            type="button"
+            :class="[
+              'rounded-lg py-2.5 text-sm font-bold text-white transition active:scale-[0.98]',
+              side === 'buy' ? 'bg-up' : 'bg-down',
+            ]"
+            @click="confirmAndSubmit"
+          >{{ side === 'buy' ? '매수' : '매도' }}</button>
+        </div>
+      </div>
+    </Modal>
 
     <!-- 발주 중 — 사용자 확인용 fullscreen overlay -->
     <Modal :open="submitting" :title="side === 'buy' ? '매수 발주 중' : '매도 발주 중'">

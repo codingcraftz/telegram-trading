@@ -144,6 +144,7 @@ export const api = {
     body: {
       stockCode: string;
       budgetAmount?: number;
+      precomputedQty?: { stage1: number; stage2?: number };
       stage1Snapshot?: { qty: number; avgPrice: number };
     },
   ) =>

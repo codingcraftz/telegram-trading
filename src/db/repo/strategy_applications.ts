@@ -53,23 +53,28 @@ export function createApplication(args: {
   chatId: number;
   stockCode: string;
   budgetAmount?: number | null;
+  /** apply 시점 미리 계산된 수량 — 09:00 시세/잔고 조회 생략. */
+  precomputedQty?: { stage1: number; stage2?: number } | null;
   /** immediate 전략 — 외부에서 매수 발주 직후 호출. runtime 을 stage1_filled 로 초기화. */
   stage1Snapshot?: { qty: number; avgPrice: number } | null;
 }): StrategyApplication {
   const id = newId();
   const now = Date.now();
-  const runtimeJson = args.stage1Snapshot
-    ? JSON.stringify({
-        phase: 'stage1_filled',
-        stage1: {
-          qty: args.stage1Snapshot.qty,
-          avgPrice: args.stage1Snapshot.avgPrice,
-          orderId: 'external',
-          positionId: 'external',
-          filledAt: now,
-        },
-      })
-    : null;
+  let runtimeJson: string | null = null;
+  if (args.stage1Snapshot) {
+    runtimeJson = JSON.stringify({
+      phase: 'stage1_filled',
+      stage1: {
+        qty: args.stage1Snapshot.qty,
+        avgPrice: args.stage1Snapshot.avgPrice,
+        orderId: 'external',
+        positionId: 'external',
+        filledAt: now,
+      },
+    });
+  } else if (args.precomputedQty) {
+    runtimeJson = JSON.stringify({ phase: 'pending', precomputedQty: args.precomputedQty });
+  }
   getDb()
     .insert(strategyApplications)
     .values({

@@ -27,6 +27,7 @@ import { createExecution } from '../db/repo/strategy_executions.js';
 import { evaluateStrategy } from './evaluator.js';
 import { StrategyDefinitionSchema, type StrategyDefinition } from './schema.js';
 import { processStagedApplication } from './staged_runner.js';
+import { fetchInternalPendingBuyAmount } from '../fastpath/pending_cash.js';
 import type { MarketContext, MarketSession as StratSession } from './types.js';
 
 function kstYmd(ts: number): string {
@@ -72,7 +73,7 @@ async function fetchPrice(code: string): Promise<{ current: number; prevClose: n
   }
 }
 
-async function fetchOrderableCash(code: string, refPrice: number): Promise<number | null> {
+async function fetchOrderableCash(code: string, refPrice: number, chatId: number): Promise<number | null> {
   try {
     const r = await callKisApi('domestic_stock', 'inquire_psbl_order', {
       pdno: code,
@@ -83,8 +84,13 @@ async function fetchOrderableCash(code: string, refPrice: number): Promise<numbe
     if (!parsed.success) return null;
     const o = firstOutput(parsed);
     if (!o) return null;
-    const cash = num(o.ord_psbl_cash);
-    return cash && cash > 0 ? cash : null;
+    let cash = num(o.ord_psbl_cash);
+    if (!cash || cash <= 0) return null;
+    // KIS inquire_psbl_order는 KIS에 접수된 미체결 주문은 반영하지만,
+    // 우리 내부 예약(pendingIntents, staged budget)은 모름 → 직접 차감.
+    const pending = fetchInternalPendingBuyAmount(chatId);
+    if (pending > 0) cash = Math.max(0, cash - pending);
+    return cash > 0 ? cash : null;
   } catch {
     return null;
   }
@@ -138,7 +144,7 @@ export async function evaluateAndFireStrategies(): Promise<void> {
         continue;
       }
 
-      const cash = (await fetchOrderableCash(app.stockCode, price.current)) ?? 0;
+      const cash = (await fetchOrderableCash(app.stockCode, price.current, app.chatId)) ?? 0;
 
       const market: MarketContext = {
         code: app.stockCode,

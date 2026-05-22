@@ -24,6 +24,7 @@ import {
   updateApplicationStatus,
 } from '../db/repo/strategy_applications.js';
 import { createExecution } from '../db/repo/strategy_executions.js';
+import { fetchInternalPendingBuyAmount, fetchPendingBuyAmount } from '../fastpath/pending_cash.js';
 import { StrategyDefinitionSchema, type StrategyDefinition } from './schema.js';
 import type { StrategyApplication } from '../db/schema.js';
 
@@ -40,6 +41,8 @@ export type StagedRuntime = {
     | 'stage2_filled'
     | 'tp1_done'
     | 'completed';
+  /** apply 시점에 미리 계산된 수량 — 있으면 09:00에 시세/잔고 조회 없이 바로 발주. */
+  precomputedQty?: { stage1: number; stage2?: number };
   /** 1차 체결 정보 */
   stage1?: { qty: number; avgPrice: number; orderId: string; positionId: string; filledAt: number };
   /** 2차 체결 정보 (있다면) */
@@ -114,33 +117,52 @@ async function fetchPrice(code: string): Promise<{ current: number } | null> {
   }
 }
 
-async function fetchOrderableCash(code: string, refPrice: number): Promise<number | null> {
-  // 1차: 종목+가격 기준 inquire_psbl_order. paper 모드에서는 종종 0/누락.
-  try {
-    const r = await callKisApi('domestic_stock', 'inquire_psbl_order', {
-      pdno: code,
-      ord_unpr: String(Math.round(refPrice)),
-      ord_dvsn: '00',
-    });
-    const parsed = parseMcpResult(r);
-    if (parsed.success) {
-      const o = firstOutput(parsed);
-      const cash = num(o?.ord_psbl_cash);
-      if (cash && cash > 0) return cash;
-    }
-  } catch { /* fall through to balance fallback */ }
-  // 2차 fallback: inquire_balance 의 가수도정산금액(prvs_rcdl_excc_amt) / 예수금총액.
-  // 종목 무관 잔고라 정확치 아니지만 cash=0 으로 silent fail 보단 발사 시도.
-  try {
-    const r = await callKisApi('domestic_stock', 'inquire_balance', {});
-    const parsed = parseMcpResult(r);
-    if (!parsed.success) return null;
-    const summary = outputDict(parsed, 'output2');
-    const cash = num(summary?.prvs_rcdl_excc_amt) ?? num(summary?.dnca_tot_amt);
-    return cash && cash > 0 ? cash : null;
-  } catch {
-    return null;
+async function fetchOrderableCash(code: string, refPrice: number, chatId: number): Promise<number | null> {
+  let rawCash: number | null = null;
+  let usedPsblOrder = false;
+  // 1차: 종목+가격 기준 inquire_psbl_order. refPrice=0이면 skip (balance 직행).
+  if (refPrice > 0) {
+    try {
+      const r = await callKisApi('domestic_stock', 'inquire_psbl_order', {
+        pdno: code,
+        ord_unpr: String(Math.round(refPrice)),
+        ord_dvsn: '00',
+      });
+      const parsed = parseMcpResult(r);
+      if (parsed.success) {
+        const o = firstOutput(parsed);
+        const cash = num(o?.ord_psbl_cash);
+        if (cash && cash > 0) {
+          rawCash = cash;
+          usedPsblOrder = true;
+        }
+      }
+    } catch { /* fall through to balance fallback */ }
   }
+  // 2차 fallback: warmup이 30초마다 갱신하는 balance:raw 캐시 활용 (추가 API 호출 없음).
+  // 캐시 miss 시에만 fresh 호출.
+  if (!rawCash) {
+    try {
+      const r = await cached('balance:raw', 60_000, () =>
+        callKisApi('domestic_stock', 'inquire_balance', {}),
+      );
+      const parsed = parseMcpResult(r);
+      if (!parsed.success) return null;
+      const summary = outputDict(parsed, 'output2');
+      rawCash = num(summary?.prvs_rcdl_excc_amt) ?? num(summary?.dnca_tot_amt) ?? null;
+    } catch { return null; }
+  }
+  if (!rawCash || rawCash <= 0) return null;
+  // inquire_psbl_order 는 KIS 미체결 주문을 이미 차감 → 내부 예약만 빼면 됨.
+  // inquire_balance fallback 은 pending 미반영 → 전체(KIS pending + 내부 예약) 차감.
+  if (usedPsblOrder) {
+    const pending = fetchInternalPendingBuyAmount(chatId);
+    if (pending > 0) rawCash = Math.max(0, rawCash - pending);
+  } else {
+    const pending = await fetchPendingBuyAmount(chatId);
+    if (pending > 0) rawCash = Math.max(0, rawCash - pending);
+  }
+  return rawCash > 0 ? rawCash : null;
 }
 
 /** budget 결정 우선순위: (1) application.budgetAmount (사용자가 매수 시점 입력) →
@@ -153,6 +175,37 @@ function resolveBudget(
   if (appOverride && appOverride > 0) return appOverride;
   if (def.budget.mode === 'fixed_amount') return def.budget.value;
   return cash * def.budget.value;
+}
+
+/** 동시호가 중 예상체결가로 precomputedQty 갱신 — 5초 tick마다 호출되지만
+ *  KIS rate limit 보호를 위해 종목별 마지막 갱신 후 30초 이내면 skip. */
+const _refreshTsMap = new Map<string, number>();
+async function refreshPrecomputedQty(
+  app: StrategyApplication,
+  entry: Extract<StrategyDefinition['entry'], { type: 'morning_staged' }>,
+  runtime: StagedRuntime,
+): Promise<void> {
+  const now = Date.now();
+  if (now - (_refreshTsMap.get(app.id) ?? 0) < 30_000) return;
+  _refreshTsMap.set(app.id, now);
+
+  const price = await fetchPrice(app.stockCode);
+  if (!price) return;
+
+  const budget = app.budgetAmount!;
+  const stages = entry.stages;
+  const s1Pct = stages[0]?.entryPct ?? 100;
+  const s2Pct = stages[1]?.entryPct ?? 0;
+  const newQty: StagedRuntime['precomputedQty'] = {
+    stage1: Math.floor((budget * s1Pct) / 100 / price.current),
+    ...(s2Pct > 0 ? { stage2: Math.floor((budget * s2Pct) / 100 / price.current) } : {}),
+  };
+
+  const old = runtime.precomputedQty;
+  if (old && old.stage1 === newQty.stage1 && (old.stage2 ?? 0) === (newQty.stage2 ?? 0)) return;
+
+  setApplicationRuntime(app.id, app.chatId, { ...runtime, precomputedQty: newQty });
+  console.log(`[staged] refreshed qty ${app.stockCode}: s1=${newQty.stage1} s2=${newQty.stage2 ?? '-'} (price=${price.current})`);
 }
 
 /** application 1건 처리 — phase 에 따라 분기. */
@@ -170,11 +223,13 @@ export async function processStagedApplication(app: StrategyApplication): Promis
 
   switch (runtime.phase) {
     case 'pending':
-      // immediate 모드는 외부(trade 폼)에서 매수 후 createApplication 시 즉시
-      // 'stage1_filled' 로 시작 — pending 상태로 떠있다는 건 외부 처리 누락이라
-      // 안전하게 무시하고 다음 tick 대기.
       if (entry.triggerMode === 'immediate') return;
-      // morning 모드 — 다음 영업일 시가 윈도우에서 1차 진입
+      // 동시호가(08:40~09:00) — 예상체결가로 precomputedQty 갱신
+      if (session === 'pre_auction' && runtime.precomputedQty && app.budgetAmount) {
+        await refreshPrecomputedQty(app, entry, runtime);
+        return;
+      }
+      // morning 모드 — 시가 윈도우(09:00:00~30)에서 1차 진입
       if (session !== 'regular' || !inMorningWindow(now)) return;
       await fireStage1(app, strat, entry, def, now);
       return;
@@ -206,30 +261,45 @@ async function fireStage1(
   def: StrategyDefinition,
   now: number,
 ): Promise<void> {
-  const price = await fetchPrice(app.stockCode);
-  if (!price) return;
+  const runtime = parseRuntime(app.runtimeJson);
 
-  // 매수가능금액 → 예산 → 1차 비율 적용 → 수량
-  const cash = (await fetchOrderableCash(app.stockCode, price.current)) ?? 0;
-  if (cash <= 0) {
-    // KIS 가 09:00 직후 ord_psbl_cash 를 일시적으로 0 으로 답하는 경우가 있어
-    // 윈도우 안에서는 failed 로 못박지 않고 다음 5초 tick 에 재시도. 윈도우(30초)
-    // 가 끝나면 inMorningWindow 가 false 라 fireStage1 호출 자체가 안 됨 → active
-    // 로 남아 다음 영업일 09:00 에 다시 시도. 사용자 정의 자금이 있어도 KIS 가
-    // 자금 0 이라고 답한 거니 다음 영업일 시도가 합리적.
-    console.warn(`[staged] fireStage1 cash=0 (transient?) — skip tick`, app.id, app.stockCode);
-    return;
+  // ━━━ 수량 결정 ━━━
+  // 우선순위: precomputedQty (apply 시점 확정) > budgetAmount+시세 > cash_ratio+시세+잔고
+  let qty: number;
+
+  if (runtime.precomputedQty?.stage1) {
+    // ⚡ 최속 경로: apply 시점에 이미 수량 확정. API 호출 0.
+    qty = runtime.precomputedQty.stage1;
+  } else if (app.budgetAmount && app.budgetAmount > 0) {
+    // 시세만 조회 (API 1회)
+    const price = await fetchPrice(app.stockCode);
+    if (!price) return;
+    const budget = app.budgetAmount;
+    const stage1Pct = entry.stages[0]!.entryPct;
+    qty = Math.floor((budget * stage1Pct) / 100 / price.current);
+  } else {
+    // 잔고 + 시세 조회 (cash_ratio 전략, API 2회 병렬)
+    const [price, cashResult] = await Promise.all([
+      fetchPrice(app.stockCode),
+      fetchOrderableCash(app.stockCode, 0, app.chatId),
+    ]);
+    if (!price) return;
+    const cash = cashResult ?? 0;
+    if (cash <= 0) {
+      console.warn(`[staged] fireStage1 cash=0 (transient?) — skip tick`, app.id, app.stockCode);
+      return;
+    }
+    const budget = Math.min(resolveBudget(entry, cash, null), cash);
+    const stage1Pct = entry.stages[0]!.entryPct;
+    qty = Math.floor((budget * stage1Pct) / 100 / price.current);
   }
-  const budget = Math.min(resolveBudget(entry, cash, app.budgetAmount), cash);
-  const stage1Pct = entry.stages[0]!.entryPct;
-  const stage1Budget = (budget * stage1Pct) / 100;
-  const qty = Math.floor(stage1Budget / price.current);
+
   if (qty < 1) {
     createExecution({
       strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
       stockCode: app.stockCode, action: 'buy', result: 'failure',
-      errorMessage: `1차 수량 < 1주 (budget=${Math.round(budget)} stage1Pct=${stage1Pct} price=${price.current} cash=${cash})`,
-      payload: { stage: 1, phase: 'pre_order', budget, stage1Budget, price: price.current, cash },
+      errorMessage: `1차 수량 < 1주`,
+      payload: { stage: 1, phase: 'pre_order', qty },
     });
     updateApplicationStatus(app.id, app.chatId, 'failed');
     return;
@@ -258,18 +328,59 @@ async function fireStage1(
     orderId = out.orderId;
   } catch (err) {
     const msg = (err as Error).message;
-    createExecution({
-      strategyId: strat.id,
-      applicationId: app.id,
-      chatId: app.chatId,
-      stockCode: app.stockCode,
-      action: 'buy',
-      result: 'failure',
-      errorMessage: msg,
-      payload: { stage: 1, qty },
-    });
-    updateApplicationStatus(app.id, app.chatId, 'failed');
-    return;
+    // 잔고부족 거절 → 현재 시세로 수량 재계산 후 재발주 (갭 대응)
+    if (app.budgetAmount && app.budgetAmount > 0 && isInsufficientFundsError(msg)) {
+      console.warn(`[staged] stage1 insufficient funds (qty=${qty}), retrying with live price`);
+      const livePrice = await fetchPrice(app.stockCode);
+      if (livePrice) {
+        const stage1Pct = entry.stages[0]!.entryPct;
+        const retryQty = Math.floor((app.budgetAmount * stage1Pct) / 100 / livePrice.current);
+        if (retryQty >= 1 && retryQty < qty) {
+          spec.quantity = retryQty;
+          try {
+            const out2 = await placeBuyOrder({ chatId: app.chatId, spec });
+            positionId = out2.positionId;
+            orderId = out2.orderId;
+            qty = retryQty;
+            // 재발주 성공 — 아래 pollFill 로 진행
+          } catch (retryErr) {
+            createExecution({
+              strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
+              stockCode: app.stockCode, action: 'buy', result: 'failure',
+              errorMessage: `재발주 실패: ${(retryErr as Error).message}`,
+              payload: { stage: 1, originalQty: qty, retryQty },
+            });
+            updateApplicationStatus(app.id, app.chatId, 'failed');
+            return;
+          }
+        } else {
+          createExecution({
+            strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
+            stockCode: app.stockCode, action: 'buy', result: 'failure',
+            errorMessage: `재계산 수량 부족 (retryQty=${retryQty})`,
+            payload: { stage: 1, originalQty: qty, retryQty, livePrice: livePrice.current },
+          });
+          updateApplicationStatus(app.id, app.chatId, 'failed');
+          return;
+        }
+      } else {
+        createExecution({
+          strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
+          stockCode: app.stockCode, action: 'buy', result: 'failure',
+          errorMessage: msg, payload: { stage: 1, qty, retryFailed: 'no_price' },
+        });
+        updateApplicationStatus(app.id, app.chatId, 'failed');
+        return;
+      }
+    } else {
+      createExecution({
+        strategyId: strat.id, applicationId: app.id, chatId: app.chatId,
+        stockCode: app.stockCode, action: 'buy', result: 'failure',
+        errorMessage: msg, payload: { stage: 1, qty },
+      });
+      updateApplicationStatus(app.id, app.chatId, 'failed');
+      return;
+    }
   }
 
   // 체결 알림은 pollFill 내부의 매수 체결 알림이 자동 송신
@@ -312,6 +423,10 @@ async function fireStage1(
 // runtime 에 stage1_filled 가 새겨진 케이스) — 무한 SL 재시도 방지용 판정.
 function isPhantomHoldingError(err: string): boolean {
   return /잔고.*없|보유.*없|미보유|hldg.*qty.*0|매도.*가능.*수량.*없/i.test(err);
+}
+
+function isInsufficientFundsError(err: string): boolean {
+  return /잔고.*부족|예수금.*부족|주문가능금액.*초과|매수.*가능.*금액|ord_psbl|insufficient/i.test(err);
 }
 
 // 종목 보유 수량을 KIS inquire_balance 로 확인 — phantom 검출용.
@@ -538,13 +653,21 @@ async function fireStage2(
 ): Promise<void> {
   if (!runtime.stage1) return;
 
-  // 2차 예산 — budget × stage2.entryPct / 100. 매수가능금액으로 제한.
-  const cash = (await fetchOrderableCash(app.stockCode, currentPrice)) ?? 0;
-  if (cash <= 0) return;
-  const baseBudget = Math.min(resolveBudget(entry, cash, app.budgetAmount), cash);
-  const stage2Pct = entry.stages[1]!.entryPct;
-  const budget = (baseBudget * stage2Pct) / 100;
-  const qty = Math.floor(budget / currentPrice);
+  // ━━━ 2차 수량 결정 ━━━
+  let qty: number;
+  if (runtime.precomputedQty?.stage2 && runtime.precomputedQty.stage2 > 0) {
+    // ⚡ apply 시점 확정 수량 — API 호출 0
+    qty = runtime.precomputedQty.stage2;
+  } else if (app.budgetAmount && app.budgetAmount > 0) {
+    const stage2Pct = entry.stages[1]!.entryPct;
+    qty = Math.floor((app.budgetAmount * stage2Pct) / 100 / currentPrice);
+  } else {
+    const cash = (await fetchOrderableCash(app.stockCode, currentPrice, app.chatId)) ?? 0;
+    if (cash <= 0) return;
+    const baseBudget = Math.min(resolveBudget(entry, cash, null), cash);
+    const stage2Pct = entry.stages[1]!.entryPct;
+    qty = Math.floor((baseBudget * stage2Pct) / 100 / currentPrice);
+  }
   if (qty < 1) return;
 
   const spec: OrderSpec = {

@@ -138,6 +138,14 @@ export const ApplyStrategyInputSchema = z.object({
   stockCode: z.string().regex(/^\d{6}$/, '6자리 종목코드만 가능'),
   /** apply 시점에 사용자가 지정하는 자금 (원). 없으면 strategy.budget 사용. */
   budgetAmount: z.number().int().positive().optional(),
+  /** apply 시점에 프론트가 미리 계산한 단계별 수량.
+   *  있으면 09:00 시세/잔고 조회 없이 바로 발주 (최속). */
+  precomputedQty: z
+    .object({
+      stage1: z.number().int().positive(),
+      stage2: z.number().int().min(0).optional(),
+    })
+    .optional(),
   /** immediate 모드 전략 — 외부에서 이미 발주한 1차 매수 정보. 있으면 runtime 을
    *  'stage1_filled' 로 즉시 초기화. */
   stage1Snapshot: z
