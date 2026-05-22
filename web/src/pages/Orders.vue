@@ -125,7 +125,6 @@ const {
 // ===== 체결 =====
 const filledItems = ref<FilledOrder[]>([]);
 const filledLoading = ref(false);
-const filledLoaded = ref(false);
 const filledDays = ref<number>(7);
 const filledHasMore = ref<boolean>(true);
 
@@ -136,7 +135,7 @@ async function loadFilled(days: number) {
     filledItems.value = r.items;
     filledHasMore.value = days < 90 && r.items.length >= 50;
   } catch { filledHasMore.value = false; }
-  finally { filledLoading.value = false; filledLoaded.value = true; }
+  finally { filledLoading.value = false; }
 }
 function loadMoreFilled() {
   const next = filledDays.value === 7 ? 30 : 90;
@@ -213,10 +212,12 @@ async function onEditSuccess() { editOpen.value = false; await store.refresh(); 
 
 onMounted(() => {
   store.subscribe(4000);
-  // 체결 데이터를 미리 로드 — 탭 전환 시 즉시 표시되도록.
-  if (!filledLoaded.value) loadFilled(filledDays.value);
+  loadFilled(filledDays.value);
 });
 onUnmounted(() => store.unsubscribe());
+
+// 체결 탭 전환 시 최신 데이터 갱신
+watch(seg, (v) => { if (v === 'filled') loadFilled(filledDays.value); });
 </script>
 
 <template>
@@ -344,16 +345,16 @@ onUnmounted(() => store.unsubscribe());
         </div>
       </div>
 
+      <div v-else-if="filledLoading" class="space-y-2">
+        <div v-for="n in 3" :key="n" class="h-[96px] animate-pulse rounded-2xl bg-card" />
+      </div>
+
       <EmptyState
-        v-else-if="filledLoaded && !filledLoading"
+        v-else
         :icon="CheckCircle2"
         title="체결 내역이 없어요"
         description="첫 거래를 시작해보세요."
       />
-
-      <div v-else class="space-y-2">
-        <div v-for="n in 3" :key="n" class="h-[96px] animate-pulse rounded-2xl bg-card" />
-      </div>
     </template>
 
     <OrderDetailSheet
