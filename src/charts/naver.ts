@@ -27,9 +27,11 @@ type NaverDay = {
 const HEADERS = { Referer: 'https://m.stock.naver.com/', 'User-Agent': 'Mozilla/5.0' };
 
 function ymdHm(d: Date): string {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
+  // NAVER API는 KST 기준 — UTC 서버에서도 KST로 변환
+  const kst = new Date(d.getTime() + 9 * 3600 * 1000);
+  const yyyy = kst.getUTCFullYear();
+  const mm = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(kst.getUTCDate()).padStart(2, '0');
   return `${yyyy}${mm}${dd}0000`;
 }
 

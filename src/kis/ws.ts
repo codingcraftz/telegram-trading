@@ -7,6 +7,16 @@ import { dirname, resolve } from 'node:path';
 import { envDv } from '../runtime.js';
 import { getKisCredentials } from './config.js';
 
+// 장외 시간 판별 — KST 08:20~15:40 밖이면 off-market.
+// WS 연결/재연결 시 불필요한 시도 방지.
+function isOffMarketHours(): boolean {
+  const kst = new Date(Date.now() + 9 * 3600 * 1000);
+  const h = kst.getUTCHours();
+  const m = kst.getUTCMinutes();
+  const t = h * 60 + m;
+  return t < 8 * 60 + 20 || t > 15 * 60 + 40;
+}
+
 type Mode = 'real' | 'demo';
 const WS_URL: Record<Mode, string> = {
   real: 'ws://ops.koreainvestment.com:21000',
@@ -143,13 +153,27 @@ class KisWsClient {
     return this.connecting;
   }
 
+  private reconnectAttempt = 0;
+  private static readonly MAX_RECONNECT_DELAY = 60_000;
+
   private onClose() {
     this.ws = null;
     if (this.askingListeners.size > 0 || this.tickListeners.size > 0) {
       if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+      // 장외 시간이면 reconnect 안 함
+      if (isOffMarketHours()) {
+        console.log('[kis-ws] off-market hours — skip reconnect');
+        return;
+      }
+      // exponential backoff: 3s, 6s, 12s, ... max 60s
+      const delay = Math.min(3_000 * Math.pow(2, this.reconnectAttempt), KisWsClient.MAX_RECONNECT_DELAY);
+      this.reconnectAttempt++;
+      console.log(`[kis-ws] reconnect in ${delay / 1000}s (attempt ${this.reconnectAttempt})`);
       this.reconnectTimer = setTimeout(() => {
-        this.connect().catch((err) => console.warn('[kis-ws] reconnect fail:', err.message));
-      }, 3_000);
+        this.connect()
+          .then(() => { this.reconnectAttempt = 0; }) // 성공 시 리셋
+          .catch((err) => console.warn('[kis-ws] reconnect fail:', err.message));
+      }, delay);
     }
   }
 

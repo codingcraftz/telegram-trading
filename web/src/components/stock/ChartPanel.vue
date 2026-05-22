@@ -68,8 +68,8 @@ const themeKey = computed<'dark' | 'light'>(() => {
 
 const visibleBars = computed(() => INTERVALS[timeframe.value].visible);
 
-const MA_PERIODS = [5, 20, 60, 120];
-const MA_COLOR: Record<number, string> = { 5: '#e23744', 20: '#a855f7', 60: '#1e88e5', 120: '#22c55e' };
+const MA_PERIODS: number[] = [];
+const MA_COLOR: Record<number, string> = {};
 
 function setCandles(c: TradeCandle[]) { candles.value = c; }
 function patchLast(snap: { price: number; cumVolume?: number }) {
@@ -122,17 +122,7 @@ onMounted(load);
             </button>
           </div>
 
-          <!-- 이동평균선 색상 라벨 -->
-          <div class="flex items-center gap-1.5 text-[10px] font-semibold tabular-nums">
-            <span
-              v-for="p in MA_PERIODS" :key="p"
-              class="inline-flex items-center gap-0.5"
-              :style="{ color: MA_COLOR[p] }"
-            >
-              <span class="inline-block h-1.5 w-1.5 rounded-sm" :style="{ backgroundColor: MA_COLOR[p] }" />
-              {{ p }}
-            </span>
-          </div>
+
         </div>
 
         <!-- 분봉 sub 토글 — '분' 활성 시만 노출 -->

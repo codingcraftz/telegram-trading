@@ -4,11 +4,18 @@
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { getKisWsClient, type AskingSnapshot } from '../kis/ws.js';
+import { getMarketSession } from '../scheduler/calendar.js';
 
 export async function handleStreamAsking(c: Context) {
   const code = c.req.query('code')?.trim() ?? '';
   if (!code || !/^\d{6}$/.test(code)) {
     return c.text('invalid code', 400);
+  }
+  const session = getMarketSession();
+  if (session === 'closed' || session === 'holiday') {
+    return streamSSE(c, async (stream) => {
+      await stream.writeSSE({ event: 'closed', data: JSON.stringify({ session }) });
+    });
   }
   return streamSSE(c, async (stream) => {
     const ws = getKisWsClient();

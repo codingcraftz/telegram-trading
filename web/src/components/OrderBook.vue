@@ -47,6 +47,9 @@ async function load() {
   }
 }
 
+let streamRetry = 0;
+let streamRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
 function openStream() {
   closeStream();
   if (!props.useStream || !props.code) return;
@@ -57,15 +60,25 @@ function openStream() {
         const snap = JSON.parse((ev as MessageEvent).data) as AskingResponse;
         data.value = snap;
         streamLive.value = true;
-        // SSE 살아있으면 REST 폴링 정지
+        streamRetry = 0;
         stopPolling();
       } catch { /* ignore */ }
     });
     es.addEventListener('ready', () => { /* first ack */ });
+    // 장외 — 서버가 closed 이벤트 보냄. polling fallback만.
+    es.addEventListener('closed', () => {
+      streamLive.value = false;
+      closeStream();
+      startPolling();
+    });
     es.addEventListener('error', () => {
       streamLive.value = false;
-      // SSE 실패 → REST 폴링 fallback
+      closeStream();
       startPolling();
+      // backoff retry SSE (3s, 6s, 12s, max 30s)
+      const delay = Math.min(3000 * Math.pow(2, streamRetry), 30_000);
+      streamRetry++;
+      streamRetryTimer = setTimeout(openStream, delay);
     });
   } catch {
     streamLive.value = false;
@@ -73,6 +86,7 @@ function openStream() {
   }
 }
 function closeStream() {
+  if (streamRetryTimer) { clearTimeout(streamRetryTimer); streamRetryTimer = null; }
   if (es) { try { es.close(); } catch {} es = null; }
   streamLive.value = false;
 }
