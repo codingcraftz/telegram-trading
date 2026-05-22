@@ -127,7 +127,7 @@ export const LOGIN_HTML = `<!DOCTYPE html>
     text-align: center;
     margin-bottom: 24px;
   }
-  .brand .logo { width: 160px; height: auto; margin: 0 auto 8px; display: block; }
+  .brand .logo { width: 160px; height: auto; margin: 0 auto 8px; display: block; filter: invert(1) brightness(1.2); }
   .brand h1 {
     font-size: 16px;
     margin: 6px 0 0;
