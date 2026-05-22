@@ -127,7 +127,7 @@ export const LOGIN_HTML = `<!DOCTYPE html>
     text-align: center;
     margin-bottom: 24px;
   }
-  .brand .logo { font-size: 32px; }
+  .brand .logo { width: 80px; height: auto; margin: 0 auto 4px; display: block; }
   .brand h1 {
     font-size: 16px;
     margin: 6px 0 0;
@@ -220,7 +220,7 @@ export const LOGIN_HTML = `<!DOCTYPE html>
 <body>
   <div class="card">
     <div class="brand">
-      <div class="logo">🦉</div>
+      <img class="logo" src="/owlim-logo.png" alt="Owlim">
       <h1>Owlim</h1>
       <p>대시보드 PIN 입력</p>
     </div>
