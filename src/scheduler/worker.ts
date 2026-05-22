@@ -26,6 +26,12 @@ import { placeBuyOrder, pollFill } from '../execution/order.js';
 import { nextMarketOpen } from './calendar.js';
 import { isHoliday, prefetchHolidays } from './holidays.js';
 import { evaluateAndFireStrategies } from '../strategy/runner.js';
+import { getMarketSession } from './calendar.js';
+import {
+  listAllActiveApplications,
+  updateApplicationStatus,
+} from '../db/repo/strategy_applications.js';
+import { createExecution } from '../db/repo/strategy_executions.js';
 
 // 5초 폴링 — 9:00:05 정각 발주 보장 (최악 5초 지연).
 // 부담은 거의 없음 (DB 쿼리 1건 + 메모리 비교).
@@ -280,6 +286,46 @@ async function tick() {
   }
 }
 
+// ━━━ 장마감 전략 폐기 ━━━
+// 15:30 이후(close_auction/post_extended/closed) active 전략 전부 completed 처리.
+// 보유 종목은 건드리지 않음 — 매도는 사용자 수동.
+// 하루 1회만 실행 (날짜 기록).
+let _lastCleanupDate = '';
+
+function maybeCleanupStrategies() {
+  const session = getMarketSession();
+  if (session !== 'close_auction' && session !== 'post_extended' && session !== 'after_single' && session !== 'closed') return;
+
+  const kst = new Date(Date.now() + 9 * 3600 * 1000);
+  const today = `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`;
+  // 장 시작 전 closed(새벽)에는 실행 안 함 — 15시 이후만
+  if (kst.getUTCHours() < 15) return;
+  if (_lastCleanupDate === today) return;
+  _lastCleanupDate = today;
+
+  const apps = listAllActiveApplications();
+  if (apps.length === 0) return;
+
+  console.log(`[scheduler] market close cleanup — ${apps.length} active strategies → completed`);
+  for (const app of apps) {
+    try {
+      createExecution({
+        strategyId: app.strategyId,
+        applicationId: app.id,
+        chatId: app.chatId,
+        stockCode: app.stockCode,
+        action: 'buy',
+        result: 'failure',
+        errorMessage: '장마감 — 전략 자동 폐기 (보유 종목 유지)',
+        payload: { reason: 'market_close_cleanup', date: today },
+      });
+      updateApplicationStatus(app.id, app.chatId, 'completed');
+    } catch (err) {
+      console.error('[scheduler] cleanup error', app.id, err);
+    }
+  }
+}
+
 // tick 마다 reservation 처리 후 추가로 strategy_applications 평가.
 // runner 가 실패해도 reservation 흐름은 영향 없음.
 // MUTEX: 이전 tick 이 끝나기 전(KIS API 지연 등) 다음 tick 이 시작하면
@@ -319,6 +365,7 @@ export function startScheduler() {
   _timer = setInterval(() => {
     tickReservationsLocked();
     tickStrategies();
+    maybeCleanupStrategies();
   }, INTERVAL_MS);
 }
 
