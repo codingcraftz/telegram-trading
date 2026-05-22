@@ -27,12 +27,14 @@ type NaverDay = {
 const HEADERS = { Referer: 'https://m.stock.naver.com/', 'User-Agent': 'Mozilla/5.0' };
 
 function ymdHm(d: Date): string {
-  // NAVER API는 KST 기준 — UTC 서버에서도 KST로 변환
+  // NAVER API는 KST 기준 — UTC 서버에서도 KST로 변환. 시분까지 포함해야 당일 봉 포함.
   const kst = new Date(d.getTime() + 9 * 3600 * 1000);
   const yyyy = kst.getUTCFullYear();
   const mm = String(kst.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(kst.getUTCDate()).padStart(2, '0');
-  return `${yyyy}${mm}${dd}0000`;
+  const hh = String(kst.getUTCHours()).padStart(2, '0');
+  const mn = String(kst.getUTCMinutes()).padStart(2, '0');
+  return `${yyyy}${mm}${dd}${hh}${mn}`;
 }
 
 // 분봉 fetcher. unit ∈ {1, 3, 5, 10, 15, 30, 60}.
