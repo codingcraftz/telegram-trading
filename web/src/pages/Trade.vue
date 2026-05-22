@@ -5,7 +5,7 @@
 
 import { ref, computed, onMounted, onUnmounted, onActivated, watch, nextTick } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
-import { Search, Clock, X, NotebookPen, Plus, Loader2 } from 'lucide-vue-next';
+import { Search, Clock, X, NotebookPen, Plus, Loader2, LineChart } from 'lucide-vue-next';
 import OrderBook from '@/components/OrderBook.vue';
 import PriceStepper from '@/components/PriceStepper.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
@@ -418,6 +418,13 @@ onUnmounted(() => {
         <div class="min-w-0">
           <div class="flex items-center gap-1.5">
             <p class="truncate text-base font-bold tracking-tight">{{ quote.name }}</p>
+            <button
+              class="rounded p-1 text-muted-foreground transition hover:bg-accent"
+              aria-label="차트"
+              @click="router.push({ path: `/chart/${code}` })"
+            >
+              <LineChart class="h-4 w-4" />
+            </button>
             <button
               class="rounded p-1 text-muted-foreground transition hover:bg-accent"
               aria-label="종목 검색"
