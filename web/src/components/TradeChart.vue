@@ -90,8 +90,23 @@ function smaSeries(candles: TradeCandle[], period: number): LineData[] {
 const containerRef = ref<HTMLDivElement | null>(null);
 const volumeContainerRef = ref<HTMLDivElement | null>(null);
 const tooltipData = ref<{
-  label: string; open: number; high: number; low: number; close: number; volume: number; up: boolean;
+  label: string;
+  open: number; high: number; low: number; close: number; volume: number;
+  openPct: number; highPct: number; lowPct: number; closePct: number;
+  up: boolean;
 } | null>(null);
+
+function fmtPctSigned(v: number): string {
+  return (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+}
+
+function findPrevClose(tsMs: number): number {
+  const sorted = props.candles;
+  for (let i = sorted.length - 1; i >= 1; i--) {
+    if (sorted[i]!.ts === tsMs) return sorted[i - 1]!.close;
+  }
+  return 0;
+}
 let chart: IChartApi | null = null;
 let volChart: IChartApi | null = null;
 let candleSeries: ISeriesApi<'Candlestick'> | null = null;
@@ -254,13 +269,14 @@ function buildChart() {
       label += ` ${hh}:${mn}`;
     }
     const vol = volumeSeries ? (param.seriesData.get(volumeSeries) as HistogramData | undefined)?.value : undefined;
+    // 이전 봉 종가 기준 변동률
+    const prevClose = findPrevClose(ts);
+    const pct = (v: number) => prevClose > 0 ? ((v - prevClose) / prevClose) * 100 : 0;
     tooltipData.value = {
       label,
-      open: cd.open,
-      high: cd.high,
-      low: cd.low,
-      close: cd.close,
+      open: cd.open, high: cd.high, low: cd.low, close: cd.close,
       volume: vol ?? 0,
+      openPct: pct(cd.open), highPct: pct(cd.high), lowPct: pct(cd.low), closePct: pct(cd.close),
       up: cd.close >= cd.open,
     };
   });
@@ -393,22 +409,46 @@ watch(() => props.showVolume, (sv) => {
 
 <template>
   <div class="relative">
-    <!-- OHLCV 크로스헤어 툴팁 -->
-    <div
-      v-if="tooltipData"
-      class="pointer-events-none absolute left-1.5 top-1 z-10 flex items-center gap-2 text-[10px] font-semibold tabular-nums leading-tight"
+    <!-- OHLCV 팝업 카드 — 크로스헤어 활성 시 차트 위에 오버레이 -->
+    <Transition
+      enter-active-class="transition duration-150 ease-out"
+      enter-from-class="opacity-0 scale-95"
+      leave-active-class="transition duration-100 ease-in"
+      leave-to-class="opacity-0 scale-95"
     >
-      <span class="text-muted-foreground">{{ tooltipData.label }}</span>
-      <span :class="tooltipData.up ? 'text-up' : 'text-down'">
-        O {{ tooltipData.open.toLocaleString() }}
-        H {{ tooltipData.high.toLocaleString() }}
-        L {{ tooltipData.low.toLocaleString() }}
-        C {{ tooltipData.close.toLocaleString() }}
-      </span>
-      <span v-if="tooltipData.volume" class="text-muted-foreground">
-        V {{ tooltipData.volume >= 1_000_000 ? (tooltipData.volume / 1_000_000).toFixed(1) + 'M' : tooltipData.volume >= 1_000 ? (tooltipData.volume / 1_000).toFixed(0) + 'K' : tooltipData.volume.toLocaleString() }}
-      </span>
-    </div>
+      <div
+        v-if="tooltipData"
+        class="pointer-events-none absolute left-2 top-2 z-10 rounded-lg bg-card/95 ring-1 ring-border/60 px-3 py-2 shadow-lg backdrop-blur-sm"
+      >
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="text-[11px] font-semibold text-muted-foreground">{{ tooltipData.label }}</span>
+          <button
+            class="pointer-events-auto ml-auto rounded p-0.5 text-muted-foreground/60 hover:text-foreground transition"
+            @click="tooltipData = null"
+          >✕</button>
+        </div>
+        <div class="grid grid-cols-[auto_1fr_auto] gap-x-3 gap-y-0.5 text-[11px] tabular-nums">
+          <span class="text-muted-foreground">시</span>
+          <span class="text-right font-semibold">{{ tooltipData.open.toLocaleString() }}</span>
+          <span :class="tooltipData.openPct >= 0 ? 'text-up' : 'text-down'" class="text-right text-[10px]">{{ fmtPctSigned(tooltipData.openPct) }}</span>
+
+          <span class="text-up font-semibold">고</span>
+          <span class="text-right font-semibold">{{ tooltipData.high.toLocaleString() }}</span>
+          <span :class="tooltipData.highPct >= 0 ? 'text-up' : 'text-down'" class="text-right text-[10px]">{{ fmtPctSigned(tooltipData.highPct) }}</span>
+
+          <span class="text-down font-semibold">저</span>
+          <span class="text-right font-semibold">{{ tooltipData.low.toLocaleString() }}</span>
+          <span :class="tooltipData.lowPct >= 0 ? 'text-up' : 'text-down'" class="text-right text-[10px]">{{ fmtPctSigned(tooltipData.lowPct) }}</span>
+
+          <span class="text-muted-foreground">종가</span>
+          <span class="text-right font-semibold" :class="tooltipData.up ? 'text-up' : 'text-down'">{{ tooltipData.close.toLocaleString() }}</span>
+          <span :class="tooltipData.closePct >= 0 ? 'text-up' : 'text-down'" class="text-right text-[10px]">{{ fmtPctSigned(tooltipData.closePct) }}</span>
+
+          <span class="text-muted-foreground">거래량</span>
+          <span class="text-right font-semibold col-span-2">{{ tooltipData.volume.toLocaleString() }}</span>
+        </div>
+      </div>
+    </Transition>
     <div ref="containerRef" class="w-full select-none overflow-hidden rounded-t-lg" :style="{ height: `${height}px` }" />
     <div
       v-if="splitVolume && showVolume"
