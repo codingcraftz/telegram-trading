@@ -125,6 +125,7 @@ const {
 // ===== 체결 =====
 const filledItems = ref<FilledOrder[]>([]);
 const filledLoading = ref(false);
+const filledLoaded = ref(false);
 const filledDays = ref<number>(7);
 const filledHasMore = ref<boolean>(true);
 
@@ -135,7 +136,7 @@ async function loadFilled(days: number) {
     filledItems.value = r.items;
     filledHasMore.value = days < 90 && r.items.length >= 50;
   } catch { filledHasMore.value = false; }
-  finally { filledLoading.value = false; }
+  finally { filledLoading.value = false; filledLoaded.value = true; }
 }
 function loadMoreFilled() {
   const next = filledDays.value === 7 ? 30 : 90;
@@ -212,11 +213,11 @@ async function onEditSuccess() { editOpen.value = false; await store.refresh(); 
 
 onMounted(() => {
   store.subscribe(4000);
-  if (seg.value === 'filled') loadFilled(filledDays.value);
+  if (seg.value === 'filled' && !filledLoaded.value) loadFilled(filledDays.value);
 });
 onUnmounted(() => store.unsubscribe());
 
-watch(seg, (v) => { if (v === 'filled' && filledItems.value.length === 0) loadFilled(filledDays.value); });
+watch(seg, (v) => { if (v === 'filled' && !filledLoaded.value) loadFilled(filledDays.value); });
 </script>
 
 <template>
@@ -345,7 +346,7 @@ watch(seg, (v) => { if (v === 'filled' && filledItems.value.length === 0) loadFi
       </div>
 
       <EmptyState
-        v-else-if="!filledLoading"
+        v-else-if="filledLoaded && !filledLoading"
         :icon="CheckCircle2"
         title="체결 내역이 없어요"
         description="첫 거래를 시작해보세요."
