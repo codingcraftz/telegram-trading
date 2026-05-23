@@ -309,6 +309,7 @@ function hotDateLabel(d: string | null): string {
               <span class="text-sm font-bold truncate">{{ s.name }}</span>
               <span v-if="s.emaUptrend" class="shrink-0 rounded-sm bg-up/15 px-1 py-px text-[9px] font-bold text-up">EMA↑</span>
             </div>
+            <p v-if="s.description" class="mt-0.5 text-[10px] text-muted-foreground leading-tight line-clamp-1">{{ s.description }}</p>
             <div class="mt-0.5 flex flex-wrap gap-1">
               <span
                 v-for="t in s.themes.slice(0, 3)" :key="t.name"

@@ -111,6 +111,20 @@ async function fetchStockThemes(
 
 function sleep(ms: number) { return new Promise<void>(r => setTimeout(r, ms)); }
 
+// ===== 기업개요 =====
+async function fetchCompanyDesc(code: string): Promise<string> {
+  try {
+    const res = await fetch(`https://finance.naver.com/item/main.naver?code=${code}`, {
+      headers: { 'User-Agent': UA, 'Accept-Encoding': 'identity' },
+      signal: AbortSignal.timeout(8_000),
+    });
+    const html = await res.text();
+    const m = html.match(/summary_info[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/);
+    if (m) return m[1]!.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  } catch { /* skip */ }
+  return '';
+}
+
 // ===== 메인 =====
 export type HotStock = {
   code: string;
@@ -120,6 +134,7 @@ export type HotStock = {
   volume: number;
   themes: ThemeInfo[];
   emaUptrend: boolean;
+  description: string;
 };
 
 export async function collectHotStocks(): Promise<HotStock[]> {
@@ -156,7 +171,15 @@ export async function collectHotStocks(): Promise<HotStock[]> {
   for (const s of candidates) codeSet.add(s.code);
   const themeMap = await fetchStockThemes(codeSet);
 
-  // 5) 결과 조합 — 거래량 순
+  // 5) 기업개요 fetch
+  const descMap = new Map<string, string>();
+  for (const s of candidates) {
+    const desc = await fetchCompanyDesc(s.code);
+    descMap.set(s.code, desc);
+    await sleep(100);
+  }
+
+  // 6) 결과 조합 — 거래량 순
   const results: HotStock[] = candidates
     .sort((a, b) => b.volume - a.volume)
     .map(s => ({
@@ -167,6 +190,7 @@ export async function collectHotStocks(): Promise<HotStock[]> {
       volume: s.volume,
       themes: (themeMap.get(s.code) ?? []).sort((a, b) => b.pct - a.pct).slice(0, 4),
       emaUptrend: withEma.some(e => e.code === s.code),
+      description: descMap.get(s.code) ?? '',
     }));
 
   console.log(`[hot-stocks] final: ${results.length} stocks`);

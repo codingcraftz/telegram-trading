@@ -435,6 +435,7 @@ export type HotStock = {
   volume: number;
   themes: HotStockTheme[];
   emaUptrend: boolean;
+  description?: string;
 };
 export type HotStocksResponse = { date: string | null; items: HotStock[] };
 
