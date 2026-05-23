@@ -24,6 +24,7 @@ import { handleCandles } from '../api/candles.js';
 import { handleIndices } from '../api/indices.js';
 import { handleRanking } from '../api/ranking.js';
 import { handleHotStocks } from '../api/hot-stocks.js';
+import { handleStockInfo } from '../api/stock-info.js';
 import {
   handleStrategiesList,
   handleStrategyApplicationDelete,
@@ -230,6 +231,7 @@ export function startDashboard(port = 8080): void {
   app.get('/api/indices', handleIndices); // 코스피·코스닥·나스닥·다우
   app.get('/api/ranking', handleRanking); // 거래대금/거래량/상승률/하락률 순위
   app.get('/api/hot-stocks', handleHotStocks); // 일간 HOT 종목
+  app.get('/api/stock-info', handleStockInfo); // 종목 기업개요
   app.get('/api/themes', handleThemes); // 네이버 테마 랭킹
   app.get('/api/themes/search', handleThemeSearch); // 종목명으로 속한 테마 검색
   app.get('/api/themes/:no', handleThemeDetail); // 테마 소속 종목 list

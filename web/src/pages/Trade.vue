@@ -5,7 +5,7 @@
 
 import { ref, computed, onMounted, onUnmounted, onActivated, watch, nextTick } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
-import { Search, Clock, X, NotebookPen, Plus, Loader2, LineChart } from 'lucide-vue-next';
+import { Search, Clock, X, NotebookPen, Plus, Loader2, LineChart, Info } from 'lucide-vue-next';
 import OrderBook from '@/components/OrderBook.vue';
 import PriceStepper from '@/components/PriceStepper.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
@@ -288,6 +288,35 @@ async function confirmApplyStrategy() {
   } finally { strategyApplying.value = false; }
 }
 
+// 종목 정보 모달
+const stockInfoOpen = ref(false);
+const stockInfo = ref<{ name: string; code: string; industry: string; summary: string; per: string; pbr: string } | null>(null);
+const stockInfoLoading = ref(false);
+
+async function openStockInfo() {
+  if (!code.value || !quote.value) return;
+  stockInfoOpen.value = true;
+  stockInfoLoading.value = true;
+  try {
+    const r = await api.quote(code.value);
+    stockInfo.value = {
+      name: r.name,
+      code: code.value,
+      industry: r.industry || '—',
+      summary: '', // 별도 fetch
+      per: r.per ?? '—',
+      pbr: r.pbr ?? '—',
+    };
+    // 기업개요 fetch
+    try {
+      const res = await fetch(`/api/stock-info?code=${code.value}`);
+      const d = await res.json();
+      if (d.description) stockInfo.value.summary = d.description;
+    } catch { /* silent */ }
+  } catch { /* silent */ }
+  finally { stockInfoLoading.value = false; }
+}
+
 // 주문 확인 모달
 const confirmOpen = ref(false);
 function requestSubmit() {
@@ -418,13 +447,23 @@ onUnmounted(() => {
         <div class="min-w-0">
           <div class="flex items-center gap-1.5">
             <p class="truncate text-base font-bold tracking-tight">{{ quote.name }}</p>
-            <button
-              class="rounded p-1 text-muted-foreground transition hover:bg-accent"
-              aria-label="차트"
-              @click="router.push({ path: `/chart/${code}` })"
-            >
-              <LineChart class="h-4 w-4" />
-            </button>
+            <div class="flex items-center rounded-md bg-muted/50 p-0.5">
+              <button
+                class="rounded p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                aria-label="종목 정보"
+                @click="openStockInfo"
+              >
+                <Info class="h-3.5 w-3.5" />
+              </button>
+              <span class="text-border">|</span>
+              <button
+                class="rounded p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                aria-label="차트"
+                @click="router.push({ path: `/chart/${code}` })"
+              >
+                <LineChart class="h-3.5 w-3.5" />
+              </button>
+            </div>
             <button
               class="rounded p-1 text-muted-foreground transition hover:bg-accent"
               aria-label="종목 검색"
@@ -677,6 +716,40 @@ onUnmounted(() => {
 
     </div>
     <!-- ↑ '주문' 탭 콘텐츠 끝 -->
+
+    <!-- 종목 정보 모달 -->
+    <Modal :open="stockInfoOpen" :title="stockInfo ? `${stockInfo.name} (${stockInfo.code})` : '종목 정보'">
+      <div class="space-y-3 py-1">
+        <div v-if="stockInfoLoading" class="flex items-center justify-center py-8">
+          <Loader2 class="h-6 w-6 animate-spin text-primary" />
+        </div>
+        <template v-else-if="stockInfo">
+          <div class="space-y-1.5 rounded-lg bg-muted/40 px-3 py-2.5 text-sm">
+            <div class="flex justify-between">
+              <span class="text-muted-foreground">업종</span>
+              <span class="font-semibold">{{ stockInfo.industry }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-muted-foreground">PER</span>
+              <span class="font-semibold tabular-nums">{{ stockInfo.per }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-muted-foreground">PBR</span>
+              <span class="font-semibold tabular-nums">{{ stockInfo.pbr }}</span>
+            </div>
+          </div>
+          <div v-if="stockInfo.summary" class="rounded-lg bg-muted/40 px-3 py-2.5">
+            <p class="text-[11px] font-semibold text-muted-foreground mb-1">기업개요</p>
+            <p class="text-sm leading-relaxed">{{ stockInfo.summary }}</p>
+          </div>
+        </template>
+        <button
+          type="button"
+          class="w-full rounded-lg bg-muted py-2.5 text-sm font-semibold transition active:scale-[0.98]"
+          @click="stockInfoOpen = false"
+        >닫기</button>
+      </div>
+    </Modal>
 
     <!-- 주문 확인 모달 -->
     <Modal :open="confirmOpen" :title="side === 'buy' ? '매수 주문 확인' : '매도 주문 확인'">

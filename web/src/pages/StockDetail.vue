@@ -2,12 +2,14 @@
 // 종목 상세 (차트) — 차트 + 호가 + 정보 + 보유 안내. 매매는 /trade 페이지로 분리.
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Info } from 'lucide-vue-next';
+import { Info, Loader2 } from 'lucide-vue-next';
 
 import StockDetailHeader from '@/components/stock/StockDetailHeader.vue';
 import ChartPanel from '@/components/stock/ChartPanel.vue';
+import Modal from '@/components/ui/Modal.vue';
 
 import { api, type Holding, type TickSnapshot } from '@/api/client';
+import { fmtKrw } from '@/lib/format';
 import { fmtPct, fmtSigned, pflsColor } from '@/lib/format';
 import { useWatchlistStore } from '@/stores/watchlist';
 import { useStockQuote } from '@/composables/useStockQuote';
@@ -67,6 +69,26 @@ watch(code, (c) => {
   loadBalance();
 }, { immediate: true });
 
+// 종목 정보 모달
+const stockInfoOpen = ref(false);
+const stockInfoData = ref<{ industry: string; per: string; pbr: string; summary: string } | null>(null);
+const stockInfoLoading = ref(false);
+
+async function openStockInfo() {
+  stockInfoOpen.value = true;
+  stockInfoLoading.value = true;
+  try {
+    const r = await api.quote(code.value);
+    stockInfoData.value = { industry: r.industry || '—', per: r.per ?? '—', pbr: r.pbr ?? '—', summary: '' };
+    try {
+      const res = await fetch(`/api/stock-info?code=${code.value}`);
+      const d = await res.json();
+      if (d.description) stockInfoData.value.summary = d.description;
+    } catch { /* silent */ }
+  } catch { /* silent */ }
+  finally { stockInfoLoading.value = false; }
+}
+
 function goTrade(side?: 'buy' | 'sell') {
   if (!code.value) return;
   const query: Record<string, string> = { code: code.value };
@@ -97,6 +119,7 @@ onUnmounted(() => watchlist.unsubscribe());
       @back="router.back()"
       @toggle-watch="toggleWatch"
       @refresh="refreshQuote"
+      @info="openStockInfo"
     />
 
     <!-- 보유 안내 -->
@@ -136,5 +159,39 @@ onUnmounted(() => watchlist.unsubscribe());
       >매도</button>
     </div>
   </div>
+
+  <!-- 종목 정보 모달 -->
+  <Modal :open="stockInfoOpen" :title="`${quote?.name ?? code} (${code})`">
+    <div class="space-y-3 py-1">
+      <div v-if="stockInfoLoading" class="flex items-center justify-center py-8">
+        <Loader2 class="h-6 w-6 animate-spin text-primary" />
+      </div>
+      <template v-else-if="stockInfoData">
+        <div class="space-y-1.5 rounded-lg bg-muted/40 px-3 py-2.5 text-sm">
+          <div class="flex justify-between">
+            <span class="text-muted-foreground">업종</span>
+            <span class="font-semibold">{{ stockInfoData.industry }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-muted-foreground">PER</span>
+            <span class="font-semibold tabular-nums">{{ stockInfoData.per }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-muted-foreground">PBR</span>
+            <span class="font-semibold tabular-nums">{{ stockInfoData.pbr }}</span>
+          </div>
+        </div>
+        <div v-if="stockInfoData.summary" class="rounded-lg bg-muted/40 px-3 py-2.5">
+          <p class="text-[11px] font-semibold text-muted-foreground mb-1">기업개요</p>
+          <p class="text-sm leading-relaxed">{{ stockInfoData.summary }}</p>
+        </div>
+      </template>
+      <button
+        type="button"
+        class="w-full rounded-lg bg-muted py-2.5 text-sm font-semibold transition active:scale-[0.98]"
+        @click="stockInfoOpen = false"
+      >닫기</button>
+    </div>
+  </Modal>
   </div>
 </template>

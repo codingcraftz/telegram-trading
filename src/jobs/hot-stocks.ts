@@ -11,6 +11,9 @@ const NAVER_HEADERS = { 'User-Agent': UA, Referer: 'https://m.stock.naver.com/' 
 
 function todayKst(): string {
   const kst = new Date(Date.now() + 9 * 3600 * 1000);
+  // 장마감(15:30) 후 수집 → 날짜는 당일 시장 영업일.
+  // 자정 이후(00:00~08:59)에 실행되면 전일이 영업일이므로 하루 빼기.
+  if (kst.getUTCHours() < 9) kst.setUTCDate(kst.getUTCDate() - 1);
   return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`;
 }
 

@@ -2,7 +2,7 @@
 // StockDetailHeader — sticky top + 가격 헤드라인 + 실시간 인디케이터. 옛 톤.
 import { computed } from 'vue';
 import {
-  ChevronLeft, ArrowUpRight, ArrowDownRight, Star, StarOff, RefreshCw,
+  ChevronLeft, ArrowUpRight, ArrowDownRight, Star, StarOff, RefreshCw, Info,
 } from 'lucide-vue-next';
 import { fmtKrw, fmtPct, pflsColor } from '@/lib/format';
 
@@ -17,7 +17,7 @@ const props = defineProps<{
   loading?: boolean;
 }>();
 
-const emit = defineEmits<{ back: []; toggleWatch: []; refresh: [] }>();
+const emit = defineEmits<{ back: []; toggleWatch: []; refresh: []; info: [] }>();
 
 const changeText = computed(() => `${props.changeAmount >= 0 ? '+' : ''}${fmtKrw(props.changeAmount)}`);
 // 종목명이 아직 로드 안된 상태 — name 이 6자리 코드와 동일하면 placeholder 로 간주.
@@ -39,6 +39,12 @@ const nameReady = computed(() => props.name && props.name !== props.code);
         <div v-else class="h-[1.125rem] w-24 animate-pulse rounded bg-muted/60" />
         <p class="text-[10px] text-muted-foreground tabular-nums">{{ code }}</p>
       </div>
+      <button
+        class="rounded-md p-2 text-muted-foreground transition hover:bg-accent"
+        @click="emit('info')"
+      >
+        <Info class="h-4 w-4" />
+      </button>
       <button
         class="rounded-md p-2 text-muted-foreground transition hover:bg-accent"
         :disabled="loading"
