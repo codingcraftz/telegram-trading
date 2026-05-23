@@ -62,6 +62,7 @@ export const api = {
 
   // 네이버 테마주
   themes: (limit = 30) => request<{ items: ThemeItem[] }>(`/api/themes?limit=${limit}`),
+  hotStocks: () => request<HotStocksResponse>('/api/hot-stocks'),
   themeDetail: (no: number) => request<{ no: number; items: ThemeStock[] }>(`/api/themes/${no}`),
   themeSearch: (q: string) =>
     request<{ q: string; items: (ThemeItem & { matchedStocks: ThemeStock[] })[] }>(
@@ -424,6 +425,18 @@ export type ThemeStock = {
   change: number;
   changePct: number;
 };
+
+export type HotStockTheme = { name: string; pct: number; hot: boolean };
+export type HotStock = {
+  code: string;
+  name: string;
+  price: number;
+  changePct: number;
+  volume: number;
+  themes: HotStockTheme[];
+  emaUptrend: boolean;
+};
+export type HotStocksResponse = { date: string | null; items: HotStock[] };
 
 export type TradeConfirmResponse = {
   ok: boolean;

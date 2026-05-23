@@ -204,6 +204,14 @@ export const strategyExecutions = sqliteTable(
   }),
 );
 
+// 일간 HOT 종목 (장마감 후 1회 수집)
+export const dailyHotStocks = sqliteTable('daily_hot_stocks', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  date: text('date').notNull(), // YYYY-MM-DD (KST)
+  dataJson: text('data_json').notNull(), // JSON array
+  createdAt: integer('created_at').notNull(),
+});
+
 export type Strategy = typeof strategies.$inferSelect;
 export type NewStrategy = typeof strategies.$inferInsert;
 export type StrategyApplication = typeof strategyApplications.$inferSelect;

@@ -78,9 +78,9 @@ async function switchTradingMode(next: 'paper' | 'real') {
   modeSwitching.value = true;
   try {
     await api.setTradingMode(next);
-    // 새 모드 상태 반영 위해 keys 다시 fetch
-    keys.value = await api.keysStatus();
     toast.success(`${next === 'real' ? '실전' : '모의'} 모드로 전환됐어요`);
+    // 모드 전환 시 전체 새로고침 — 잔고/보유종목/캐시 모두 갱신
+    setTimeout(() => location.reload(), 500);
   } catch (err) {
     toast.error((err as Error).message);
   } finally { modeSwitching.value = false; }

@@ -179,6 +179,16 @@ export function ensureSchema() {
   } catch (e) {
     // 이미 존재
   }
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS daily_hot_stocks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      data_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS daily_hot_date_idx ON daily_hot_stocks(date);
+  `);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

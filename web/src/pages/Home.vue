@@ -10,12 +10,14 @@ import Card from '@/components/ui/Card.vue';
 import InfoTooltip from '@/components/InfoTooltip.vue';
 import Sparkline from '@/components/Sparkline.vue';
 import LoadingState from '@/components/ui/LoadingState.vue';
-import { api, type BalanceResponse } from '@/api/client';
+import { api, type BalanceResponse, type HotStock } from '@/api/client';
 import { fmtKrw, fmtPct, fmtSigned, pflsColor } from '@/lib/format';
 import { useOrdersStore } from '@/stores/orders';
 import { useMarketSession } from '@/composables/useMarketSession';
 import { useIndices } from '@/composables/useIndices';
+import { useRouter } from 'vue-router';
 
+const router = useRouter();
 const ordersStore = useOrdersStore();
 const { session, nowKst } = useMarketSession();
 const { items: indices } = useIndices();
@@ -82,7 +84,8 @@ function onVisibility() {
 }
 
 onMounted(() => {
-  load(); // 캐시 있어도 백그라운드로 fresh fetch
+  load();
+  loadHot();
   startBalPolling();
   document.addEventListener('visibilitychange', onVisibility);
 });
@@ -133,7 +136,29 @@ const usSessionLabel = computed(() => {
 });
 function isUsIndex(key: string) { return key === 'nasdaq' || key === 'dow'; }
 
-const holdingCount = computed(() => balance.value?.holdings.length ?? 0);
+// ===== HOT 종목 =====
+const hotDate = ref<string | null>(null);
+const hotStocks = ref<HotStock[]>([]);
+
+async function loadHot() {
+  try {
+    const r = await api.hotStocks();
+    hotDate.value = r.date;
+    hotStocks.value = r.items;
+  } catch { /* silent */ }
+}
+
+function fmtVol(v: number): string {
+  if (v >= 10_000_000) return (v / 10_000_000).toFixed(1) + '천만';
+  if (v >= 10_000) return Math.floor(v / 10_000).toLocaleString() + '만';
+  return v.toLocaleString();
+}
+
+function hotDateLabel(d: string | null): string {
+  if (!d) return '';
+  const [, mm, dd] = d.split('-');
+  return `${Number(mm)}/${Number(dd)}`;
+}
 </script>
 
 <template>
@@ -266,21 +291,39 @@ const holdingCount = computed(() => balance.value?.holdings.length ?? 0);
       <ChevronRight class="h-4 w-4 text-muted-foreground" />
     </RouterLink>
 
-    <!-- 보유 종목 — 잔고 페이지로 -->
-    <RouterLink
-      to="/holdings"
-      class="flex items-center gap-3 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-4 py-3 transition active:scale-[0.99]"
-    >
-      <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted/60">
-        <Wallet class="h-4 w-4 text-muted-foreground" />
+    <!-- 오늘의 HOT 종목 -->
+    <section v-if="hotStocks.length > 0" class="space-y-2">
+      <div class="flex items-center justify-between px-1">
+        <h2 class="text-sm font-bold tracking-tight">🔥 오늘의 HOT 종목</h2>
+        <span v-if="hotDate" class="text-[10px] text-muted-foreground">{{ hotDateLabel(hotDate) }}</span>
       </div>
-      <div class="min-w-0 flex-1">
-        <p class="text-sm font-semibold">
-          {{ holdingCount > 0 ? `보유 종목 ${holdingCount}개` : '보유 종목' }}
-        </p>
-        <p class="text-[11px] text-muted-foreground">평가손익 · 종목별 상세</p>
+      <div class="space-y-1.5">
+        <button
+          v-for="s in hotStocks" :key="s.code"
+          type="button"
+          class="flex w-full items-center gap-3 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-3 py-2.5 text-left transition active:scale-[0.99]"
+          @click="router.push(`/chart/${s.code}`)"
+        >
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5">
+              <span class="text-sm font-bold truncate">{{ s.name }}</span>
+              <span v-if="s.emaUptrend" class="shrink-0 rounded-sm bg-up/15 px-1 py-px text-[9px] font-bold text-up">EMA↑</span>
+            </div>
+            <div class="mt-0.5 flex flex-wrap gap-1">
+              <span
+                v-for="t in s.themes.slice(0, 3)" :key="t.name"
+                class="rounded-sm px-1 py-px text-[9px]"
+                :class="t.hot ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold' : 'bg-muted text-muted-foreground'"
+              >{{ t.hot ? '🔥' : '' }}{{ t.name }}</span>
+              <span v-if="s.themes.length === 0" class="text-[9px] text-muted-foreground">(미분류)</span>
+            </div>
+          </div>
+          <div class="shrink-0 text-right">
+            <p class="text-sm font-bold tabular-nums text-up">+{{ s.changePct.toFixed(1) }}%</p>
+            <p class="text-[10px] text-muted-foreground tabular-nums">{{ fmtVol(s.volume) }}</p>
+          </div>
+        </button>
       </div>
-      <ChevronRight class="h-4 w-4 text-muted-foreground" />
-    </RouterLink>
+    </section>
   </div>
 </template>

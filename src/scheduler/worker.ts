@@ -32,6 +32,7 @@ import {
   updateApplicationStatus,
 } from '../db/repo/strategy_applications.js';
 import { createExecution } from '../db/repo/strategy_executions.js';
+import { runAndSave as collectHotStocks } from '../jobs/hot-stocks.js';
 
 // 5초 폴링 — 9:00:05 정각 발주 보장 (최악 5초 지연).
 // 부담은 거의 없음 (DB 쿼리 1건 + 메모리 비교).
@@ -307,6 +308,9 @@ function maybeCleanupStrategies() {
   if (apps.length === 0) return;
 
   console.log(`[scheduler] market close cleanup — ${apps.length} active strategies → completed`);
+  // HOT 종목 수집 (비동기, cleanup과 병렬)
+  collectHotStocks().catch(err => console.error('[scheduler] hot-stocks collect failed:', err));
+
   for (const app of apps) {
     try {
       createExecution({
