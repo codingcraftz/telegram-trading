@@ -446,8 +446,7 @@ onUnmounted(() => {
       <div v-else key="header-data" class="flex items-center gap-2 px-1">
         <div class="min-w-0">
           <div class="flex items-center gap-1.5">
-            <p class="truncate text-base font-bold tracking-tight">{{ quote.name }}</p>
-            <div class="flex items-center rounded-md bg-muted/50 p-0.5">
+            <div class="flex items-center rounded-md bg-muted/50 p-0.5 shrink-0">
               <button
                 class="rounded p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
                 aria-label="종목 정보"
@@ -455,7 +454,7 @@ onUnmounted(() => {
               >
                 <Info class="h-3.5 w-3.5" />
               </button>
-              <span class="text-border">|</span>
+              <span class="text-border/40 text-[10px]">|</span>
               <button
                 class="rounded p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
                 aria-label="차트"
@@ -464,8 +463,9 @@ onUnmounted(() => {
                 <LineChart class="h-3.5 w-3.5" />
               </button>
             </div>
+            <p class="truncate text-base font-bold tracking-tight">{{ quote.name }}</p>
             <button
-              class="rounded p-1 text-muted-foreground transition hover:bg-accent"
+              class="ml-auto rounded p-1 text-muted-foreground transition hover:bg-accent shrink-0"
               aria-label="종목 검색"
               @click="openSearch"
             >
@@ -728,14 +728,6 @@ onUnmounted(() => {
             <div class="flex justify-between">
               <span class="text-muted-foreground">업종</span>
               <span class="font-semibold">{{ stockInfo.industry }}</span>
-            </div>
-            <div class="flex justify-between">
-              <span class="text-muted-foreground">PER</span>
-              <span class="font-semibold tabular-nums">{{ stockInfo.per }}</span>
-            </div>
-            <div class="flex justify-between">
-              <span class="text-muted-foreground">PBR</span>
-              <span class="font-semibold tabular-nums">{{ stockInfo.pbr }}</span>
             </div>
           </div>
           <div v-if="stockInfo.summary" class="rounded-lg bg-muted/40 px-3 py-2.5">

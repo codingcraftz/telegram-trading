@@ -154,10 +154,14 @@ function fmtVol(v: number): string {
   return v.toLocaleString();
 }
 
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 function hotDateLabel(d: string | null): string {
   if (!d) return '';
-  const [, mm, dd] = d.split('-');
-  return `${Number(mm)}/${Number(dd)}`;
+  const dt = new Date(d + 'T00:00:00+09:00');
+  const mm = dt.getMonth() + 1;
+  const dd = dt.getDate();
+  const day = WEEKDAYS[dt.getDay()];
+  return `${mm}.${dd}(${day})`;
 }
 </script>
 
@@ -293,9 +297,8 @@ function hotDateLabel(d: string | null): string {
 
     <!-- 오늘의 HOT 종목 -->
     <section v-if="hotStocks.length > 0" class="space-y-2">
-      <div class="flex items-center justify-between px-1">
-        <h2 class="text-sm font-bold tracking-tight">🔥 오늘의 HOT 종목</h2>
-        <span v-if="hotDate" class="text-[10px] text-muted-foreground">{{ hotDateLabel(hotDate) }}</span>
+      <div class="px-1">
+        <h2 class="text-sm font-bold tracking-tight">🔥 {{ hotDate ? hotDateLabel(hotDate) : '오늘' }} HOT 종목</h2>
       </div>
       <div class="space-y-1.5">
         <button
@@ -307,9 +310,8 @@ function hotDateLabel(d: string | null): string {
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-1.5">
               <span class="text-sm font-bold truncate">{{ s.name }}</span>
-              <span v-if="s.emaUptrend" class="shrink-0 rounded-sm bg-up/15 px-1 py-px text-[9px] font-bold text-up">EMA↑</span>
+              <span class="text-[11px] font-bold tabular-nums text-up">+{{ s.changePct.toFixed(1) }}%</span>
             </div>
-            <p v-if="s.description" class="mt-0.5 text-[10px] text-muted-foreground leading-tight line-clamp-1">{{ s.description }}</p>
             <div class="mt-0.5 flex flex-wrap gap-1">
               <span
                 v-for="t in s.themes.slice(0, 3)" :key="t.name"
@@ -320,7 +322,6 @@ function hotDateLabel(d: string | null): string {
             </div>
           </div>
           <div class="shrink-0 text-right">
-            <p class="text-sm font-bold tabular-nums text-up">+{{ s.changePct.toFixed(1) }}%</p>
             <p class="text-[10px] text-muted-foreground tabular-nums">{{ fmtVol(s.volume) }}</p>
           </div>
         </button>

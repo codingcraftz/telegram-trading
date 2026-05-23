@@ -172,14 +172,6 @@ onUnmounted(() => watchlist.unsubscribe());
             <span class="text-muted-foreground">업종</span>
             <span class="font-semibold">{{ stockInfoData.industry }}</span>
           </div>
-          <div class="flex justify-between">
-            <span class="text-muted-foreground">PER</span>
-            <span class="font-semibold tabular-nums">{{ stockInfoData.per }}</span>
-          </div>
-          <div class="flex justify-between">
-            <span class="text-muted-foreground">PBR</span>
-            <span class="font-semibold tabular-nums">{{ stockInfoData.pbr }}</span>
-          </div>
         </div>
         <div v-if="stockInfoData.summary" class="rounded-lg bg-muted/40 px-3 py-2.5">
           <p class="text-[11px] font-semibold text-muted-foreground mb-1">기업개요</p>
