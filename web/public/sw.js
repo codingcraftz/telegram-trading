@@ -4,10 +4,11 @@
 //   /assets/*, /*.png, manifest 등 → cache-first (Vite hashed → 새 버전마다 새 파일)
 //   /                → network-first → fallback to cache (SPA shell)
 
-const CACHE_NAME = 'owlim-stock-v1';
-const APP_SHELL = ['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
+const CACHE_NAME = 'owlim-stock-v3';
+const APP_SHELL = ['/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {
+  // 새 SW 즉시 활성화 — 옛 캐시 대기 안 함
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL).catch(() => {})),
   );
@@ -44,16 +45,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // SPA navigation → network-first, fallback cache
+  // SPA navigation → network-only (항상 최신 index.html)
   if (event.request.mode === 'navigate' || url.pathname === '/') {
     event.respondWith(
       fetch(event.request)
-        .then((res) => {
-          const clone = res.clone();
-          caches.open(CACHE_NAME).then((c) => c.put('/', clone));
-          return res;
-        })
-        .catch(() => caches.match('/').then((r) => r || new Response('offline', { status: 503 }))),
+        .catch(() => new Response('offline', { status: 503 })),
     );
   }
 });
