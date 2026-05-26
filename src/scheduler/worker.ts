@@ -304,12 +304,13 @@ function maybeCleanupStrategies() {
   if (_lastCleanupDate === today) return;
   _lastCleanupDate = today;
 
+  // HOT 종목 수집 (비동기, 전략 유무와 무관하게 매일 실행)
+  collectHotStocks().catch(err => console.error('[scheduler] hot-stocks collect failed:', err));
+
   const apps = listAllActiveApplications();
   if (apps.length === 0) return;
 
   console.log(`[scheduler] market close cleanup — ${apps.length} active strategies → completed`);
-  // HOT 종목 수집 (비동기, cleanup과 병렬)
-  collectHotStocks().catch(err => console.error('[scheduler] hot-stocks collect failed:', err));
 
   for (const app of apps) {
     try {
