@@ -65,6 +65,9 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+  scrollBehavior() {
+    return { top: 0 };
+  },
 });
 
 // 첫 진입 가드 — KIS 키가 전혀 없으면 /onboarding 으로.
