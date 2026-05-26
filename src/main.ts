@@ -9,6 +9,7 @@ import { ensureKrxSymbols } from './fastpath/symbols-fetcher.js';
 import { reloadKrxMaster } from './fastpath/symbol.js';
 import { startDashboard } from './dashboard/server.js';
 import { prefetchHolidays } from './scheduler/holidays.js';
+import { ensureInitialHotStocks } from './jobs/hot-stocks.js';
 
 async function main() {
   // 1) 대시보드는 항상 시작 (키가 없어도 사용자가 키 입력할 수 있게)
@@ -50,6 +51,12 @@ async function main() {
 
   console.log('[boot] starting market-open scheduler');
   startScheduler();
+
+  // HOT 종목 초기 데이터 — DB 비어있으면 전일 데이터로 시드
+  console.log('[boot] checking HOT stocks initial data');
+  ensureInitialHotStocks().catch(err =>
+    console.warn('[boot] hot-stocks seed error:', (err as Error).message),
+  );
 
   console.log('[boot] starting warmup (balance cache)');
   startWarmup();

@@ -4,7 +4,7 @@
 import iconv from 'iconv-lite';
 import { getDb } from '../db/client.js';
 import { dailyHotStocks } from '../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
 const NAVER_HEADERS = { 'User-Agent': UA, Referer: 'https://m.stock.naver.com/' };
@@ -219,5 +219,37 @@ export async function runAndSave(): Promise<void> {
     console.log(`[hot-stocks] saved ${stocks.length} stocks for ${date}`);
   } catch (err) {
     console.error('[hot-stocks] collect failed:', (err as Error).message);
+  }
+}
+
+// 부팅 시 HOT 데이터 없으면 전일 데이터로 초기 수집
+export async function ensureInitialHotStocks(): Promise<void> {
+  const existing = getDb()
+    .select()
+    .from(dailyHotStocks)
+    .orderBy(desc(dailyHotStocks.date))
+    .limit(1)
+    .get();
+  if (existing) {
+    console.log(`[hot-stocks] initial data exists (${existing.date}), skip`);
+    return;
+  }
+
+  console.log('[hot-stocks] no data found — seeding initial HOT stocks...');
+  const date = todayKst();
+  try {
+    const stocks = await collectHotStocks();
+    if (stocks.length === 0) {
+      console.log('[hot-stocks] no 29%+ stocks found (market may be closed), skip seed');
+      return;
+    }
+    getDb().insert(dailyHotStocks).values({
+      date,
+      dataJson: JSON.stringify(stocks),
+      createdAt: Date.now(),
+    }).run();
+    console.log(`[hot-stocks] seeded ${stocks.length} stocks for ${date}`);
+  } catch (err) {
+    console.error('[hot-stocks] initial seed failed:', (err as Error).message);
   }
 }
