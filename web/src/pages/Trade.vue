@@ -394,6 +394,7 @@ onMounted(() => {
 // 마지막 본 종목으로 자동 redirect (탭 전환 시 빈 화면 방지).
 onActivated(() => {
   ensureAutoCode();
+  loadBalance();
 });
 onUnmounted(() => {
   if (quoteTimer) clearInterval(quoteTimer);

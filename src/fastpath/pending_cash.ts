@@ -13,7 +13,7 @@
 // 양쪽 모두 KIS 가 즉시 raw cash 에 반영 안 하는 케이스라 봇 측에서 차감.
 
 import { fetchPendingOrders } from './pending.js';
-import { listChatPendingIntents } from '../db/repo.js';
+import { listChatPendingIntents, listPendingPositions } from '../db/repo.js';
 import { getDb } from '../db/client.js';
 import { strategyApplications, strategies as strategiesTable } from '../db/schema.js';
 import { and, eq } from 'drizzle-orm';
@@ -85,13 +85,26 @@ export function fetchInternalPendingBuyAmount(chatId: number): number {
 export async function fetchPendingBuyAmount(chatId: number): Promise<number> {
   let total = 0;
 
+  // KIS 미체결 매수 주문
+  const kisOdnos = new Set<string>();
   try {
     const k = await fetchPendingOrders();
     if (k.ok) {
       for (const it of k.items) {
         const isBuy = String(it.side).includes('매수') || String(it.side) === '02';
-        if (isBuy) total += it.price * it.remaining;
+        if (isBuy) {
+          total += it.price * it.remaining;
+          kisOdnos.add(it.odno);
+        }
       }
+    }
+  } catch { /* ignore */ }
+
+  // DB pending 포지션 (KIS에 아직 반영 전이거나 지정가 대기 중) — KIS 미체결과 중복 방지
+  try {
+    for (const p of listPendingPositions()) {
+      if (p.entryOrderId && kisOdnos.has(p.entryOrderId)) continue;
+      total += (p.avgPrice ?? 0) * p.quantity;
     }
   } catch { /* ignore */ }
 
