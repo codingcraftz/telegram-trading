@@ -1,6 +1,9 @@
-import { listOpenPositions } from '../db/repo.js';
-import { getQuote, type Market } from '../mcp/kis.js';
+import { listOpenPositions, listPendingPositions, markPositionOpen, markPositionFailed, logTrade, setPositionTpSl } from '../db/repo.js';
+import { getQuote, checkFill, type Market } from '../mcp/kis.js';
 import { maybeFire } from './trigger.js';
+import { fetchPendingOrders } from '../fastpath/pending.js';
+import { notify } from '../notify/telegram.js';
+import { invalidate as invalidateCache } from '../fastpath/cache.js';
 
 // 30초 간격으로 오픈 포지션의 현재가 폴링.
 // 시장(국내/해외)에 따라 다른 KIS API 호출. v2에서 WS로 업그레이드.
@@ -34,7 +37,82 @@ function extractNumber(obj: unknown, ...keys: string[]): number | null {
   return null;
 }
 
+// pending(지정가) 포지션 체결 확인 — 30초마다 open 포지션과 함께 체크
+async function checkPendingFills() {
+  const pendings = listPendingPositions();
+  if (pendings.length === 0) return;
+
+  // KIS 미체결 목록 한 번 조회
+  let pendingOrders: Awaited<ReturnType<typeof fetchPendingOrders>> | null = null;
+  try {
+    pendingOrders = await fetchPendingOrders();
+  } catch (err) {
+    console.warn('[monitor] fetchPendingOrders error:', (err as Error).message);
+    return;
+  }
+  if (!pendingOrders?.ok) return;
+
+  for (const p of pendings) {
+    const orderId = p.entryOrderId;
+    if (!orderId) continue;
+    const market = (p.market || 'KRX') as Market;
+
+    // 미체결 목록에 아직 있으면 대기 중 — skip
+    const stillPending = pendingOrders.items.find(it => it.odno === orderId);
+    if (stillPending) continue;
+
+    // 미체결 목록에 없음 → 체결됐거나 취소됨. checkFill로 확인
+    try {
+      const res = await checkFill(market, orderId);
+      const filled = Number(extract(res, 'tot_ccld_qty', 'filled_qty', 'ccld_qty') ?? 0);
+      const avgStr = extract(res, 'avg_prvs', 'avg_price', 'ccld_unpr');
+      const avg = avgStr ? Number(avgStr) : null;
+      if (filled > 0 && avg) {
+        markPositionOpen(p.id, avg);
+        logTrade({ chatId: p.chatId, positionId: p.id, kind: 'limit_filled', payload: { filled, avg, orderId } });
+        if (p.tpPrice || p.slPrice) {
+          setPositionTpSl(p.id, p.tpPrice, p.slPrice);
+        }
+        invalidateCache('holdings');
+        invalidateCache('balance:raw');
+        invalidateCache('pending:raw');
+        invalidateCache('filled:');
+        await notify(p.chatId, `✅ <b>지정가 체결</b> ${p.symbolName ?? ''}\n${avg.toLocaleString()}원 × ${filled}주`);
+        console.log('[monitor] limit filled:', p.id, p.symbolName, avg, '×', filled);
+      } else {
+        // 체결도 안 되고 미체결에도 없음 → KIS가 취소/거절한 것
+        markPositionFailed(p.id);
+        logTrade({ chatId: p.chatId, positionId: p.id, kind: 'limit_expired', payload: { orderId } });
+        console.log('[monitor] limit order gone:', p.id, orderId);
+      }
+    } catch (err) {
+      console.warn('[monitor] checkFill error for', p.id, (err as Error).message);
+    }
+  }
+}
+
+function extract(obj: unknown, ...keys: string[]): string | undefined {
+  if (!obj || typeof obj !== 'object') return undefined;
+  const o = obj as Record<string, unknown>;
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v === 'string' && v.trim() !== '') return v;
+    if (typeof v === 'number') return String(v);
+  }
+  for (const k of Object.keys(o)) {
+    const v = o[k];
+    if (v && typeof v === 'object') {
+      const r = extract(v, ...keys);
+      if (r) return r;
+    }
+  }
+  return undefined;
+}
+
 async function tick() {
+  // pending 지정가 주문 체결 확인
+  await checkPendingFills().catch(err => console.warn('[monitor] checkPending error:', err));
+
   const positions = listOpenPositions();
   if (positions.length === 0) return;
 

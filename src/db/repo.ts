@@ -107,6 +107,10 @@ export function listOpenPositions(): Position[] {
   return getDb().select().from(positions).where(eq(positions.state, 'open')).all();
 }
 
+export function listPendingPositions(): Position[] {
+  return getDb().select().from(positions).where(eq(positions.state, 'pending')).all();
+}
+
 export function listAllUnclosedPositions(): Position[] {
   return getDb()
     .select()

@@ -229,6 +229,7 @@ async function executeBuyDirect(
       expectedQty: qty,
       tpPct: opts.tp,
       slPct: opts.sl,
+      orderType,
     }).catch((err) => console.error('[pollFill]', err));
     invalidateCache('holdings');
     invalidateCache('balance:raw');
@@ -342,6 +343,7 @@ async function executeConfirm(
         expectedQty: spec.quantity,
         tpPct: spec.tp_pct ?? null,
         slPct: spec.sl_pct ?? null,
+        orderType: spec.order_type,
       }).catch((err) => console.error('[pollFill]', err));
       invalidateCache('holdings');
       invalidateCache('balance:raw');

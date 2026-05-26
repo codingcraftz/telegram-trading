@@ -12,7 +12,9 @@ import {
   expireOldAwaitingReservations,
   getReservation,
   listDueReservations,
+  listPendingPositions,
   logTrade,
+  markPositionFailed,
   rejectReservation,
   rescheduleReservation,
   setPositionTpSl,
@@ -306,6 +308,16 @@ function maybeCleanupStrategies() {
 
   // HOT 종목 수집 (비동기, 전략 유무와 무관하게 매일 실행)
   collectHotStocks().catch(err => console.error('[scheduler] hot-stocks collect failed:', err));
+
+  // 미체결 지정가 주문 정리 — 장마감 시 pending 포지션 전부 failed 처리
+  const pendings = listPendingPositions();
+  for (const p of pendings) {
+    markPositionFailed(p.id);
+    logTrade({ chatId: p.chatId, positionId: p.id, kind: 'limit_market_close', payload: { date: today } });
+  }
+  if (pendings.length > 0) {
+    console.log(`[scheduler] market close — ${pendings.length} pending limit orders → failed`);
+  }
 
   const apps = listAllActiveApplications();
   if (apps.length === 0) return;

@@ -172,6 +172,8 @@ export async function pollFill(args: {
   slPct?: number | null;
   intervalMs?: number;
   timeoutMs?: number;
+  /** 지정가 주문이면 타임아웃 후 자동취소 안 함 — pending 유지 */
+  orderType?: string;
 }): Promise<{ filled: number; avgPrice: number | null }> {
   const interval = args.intervalMs ?? 2000;
 
@@ -228,10 +230,21 @@ export async function pollFill(args: {
   }
 
   // 타임아웃 또는 체결 정보 부족 — KIS에 직접 재조회해서 안전 처리.
-  // 알림은 보내지 않음 (사용자 정책: 체결 알림만). 대시보드 활동 로그에서 확인.
+  const isLimitOrder = args.orderType === 'limit';
   const recheck = await recheckFillFromKis(args.orderId);
   if (recheck) {
-    // 잔여가 있음 — 아직 호가창에 살아있는 주문. 이중 매수 방지 위해 자동 취소.
+    // 지정가 주문: 호가창에 걸려있는 게 정상 → 취소하지 않고 pending 유지
+    if (isLimitOrder) {
+      console.log(`[pollFill] limit order ${args.orderId} still pending (${recheck.remaining} remaining) — keeping alive`);
+      logTrade({
+        chatId: args.chatId,
+        positionId: args.positionId,
+        kind: 'limit_pending',
+        payload: { orderId: args.orderId, partialFilled: recheck.filled, remaining: recheck.remaining },
+      });
+      return { filled: recheck.filled, avgPrice: null };
+    }
+    // 시장가 주문: 잔여가 있음 — 이중 매수 방지 위해 자동 취소.
     try {
       await cancelKrxOrder({
         orgno: recheck.orgno,
@@ -246,7 +259,6 @@ export async function pollFill(args: {
       });
       markPositionFailed(args.positionId);
     } catch (err) {
-      // 취소 실패 — 가장 위험한 케이스. 알림 대신 logTrade에 기록 (대시보드에서 확인).
       logTrade({
         chatId: args.chatId,
         positionId: args.positionId,
@@ -255,7 +267,6 @@ export async function pollFill(args: {
       });
       markPositionFailed(args.positionId);
     }
-    // 미체결 → 자동 취소 / 취소 실패 — 어느 경우든 KIS 상태 변경. 캐시 무효화.
     invalidateOrderCaches();
     return { filled: recheck.filled, avgPrice: null };
   }
@@ -268,7 +279,6 @@ export async function pollFill(args: {
     const avgStr = extract(res, 'avg_prvs', 'avg_price', 'ccld_unpr');
     const finalAvg = avgStr ? Number(avgStr) : null;
     if (finalFilled > 0 && finalAvg) {
-      // 폴링 중에 못 잡았는데 사실 체결됐음 — 체결 알림은 보냄
       markPositionOpen(args.positionId, finalAvg);
       logTrade({ chatId: args.chatId, positionId: args.positionId, kind: 'filled_late', payload: { filled: finalFilled, avg: finalAvg } });
       if (args.tpPct || args.slPct) {
