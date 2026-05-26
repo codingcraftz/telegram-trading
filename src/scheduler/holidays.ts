@@ -94,6 +94,19 @@ export function nextBusinessDay(after: Date): Date {
   return cursor;
 }
 
+// 이전 영업일(평일 + 휴장 아님). 인자 date의 전날부터 역순 검사.
+export function prevBusinessDay(before: Date): Date {
+  const oneDay = 24 * 60 * 60 * 1000;
+  let cursor = new Date(before.getTime() - oneDay);
+  for (let i = 0; i < 60; i++) {
+    const kst = new Date(cursor.getTime() + KST_OFFSET_MS);
+    const day = kst.getUTCDay();
+    if (day !== 0 && day !== 6 && !isHoliday(cursor)) return cursor;
+    cursor = new Date(cursor.getTime() - oneDay);
+  }
+  return cursor;
+}
+
 // KIS chk_holiday로 향후 N일치 미리 조회 → DYNAMIC_MAP 채움.
 // KIS API는 1일 1행 응답. inqr_bass_dt가 시작일, output1 배열에 N행 반환 (보통 30~40행).
 // 실패 시 무시 (정적 데이터로 fallback).

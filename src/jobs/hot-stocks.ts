@@ -5,6 +5,7 @@ import iconv from 'iconv-lite';
 import { getDb } from '../db/client.js';
 import { dailyHotStocks } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
+import { prevBusinessDay } from '../scheduler/holidays.js';
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
 const NAVER_HEADERS = { 'User-Agent': UA, Referer: 'https://m.stock.naver.com/' };
@@ -222,7 +223,7 @@ export async function runAndSave(): Promise<void> {
   }
 }
 
-// 부팅 시 HOT 데이터 없으면 전일 데이터로 초기 수집
+// 부팅 시 HOT 데이터 없으면 전 영업일 데이터로 초기 수집
 export async function ensureInitialHotStocks(): Promise<void> {
   const existing = getDb()
     .select()
@@ -235,8 +236,11 @@ export async function ensureInitialHotStocks(): Promise<void> {
     return;
   }
 
-  console.log('[hot-stocks] no data found — seeding initial HOT stocks...');
-  const date = todayKst();
+  console.log('[hot-stocks] no data found \u2014 seeding initial HOT stocks...');
+  // 이전 영업일 날짜 사용 (휴일·주말 자동 건너뜀)
+  const prev = prevBusinessDay(new Date());
+  const kst = new Date(prev.getTime() + 9 * 3600 * 1000);
+  const date = `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`;
   try {
     const stocks = await collectHotStocks();
     if (stocks.length === 0) {
