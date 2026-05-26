@@ -75,8 +75,6 @@ const APP_VERSION: string = (() => {
 const REPO_API = 'https://api.github.com/repos/codingcraftz/telegram-trading/commits/main';
 
 type Settings = {
-  TELEGRAM_BOT_TOKEN?: string;
-  ALLOWED_CHAT_IDS?: string;
   KIS_PAPER_APP_KEY?: string;
   KIS_PAPER_APP_SECRET?: string;
   KIS_PAPER_STOCK?: string;

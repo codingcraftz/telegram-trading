@@ -9,18 +9,7 @@ if (existsSync(RUNTIME_ENV)) {
   dotenvConfig({ path: RUNTIME_ENV, override: true });
 }
 
-const csvIds = z
-  .string()
-  .default('')
-  .transform((s) => s.split(',').map((x) => x.trim()).filter(Boolean).map(Number))
-  .pipe(z.array(z.number().int().positive()));
-
 const Env = z.object({
-  // 알림 전용 (체결 알림). 비어 있으면 봇 비활성 — 매매는 대시보드에서만.
-  TELEGRAM_BOT_TOKEN: z.string().default(''),
-  // 알림 받을 chat_id. 비어 있으면 알림 송신 안 함.
-  ALLOWED_CHAT_IDS: csvIds,
-
   // 모의(paper)/실전(real). KIS REST 호출 시 env_dv로 사용.
   MODE: z.enum(['paper', 'real']).default('paper'),
 

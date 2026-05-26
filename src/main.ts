@@ -1,6 +1,5 @@
 import { getConfig } from './config.js';
 import { ensureSchema } from './db/migrate.js';
-import { createBot } from './bot/index.js';
 import { reconcileOnBoot } from './monitor/recovery.js';
 import { startMonitor, stopMonitor } from './monitor/worker.js';
 import { startScheduler, stopScheduler } from './scheduler/worker.js';
@@ -12,19 +11,16 @@ import { prefetchHolidays } from './scheduler/holidays.js';
 import { ensureInitialHotStocks } from './jobs/hot-stocks.js';
 
 async function main() {
-  // 1) 대시보드는 항상 시작 (키가 없어도 사용자가 키 입력할 수 있게)
   console.log('[boot] starting dashboard');
   startDashboard(Number(process.env.DASHBOARD_PORT ?? 8080));
 
-  // 2) DB 초기화 + 봇 키 검증 — 어느 단계든 실패하면 대시보드만 살아남고 봇 보류.
-  //    (ensureSchema가 내부적으로 getConfig를 호출하므로 같이 try로 감싸야 한다.)
   let cfg;
   try {
     console.log('[boot] db init');
     ensureSchema();
     cfg = getConfig();
   } catch (err) {
-    console.warn('[boot] 봇 시작 보류 (대시보드는 동작) — 대시보드에서 키 입력 후 컨테이너 재시작 시 봇이 켜집니다.');
+    console.warn('[boot] 시작 보류 (대시보드는 동작) — 대시보드에서 키 입력 후 컨테이너 재시작.');
     console.warn('[boot] reason:', (err as Error).message);
     return;
   }
@@ -40,7 +36,6 @@ async function main() {
   console.log('[boot] reconciling positions');
   await reconcileOnBoot();
 
-  // 휴장일 prefetch (실패해도 정적 fallback으로 동작)
   console.log('[boot] prefetching holidays');
   await prefetchHolidays(60).catch((err) =>
     console.warn('[boot] holiday prefetch error:', (err as Error).message),
@@ -52,7 +47,6 @@ async function main() {
   console.log('[boot] starting market-open scheduler');
   startScheduler();
 
-  // HOT 종목 초기 데이터 — DB 비어있으면 전일 데이터로 시드
   console.log('[boot] checking HOT stocks initial data');
   ensureInitialHotStocks().catch(err =>
     console.warn('[boot] hot-stocks seed error:', (err as Error).message),
@@ -61,33 +55,15 @@ async function main() {
   console.log('[boot] starting warmup (balance cache)');
   startWarmup();
 
-  // 텔레그램 봇은 "알림 송신용" 으로만. 토큰 없으면 봇 자체 skip — 대시보드/스케줄러는 정상 동작.
-  // 매수/매도 체결 알림은 notify()가 봇 인스턴스 있을 때만 송신.
-  const bot = cfg.TELEGRAM_BOT_TOKEN ? createBot() : null;
-
-  const shutdown = async (signal: string) => {
+  const shutdown = (signal: string) => {
     console.log(`[shutdown] ${signal} received`);
     stopWarmup();
     stopScheduler();
     stopMonitor();
-    if (bot) {
-      try { await bot.stop(); } catch {}
-    }
     process.exit(0);
   };
   process.once('SIGINT', () => shutdown('SIGINT'));
   process.once('SIGTERM', () => shutdown('SIGTERM'));
-
-  if (bot) {
-    console.log('[boot] starting telegram notification bot');
-    try {
-      await bot.start({ onStart: (me) => console.log('[bot] notify-only mode as @' + me.username) });
-    } catch (err) {
-      console.error('[bot] start failed (대시보드는 동작):', (err as Error).message);
-    }
-  } else {
-    console.log('[boot] telegram token 미입력 — 알림 비활성');
-  }
 }
 
 main().catch((err) => {

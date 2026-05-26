@@ -5,7 +5,11 @@
 //
 // callback 데이터 64-byte 한계 회피: 종목명은 마스터에서 lookup, code/strategy/amount 만 인코딩.
 
-import { InlineKeyboard } from 'grammy';
+// grammy 제거 — InlineKeyboard stub (API에서 kb 필드 미사용, 호환용)
+class InlineKeyboard {
+  text(_label: string, _data?: string) { return this; }
+  row() { return this; }
+}
 import {
   DEFAULT_GAP_GUARD_PCT,
   getMarketOpenSettings,

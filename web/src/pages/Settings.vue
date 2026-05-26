@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
-import { CircleCheck, CircleX, Info, ExternalLink, Smartphone, NotebookPen, Plus, ChevronRight, KeyRound, Bell, Download, X, RefreshCw, Rocket } from 'lucide-vue-next';
+import { CircleCheck, CircleX, Info, ExternalLink, Smartphone, NotebookPen, Plus, ChevronRight, KeyRound, Download, X, RefreshCw, Rocket } from 'lucide-vue-next';
 import Card from '@/components/ui/Card.vue';
 import Button from '@/components/ui/Button.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
@@ -33,30 +33,6 @@ const keys = ref<{
 } | null>(null);
 
 const strategyCount = ref<number>(0);
-
-// 텔레그램 알림 설정 — POST /api/settings 재사용. 시트로 분리.
-const telegram = ref({ TELEGRAM_BOT_TOKEN: '', ALLOWED_CHAT_IDS: '' });
-const savingTelegram = ref(false);
-const telegramSheetOpen = ref(false);
-
-async function saveTelegram() {
-  savingTelegram.value = true;
-  try {
-    const res = await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        TELEGRAM_BOT_TOKEN: telegram.value.TELEGRAM_BOT_TOKEN,
-        ALLOWED_CHAT_IDS: telegram.value.ALLOWED_CHAT_IDS,
-      }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    toast.success('저장됨. 봇 재시작 중…');
-    telegram.value = { TELEGRAM_BOT_TOKEN: '', ALLOWED_CHAT_IDS: '' };
-  } catch (err) {
-    toast.error((err as Error).message);
-  } finally { savingTelegram.value = false; }
-}
 
 function gotoOnboarding() {
   try { sessionStorage.removeItem('owlim:keys-cached'); } catch {}
@@ -374,25 +350,6 @@ onUnmounted(() => {
       </div>
     </Card>
 
-    <!-- 텔레그램 알림 — 메뉴 항목. 클릭 시 시트로 설명 + 입력. -->
-    <Card>
-      <button
-        class="-mx-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-accent"
-        @click="telegramSheetOpen = true"
-      >
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-          <Bell class="h-5 w-5 text-primary" />
-        </div>
-        <div class="min-w-0 flex-1">
-          <p class="text-sm font-semibold">텔레그램 알림 설정</p>
-          <p class="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-            매수/매도 체결 시 텔레그램으로 알림 받기 (선택)
-          </p>
-        </div>
-        <ChevronRight class="h-4 w-4 shrink-0 text-muted-foreground" />
-      </button>
-    </Card>
-
     <!-- KIS 키 다시 입력 — 별도 메뉴 항목. -->
     <Card>
       <button
@@ -480,68 +437,5 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 텔레그램 알림 시트 -->
-    <BottomSheet :open="telegramSheetOpen" title="텔레그램 알림 설정" @close="telegramSheetOpen = false">
-      <div class="space-y-4">
-        <p class="text-[12px] leading-relaxed text-muted-foreground">
-          매수/매도 <b class="text-foreground">체결</b> 시 텔레그램으로 알림을 보내드려요.
-          매매 자체는 텔레그램이 아니라 이 앱에서만 가능합니다. 비워두면 알림 없이 동작.
-        </p>
-
-        <!-- 단계 안내 -->
-        <ol class="space-y-2 text-[12px] leading-relaxed">
-          <li class="flex gap-2">
-            <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">1</span>
-            <span>
-              텔레그램에서 <b>@BotFather</b> 를 검색해 대화 시작 →
-              <code class="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">/newbot</code> 입력 → 봇 이름 정하면
-              <b>봇 토큰</b>이 발급돼요.
-            </span>
-          </li>
-          <li class="flex gap-2">
-            <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">2</span>
-            <span>
-              <b>@userinfobot</b> 을 검색해 <code class="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">/start</code> →
-              본인 chat ID 가 나와요. 여러 명한테 알림 받으려면 쉼표로 이어 쓰기.
-            </span>
-          </li>
-          <li class="flex gap-2">
-            <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">3</span>
-            <span>위에서 받은 두 값을 아래에 입력하고 <b>저장</b>.</span>
-          </li>
-        </ol>
-
-        <div class="space-y-2.5 border-t border-border/60 pt-4">
-          <label class="block">
-            <span class="text-[11px] font-semibold text-muted-foreground">봇 토큰</span>
-            <input
-              v-model="telegram.TELEGRAM_BOT_TOKEN"
-              type="password"
-              placeholder="8123456789:AAEx_abcDEFghIJKL..."
-              class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-          </label>
-          <label class="block">
-            <span class="text-[11px] font-semibold text-muted-foreground">알림 받을 chat ID</span>
-            <input
-              v-model="telegram.ALLOWED_CHAT_IDS"
-              type="text"
-              placeholder="987654321"
-              class="mt-1 w-full rounded-lg bg-muted/40 px-3 py-2 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-            <span class="mt-1 block text-[10px] text-muted-foreground">여러 명일 땐 쉼표로 — 예: 987654321,123456789</span>
-          </label>
-          <Button
-            variant="primary"
-            size="md"
-            class="w-full"
-            :disabled="savingTelegram"
-            @click="saveTelegram"
-          >
-            {{ savingTelegram ? '저장 중…' : '저장하고 봇 재시작' }}
-          </Button>
-        </div>
-      </div>
-    </BottomSheet>
   </div>
 </template>

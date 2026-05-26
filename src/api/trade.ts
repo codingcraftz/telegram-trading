@@ -45,7 +45,7 @@ type BuyBody = {
 
 export async function handleTradeBuy(c: Context) {
   const chatId = getDefaultChatId();
-  if (chatId <= 0) return c.json({ error: 'chat id 미설정 — 설정에서 ALLOWED_CHAT_IDS 입력' }, 400);
+  if (chatId <= 0) return c.json({ error: 'chat id 미설정' }, 400);
   let body: BuyBody = {};
   try {
     body = await c.req.json();

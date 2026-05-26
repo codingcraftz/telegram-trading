@@ -1,19 +1,5 @@
-import type { Bot } from 'grammy';
+// 텔레그램 알림 제거됨 — notify()는 no-op 유지 (호출부 호환).
 
-let _bot: Bot | null = null;
-
-export function setBot(bot: Bot) {
-  _bot = bot;
-}
-
-export async function notify(chatId: number, text: string) {
-  if (!_bot) {
-    console.warn('[notify] bot not initialized');
-    return;
-  }
-  try {
-    await _bot.api.sendMessage(chatId, text, { parse_mode: 'HTML' });
-  } catch (err) {
-    console.error('[notify] failed:', (err as Error).message);
-  }
+export async function notify(_chatId: number, _text: string) {
+  // no-op
 }

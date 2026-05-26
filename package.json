@@ -29,7 +29,6 @@
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.3",
     "fflate": "^0.8.2",
-    "grammy": "^1.32.0",
     "hono": "^4.12.18",
     "iconv-lite": "^0.7.2",
     "nanoid": "^5.0.9",
