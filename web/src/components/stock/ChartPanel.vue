@@ -7,15 +7,16 @@ import Card from '@/components/ui/Card.vue';
 import { api } from '@/api/client';
 import { usePrefs } from '@/stores/prefs';
 
-type Timeframe = '5m' | '15m' | '1d' | '1w' | '1M';
+type Timeframe = '1m' | '5m' | '30m' | '1d' | '1w' | '1M';
 type Bucket = 'day' | 'week' | 'month' | 'min';
 
 const INTERVALS: Record<Timeframe, { fetch: number; visible: number }> = {
   '1d': { fetch: 120, visible: 60 },
   '1w': { fetch: 80, visible: 32 },
   '1M': { fetch: 36, visible: 24 },
+  '1m': { fetch: 200, visible: 60 },
   '5m': { fetch: 200, visible: 60 },
-  '15m': { fetch: 200, visible: 60 },
+  '30m': { fetch: 200, visible: 60 },
 };
 
 const BUCKETS: { value: Bucket; label: string }[] = [
@@ -29,8 +30,8 @@ const props = withDefaults(defineProps<{ code: string; height?: number }>(), { h
 
 const prefs = usePrefs();
 
-// 분봉 sub 선택 (5분/15분). 사용자가 분 탭 active 시점에 표시.
-const minBucket = ref<'5m' | '15m'>('5m');
+// 분봉 sub 선택 (1분/5분/30분). 사용자가 분 탭 active 시점에 표시.
+const minBucket = ref<'1m' | '5m' | '30m'>('1m');
 const bucket = ref<Bucket>('day');
 const timeframe = computed<Timeframe>(() => {
   if (bucket.value === 'day') return '1d';
@@ -128,14 +129,14 @@ onMounted(load);
         <!-- 분봉 sub 토글 — '분' 활성 시만 노출 -->
         <div v-if="bucket === 'min'" class="flex gap-1">
           <button
-            v-for="m in (['5m', '15m'] as const)" :key="m"
+            v-for="m in (['1m', '5m', '30m'] as const)" :key="m"
             class="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold transition"
             :class="m === minBucket
               ? 'bg-primary/15 text-primary ring-1 ring-primary/40'
               : 'bg-muted text-muted-foreground hover:text-foreground'"
             @click="minBucket = m"
           >
-            {{ m === '5m' ? '5분' : '15분' }}
+            {{ m === '1m' ? '1분' : m === '5m' ? '5분' : '30분' }}
           </button>
         </div>
       </div>
