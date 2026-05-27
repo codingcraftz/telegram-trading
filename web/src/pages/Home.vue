@@ -10,7 +10,7 @@ import Card from '@/components/ui/Card.vue';
 import InfoTooltip from '@/components/InfoTooltip.vue';
 import Sparkline from '@/components/Sparkline.vue';
 import LoadingState from '@/components/ui/LoadingState.vue';
-import { api, type BalanceResponse, type HotStock } from '@/api/client';
+import { api, type BalanceResponse, type HotStock, type RankingItem } from '@/api/client';
 import { fmtKrw, fmtPct, fmtSigned, pflsColor } from '@/lib/format';
 import { useOrdersStore } from '@/stores/orders';
 import { useMarketSession } from '@/composables/useMarketSession';
@@ -86,11 +86,14 @@ function onVisibility() {
 onMounted(() => {
   load();
   loadHot();
+  loadLiveRanking();
   startBalPolling();
+  startLivePolling();
   document.addEventListener('visibilitychange', onVisibility);
 });
 onUnmounted(() => {
   stopBalPolling();
+  stopLivePolling();
   document.removeEventListener('visibilitychange', onVisibility);
 });
 
@@ -137,8 +140,13 @@ const usSessionLabel = computed(() => {
 function isUsIndex(key: string) { return key === 'nasdaq' || key === 'dow'; }
 
 // ===== HOT 종목 =====
+type HotTab = 'live' | 'daily';
+const hotTab = ref<HotTab>('live');
 const hotDate = ref<string | null>(null);
 const hotStocks = ref<HotStock[]>([]);
+const liveRanking = ref<RankingItem[]>([]);
+const liveLoading = ref(false);
+let liveTimer: ReturnType<typeof setInterval> | null = null;
 
 async function loadHot() {
   try {
@@ -147,6 +155,33 @@ async function loadHot() {
     hotStocks.value = r.items;
   } catch { /* silent */ }
 }
+
+async function loadLiveRanking() {
+  try {
+    liveLoading.value = true;
+    const r = await api.ranking('volume');
+    liveRanking.value = r.items.slice(0, 15);
+  } catch { /* silent */ }
+  finally { liveLoading.value = false; }
+}
+
+function startLivePolling() {
+  stopLivePolling();
+  if (session.value !== 'open') return;
+  liveTimer = setInterval(loadLiveRanking, 30_000);
+}
+function stopLivePolling() {
+  if (liveTimer) clearInterval(liveTimer);
+  liveTimer = null;
+}
+
+watch(session, () => {
+  if (session.value === 'open') { loadLiveRanking(); startLivePolling(); }
+  else stopLivePolling();
+});
+watch(hotTab, (tab) => {
+  if (tab === 'live' && liveRanking.value.length === 0) loadLiveRanking();
+});
 
 function fmtVol(v: number): string {
   if (v >= 10_000_000) return (v / 10_000_000).toFixed(1) + '천만';
@@ -295,12 +330,47 @@ function hotDateLabel(d: string | null): string {
       <ChevronRight class="h-4 w-4 text-muted-foreground" />
     </RouterLink>
 
-    <!-- 오늘의 HOT 종목 -->
-    <section v-if="hotStocks.length > 0" class="space-y-2">
-      <div class="px-1">
-        <h2 class="text-sm font-bold tracking-tight">🔥 {{ hotDate ? hotDateLabel(hotDate) : '오늘' }} HOT 종목</h2>
+    <!-- HOT 종목 — 장중/장마감 탭 -->
+    <section v-if="hotStocks.length > 0 || liveRanking.length > 0" class="space-y-2">
+      <div class="flex items-center gap-2 px-1">
+        <button
+          class="text-sm font-bold tracking-tight transition"
+          :class="hotTab === 'live' ? 'text-foreground' : 'text-muted-foreground'"
+          @click="hotTab = 'live'"
+        >📈 장중 HOT</button>
+        <span class="text-muted-foreground/40">|</span>
+        <button
+          class="text-sm font-bold tracking-tight transition"
+          :class="hotTab === 'daily' ? 'text-foreground' : 'text-muted-foreground'"
+          @click="hotTab = 'daily'"
+        >🔥 {{ hotDate ? hotDateLabel(hotDate) : '' }} HOT</button>
       </div>
-      <div class="space-y-1.5">
+
+      <!-- 장중 HOT — 거래대금 상위 -->
+      <div v-if="hotTab === 'live'" class="space-y-1.5">
+        <p v-if="liveRanking.length === 0 && !liveLoading" class="px-1 text-xs text-muted-foreground">장 시간에 거래대금 상위 종목이 표시됩니다</p>
+        <button
+          v-for="(s, i) in liveRanking" :key="s.code"
+          type="button"
+          class="flex w-full items-center gap-3 rounded-2xl bg-card ring-1 ring-border/60 dark:ring-0 px-3 py-2.5 text-left transition active:scale-[0.99]"
+          @click="router.push(`/chart/${s.code}`)"
+        >
+          <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground">{{ i + 1 }}</span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5">
+              <span class="text-sm font-bold truncate">{{ s.name }}</span>
+              <span class="text-[11px] font-bold tabular-nums" :class="pflsColor(s.changePct)">{{ s.changePct >= 0 ? '+' : '' }}{{ s.changePct.toFixed(1) }}%</span>
+            </div>
+            <p class="mt-0.5 text-[10px] text-muted-foreground tabular-nums">{{ fmtKrw(s.price) }}</p>
+          </div>
+          <div class="shrink-0 text-right">
+            <p class="text-[10px] text-muted-foreground tabular-nums">{{ fmtVol(s.tradeAmount) }}</p>
+          </div>
+        </button>
+      </div>
+
+      <!-- 장마감 HOT — 29%+ EMA 상승트렌드 -->
+      <div v-if="hotTab === 'daily'" class="space-y-1.5">
         <button
           v-for="s in hotStocks" :key="s.code"
           type="button"
