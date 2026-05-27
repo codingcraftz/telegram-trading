@@ -52,7 +52,7 @@ export async function fetchQuickQuote(
     if (!d) return null;
     const price = num(d.stck_prpr);
     if (!price || price <= 0) return null;
-    const absRate = num(d.prdy_ctrt) ?? 0;
+    const absRate = Math.abs(num(d.prdy_ctrt) ?? 0);
     const sign = String(d.prdy_vrss_sign ?? '3');
     const signLabel =
       sign === '1' || sign === '2' ? '▲' : sign === '4' || sign === '5' ? '▼' : '–';
