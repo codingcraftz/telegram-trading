@@ -55,7 +55,11 @@ export async function handleBalance(c: Context) {
     cashRaw: cashOrderable,
     cashReservedForPending: pendingBuyAmount,
     totalPfls: num(summary?.evlu_pfls_smtl_amt) ?? 0,
-    totalPflsRt: num(summary?.asst_icdc_erng_rt) ?? 0,
+    totalPflsRt: (() => {
+      const pfls = num(summary?.evlu_pfls_smtl_amt) ?? 0;
+      const pchs = num(summary?.pchs_amt_smtl_amt) ?? 0;
+      return pchs > 0 ? (pfls / pchs) * 100 : 0;
+    })(),
     nextDaySettlement: num(summary?.nxdy_excc_amt) ?? 0,
     session: { session, label: sLabel.label, icon: sLabel.icon },
     holdings: holdings.map((h) => ({
