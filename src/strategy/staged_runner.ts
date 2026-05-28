@@ -335,7 +335,7 @@ async function fireStage1(
       if (livePrice) {
         const stage1Pct = entry.stages[0]!.entryPct;
         const retryQty = Math.floor((app.budgetAmount * stage1Pct) / 100 / livePrice.current);
-        if (retryQty >= 1 && retryQty < qty) {
+        if (retryQty >= 1) {
           spec.quantity = retryQty;
           try {
             const out2 = await placeBuyOrder({ chatId: app.chatId, spec });
